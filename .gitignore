@@ -1,0 +1,41 @@
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editors/IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.env/
+
+# Build outputs (Arduino/Teensy)
+*.hex
+*.elf
+*.bin
+*.eep
+*.d
+*.o
+*.map
+
+# Generic build dirs
+build/
+dist/
+out/
+
+# Logs
+logs/
+*.log
+
+# Node/npm (if any tools later)
+node_modules/
+
+# Backup files
+*~
+*.swp
+*.swo
