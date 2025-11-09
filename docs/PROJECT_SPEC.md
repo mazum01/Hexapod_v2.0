@@ -8,7 +8,7 @@ All code must be clearly commented:
 # Hexapod v2.0 Controller — Project Specification (Phase 1)
 Project codename: MARS — Modular Autonomous Robotic System
 
-Last updated: 2025-11-01
+Last updated: 2025-11-07
 Target MCU: Teensy 4.1
 Servo type: Hiwonder HTS-35S (serial bus)
 Servo library: lx16a-servo
@@ -121,7 +121,8 @@ IK implementation notes (as provided)
 
 - Motion enable gate: commands to servos are suppressed unless enabled.
 - Soft limits: joint angle bounds from config; rate limits on commanded steps. [impl]
-- Leg/body collision detection: kinematic check against body footprint/keep‑out; on violation → lockout and require re‑enable.
+- Leg/body collision detection: kinematic check against body footprint/keep‑out; on violation → lockout and require re‑enable. [impl]
+  - Keep-out model (Phase 1): simple foot-to-foot minimum clearance in the X/Z plane. If any pair of feet are closer than `safety.clearance_mm`, trigger a lockout (E40 COLLISION). Configurable at runtime via `SAFETY CLEARANCE <mm>` and persisted to `/config.txt`.
 - E‑stop concept: serial command to DISABLE; clears motion and optionally torque‑off (as supported).
 
 ## 7. Configuration (SD card)
@@ -146,13 +147,16 @@ IK implementation notes (as provided)
   - joint_limits.LF.coxa.max_deg=45 [impl]
   - body.dimensions.width_mm=…
   - body.dimensions.length_mm=…
-  - safety.soft_limits=true
-  - safety.clearance_mm=10
+  - safety.soft_limits=true [impl]
+  - safety.collision=true [impl]
+  - safety.temp_lockout_c=80 [impl]
+  - safety.clearance_mm=10 [impl]
   - rate_limit.deg_per_s=360 [impl]
   - oos.fail_threshold=3 [impl] — number of consecutive vin/temp failures before marking a servo out-of-service (range 1..20, default 3). At runtime, a failure is counted only when BOTH vin and temp reads are invalid; any valid vin OR temp resets the counter. A brief startup grace window (~750 ms) ignores failures to avoid false OOS during boot.
   - logging.enabled=true
   - logging.rate_hz=166
   - test.trigait.enabled=false
+  - test.trigait.overlap_pct=5 [impl]
   - trigait.step_height_mm=20
   - trigait.step_length_mm=40
 - Reload: Phase 1 loads once at boot; live reload TBD. If SD is disabled at build time (`MARS_ENABLE_SD=0`) or missing, compiled-in defaults are used.
@@ -194,6 +198,20 @@ This emits once per tick in addition to `read` rows to aid trace alignment.
 - Replies: `OK` or `ERR <code> <msg>`. Unknown commands and bad args produce `ERR`.
 - Safety interlocks: motion commands ignored when disabled; soft limits and collision checks applied prior to sending to servos; on violation return `ERR` and enter lockout where specified.
  - Gating: motion output is subject to global enable, per-leg enables, and per-joint enables; commands like `RAW/RAW3` are rejected when the corresponding leg/joint is disabled.
+
+### Telemetry: FK stream
+
+- Controlled via `FK <LEG|ALL> <ON|OFF>` runtime command.
+- When enabled, each tick emits one line for the leg that had feedback read that tick:
+
+```
+RR_FK <LEG> x=<bx> y=<by> z=<bz> lx=<lx> ly=<ly> lz=<lz> c=<c_cd> f=<f_cd> t=<t_cd>
+```
+
+- Units: positions in mm with one decimal; joint angles are raw centidegrees (0..24000).
+- Frames:
+  - `x/y/z` are BODY-frame coordinates at the foot.
+  - `lx/ly/lz` are coordinates relative to the leg’s hip origin (LEG-frame), expressed in BODY axes (no COXA_OFFSET translation).
  - Torque policy: `DISABLE` torques off all servos at the next control tick; `ENABLE` does not torque-on any servo automatically. `SERVO ... ENABLE` torques on only when global is enabled; otherwise, it updates masks without sending torque-on.
 
 Core commands (Phase 1)
@@ -209,13 +227,25 @@ Core commands (Phase 1)
 - `T` — shortcut for `MODE TEST`.
 - `STATUS` — returns a multi-line summary (CR/LF-delimited): first line `STATUS`, then key=value lines: `enabled`, `loop_hz`, `rr_idx`, `last_err`, `overruns`, `legs`, `jmask`, telemetry grids `vin_V`, `temp`, `pos_cd`, and `home_cd`.
  - `STATUS` — returns a multi-line summary (CR/LF-delimited): first line `STATUS`, then key=value lines: `enabled`, `loop_hz`, `rr_idx`, `last_err`, `overruns`, `legs`, `jmask`, telemetry grids `vin_V`, `temp`, `pos_cd`, and `home_cd`. When `MARS_TIMING_PROBES` is enabled, includes `tprobe_us=serial/send/fb/tick` (microseconds).
+  - STATUS also includes grouped sections: a compact safety summary `safety=<OK|LOCKOUT|OVERRIDDEN> cause=0x.. override=0x..`, test parameters including `overlap_pct=...`, `safety_clearance_mm=<mm>`, enables, telemetry grids, home grid, timing probes (when enabled), and OOS masks.
 - `HOME` — move enabled, in-service servos to their configured home positions (gated by leg/joint enables and OOS).
 - `SAVEHOME` — read current positions of enabled, in-service servos and persist to SD `/config.txt` as `home_cd.<LEG>.<coxa|femur|tibia>=<centideg>`. Updates existing keys in place or appends new ones; also updates runtime `g_home_cd`.
+ - `SAVEHOME` — adjust and save hardware angle offsets so the present neutral maps to 12000 cd (±30° clamp), then persist residual centidegree homes as `home_cd.<LEG>.<coxa|femur|tibia>=<centideg>`; updates runtime `g_home_cd`.
+ - `OFFSET LIST` — report per-servo hardware angle offsets (centidegrees) after scaling.
+ - `OFFSET CLEAR <LEG|ALL> <JOINT|ALL>` — clear hardware angle offsets for selected servos and update `home_cd` to preserve logical pose.
 - `LEGS` — prints per-leg enable mask in human-friendly form: `LEGS LF=1 LM=0 ...` (CR/LF-terminated).
 - `SERVOS` — prints per-leg 3-bit joint enable masks: `SERVOS LF=111 LM=101 ...` (CR/LF-terminated).
 - `LEG <LEG|ALL> <ENABLE|DISABLE>` — toggle per-leg motion gating.
 - `SERVO <LEG|ALL> <JOINT|ALL> <ENABLE|DISABLE>` — toggle per-joint (servo) motion gating.
-- `SAFETY CLEAR` — attempt to clear safety lockout and return to disabled state (requires no active violations). Use `ENABLE` to re‑arm motion.
+- `FK <LEG|ALL> <ON|OFF>` — enable/disable FK body-frame stream for selected leg(s); output occurs once per tick for the leg currently served by the round-robin feedback.
+- `SAFETY` — safety inspection and controls:
+  - `SAFETY LIST` — print current safety state: `lockout`, `cause`, `override`, `clearance_mm`, `soft_limits`, `collision`, `temp_C`.
+  - `SAFETY OVERRIDE <ALL|TEMP|COLLISION|NONE>` — set override mask to suppress specific lockout causes. If all active causes are overridden, lockout auto-clears (system remains disabled until `ENABLE`).
+  - `SAFETY SOFTLIMITS <ON|OFF>` — enable/disable soft joint limits; persisted to `/config.txt` as `safety.soft_limits=true|false`.
+  - `SAFETY COLLISION <ON|OFF>` — enable/disable collision checks; persisted to `/config.txt` as `safety.collision=true|false`.
+  - `SAFETY TEMPLOCK <C>` — set over-temperature lockout threshold in Celsius (30..120); persisted as `safety.temp_lockout_c=<C>`.
+  - `SAFETY CLEARANCE <mm>` — set the foot-to-foot keep-out clearance (X/Z plane), 0..500 mm; persisted as `safety.clearance_mm=<mm>`.
+  - `SAFETY CLEAR` — attempt to clear safety lockout and return to disabled state (requires no active, un-overridden violations). Use `ENABLE` to re‑arm motion.
 
 Notes
 - Position commands are clamped to soft limits. If IK is unreachable, return `ERR E20 UNREACHABLE` and ignore the command.
@@ -324,3 +354,18 @@ SAFETY CLEAR           -> ERR E91 NOT_LOCKED
 ---
 
 Feedback welcome: annotate TBDs, propose values (e.g., joint limits, gait params), or suggest additions. Once agreed, we’ll freeze Phase 1 spec and start implementation.
+
+### Servo angle offset calibration (added 2025-11-07)
+
+Workflow to center physical neutral at logical 12000 cd using LX16A hardware offset:
+1. Mechanically place each leg in desired neutral stance; enable relevant legs/joints.
+2. Issue `SAVEHOME`. For each enabled, in-service servo:
+  - Read current position and existing offset.
+  - Compute required total offset so (raw_physical_angle − total_offset) = 12000 cd.
+  - Clamp to ±30° (±3000 cd ≈ ±125 ticks) and apply via `angle_offset_adjust` + `angle_offset_save`.
+  - Re-read position; store residual as `home_cd.<LEG>.<joint>`.
+3. STATUS then shows both `home_cd` and `offset_cd` grids.
+
+Clearing offsets: `OFFSET CLEAR <LEG|ALL> <JOINT|ALL>` restores offset(s) to zero while updating `home_cd` so logical pose stays stable.
+
+Rationale: hardware offsets reduce need for per-servo home tuning and keep IK/FK consistent around a standard center (12000 cd) while residual homes capture sub-degree differences.

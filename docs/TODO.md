@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-03
+Last updated: 2025-11-08 (post 0.1.72 helper restore)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -10,34 +10,47 @@ Conventions
 
 ## Open tasks
 
-- [ ] Keep HELP in sync with commands
-  - Whenever commands are added/removed/changed, update `printHELP()` in `firmware/MARS_Hexapod/functions.ino` and the Serial command list in `docs/PROJECT_SPEC.md`.
-
 - [ ] Optimize servo send path
   - Reduce per-command latency (<300 µs at 115200). Investigate prebuilt frames, batching per leg, minimize copies, evaluate higher baud or DMA/queue.
 - [ ] Stabilize loop at 166 Hz
   - Tune and verify adaptive hysteresis to maintain 166 Hz under typical load; measure with timing probes; ensure no sustained overruns.
-- [ ] Collision lockout
-  - Implement simple keep-out model; detect leg/body collisions and enter safety lockout; config clearance_mm.
+ 
 - [ ] CSV logging to SD
   - Implement buffered CSV logging with modes (read/all/off), rate_hz; file naming logs/YYYYMMDD_hhmmss.csv; minimal schema.
 - [ ] Expand config keys
-  - Add safety.* (soft_limits, clearance_mm), logging.* (enabled, rate_hz, mode), test.trigait.* and joint_limits.* parsing.
+  - Add logging.* (enabled, rate_hz, mode), additional test.trigait.* and joint_limits.* parsing.
 - [ ] Tripod test mode
   - Implement simple tripod gait (tri-gait) with configurable step height/length, cycle time, duty factor.
   - [x] Expose runtime tuning via serial: TEST CYCLE/HEIGHT/BASEX/STEPLEN; reflect in STATUS. (2025-11-02)
-- [ ] STATUS safety details (optional)
-  - Include cause/override bitmasks (hex) in STATUS for quick triage.
+ 
 - [ ] Configurable move_time
   - Expose move_time_ms via /config.txt and echo in STATUS; default derived from loop rate.
-- [ ] STATUS rr_read identity (optional)
   - Add compact indicator of which leg/joint was read this tick (e.g., rr_meas=LF/TIBIA).
 - [ ] STATUS readability
   - Reformat STATUS output for better readability (grouped sections, aligned grids, compact summary lines).
 
+  - Re-implemented multi-line grouped STATUS (system/config, test, safety, enables, offsets, oos, fk mask). (2025-11-08)
+  - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
+
 ## Completed
+- [x] Echo processed command lines (2025-11-08)
+  - After each command is handled, the original line is reflected back as `> <line>` to aid logging/CLI.
+- [x] Keep docs in sync with commands (2025-11-04)
+  - Updated Serial command list in `docs/PROJECT_SPEC.md` to include SAFETY LIST/OVERRIDE/SOFTLIMITS/COLLISION/TEMPLOCK/CLEARANCE and expanded STATUS grouping; added implemented config keys (safety.* and test.trigait.overlap_pct).
+- [x] STATUS readability (2025-11-03)
+  - Reformatted STATUS output into grouped sections: system, safety, test, enables, telemetry, home, timing, oos.
+- [x] HELP in sync (2025-11-03)
+  - Updated HELP to list all implemented commands, including SAFETY SOFTLIMITS/COLLISION/TEMPLOCK; removed duplicates.
+- [x] RR FK round-robin telemetry (2025-11-03)
+  - Print FK body-frame x/y/z for the leg read during round-robin feedback to aid bring-up.
+- [x] Safety config toggles (2025-11-03)
+  - Added safety.soft_limits, safety.collision, and safety.temp_lockout_c keys; runtime `SAFETY` subcommands to update/persist; STATUS/SAFETY LIST show current values.
+- [x] Collision lockout (2025-11-03)
+  - Implemented simple foot-to-foot keep-out in X/Z plane with configurable clearance. Added `SAFETY CLEARANCE <mm>` command and `safety.clearance_mm` config key; STATUS prints `safety_clearance_mm`. Lockout triggers E40 and requires re-enable.
 - [x] TEST OVERLAP runtime command (2025-11-03)
   - Added `TEST OVERLAP <pct>` to adjust overlap at runtime (0..25). Value is persisted to `/config.txt` as `test.trigait.overlap_pct`. STATUS includes `overlap_pct`.
+- [x] STATUS safety details (2025-11-03)
+  - STATUS now includes `safety=<state> cause=0x.. override=0x..`. Added `SAFETY LIST` and `SAFETY OVERRIDE` commands.
 
 - [x] TEST gait params commands (2025-11-02)
   - Added TEST subcommands to set cycle time, ground height, base X, and step length at runtime; STATUS shows current values.
@@ -111,6 +124,6 @@ Conventions
   - Enable/inspect map output, confirm -ffunction/data-sections and --gc-sections, consider LTO; identify big symbols (float printf, trig).
 
 ## Optional Features
-- [ ] Optional feature flags
-  - Plan compile-time flags to strip TEST gait, verbose IK debug, timing probes, extended STATUS for a “slim build” for troubleshooting freezes.
-  - Plan compile-time flags to strip TEST gait, verbose IK debug, timing probes, and extended STATUS to create a “slim build” for troubleshooting freezes.
+
+- [ ] Centralize OK responses (consolidate duplicate entry)
+  - (Planned) After confirming link success under FW 0.1.72, evaluate moving printOK() emission to a single dispatcher epilogue unless handler already printed error or multi-line output; update handlers accordingly.

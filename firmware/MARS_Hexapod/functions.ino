@@ -1,91 +1,69 @@
 // =============================================================
-//  functions.ino — Helper and Non-Core Functions (cleaned)
-//  Parsing, printing, IK, config, and serial helpers for MARS_Hexapod
+// functions.ino — Helper and Non-Core Functions
+// Minimal post-refactor content: serial dispatch shim + buffer init.
+// All command implementations live in commandprocessor.ino.
 // =============================================================
 
 #include <Arduino.h>
 #include <ctype.h>
+#include "command_helpers.h"
+#include "command_types.h"
 #include "robot_config.h"
+// For rebootNow() register access (ARM SCB AIRCR)
+#include <stdint.h>
 
-// Optional SD config support guarded for Arduino concat order
-#ifdef MARS_ENABLE_SD
-#if MARS_ENABLE_SD
-#include <SD.h>
-#endif
-#endif
+// -----------------------------------------------------------------------------
+// Forward Kinematics (FK) implementations (body + leg frame)
+// -----------------------------------------------------------------------------
+// These definitions were previously removed during refactor; reintroduced to
+// satisfy linker references from updateFootBodyEstimates() and telemetry.
+// Lightweight approximation consistent with current IK conventions:
+//  - Joint angles are absolute centidegrees; converted relative to g_home_cd.
+//  - Coxa yaw rotates around +Y (up) axis.
+//  - Femur & tibia pitch in sagittal plane; simple 2-link chain.
+//  - Leg frame origin: hip yaw axis; +x lateral, +y up, +z forward.
+//  - Body frame translation by Robot::COXA_OFFSET[leg] (x,z).
+// Accuracy: Adequate for collision and telemetry; refine later if needed.
 
-// Error codes (ensure defined)
-#ifndef E_OK
-#define E_OK 0
-#endif
-#ifndef E_PARSE
-#define E_PARSE 1
-#endif
-#ifndef E_BUS_IO
-#define E_BUS_IO 2
-#endif
-
-// Shared globals from the main TU (only what's used here)
+extern volatile int16_t g_home_cd[6][3];
 extern volatile uint16_t g_loop_hz;
-extern volatile uint8_t  g_last_err;
-extern volatile bool     g_enabled;
-extern volatile bool     g_lockout;
-extern volatile uint8_t  g_rr_index;
-extern volatile uint32_t g_overrun_count;
-extern volatile uint8_t  g_leg_enabled_mask;   // bit per leg
-extern volatile uint32_t g_joint_enabled_mask; // bit per joint (leg*3 + joint)
-extern volatile uint32_t g_servo_oos_mask;     // bit per joint (leg*3 + joint)
-extern volatile uint8_t  g_servo_fb_fail_threshold; // OOS threshold (consecutive pos_read failures)
-extern volatile int16_t  g_cmd_cd[6][3];
-extern volatile int16_t  g_home_cd[6][3];
-extern volatile int16_t  g_limit_min_cd[6][3];
-extern volatile int16_t  g_limit_max_cd[6][3];
-extern volatile uint16_t g_rate_limit_cdeg_per_s;
-extern uint16_t          g_meas_vin_mV[6][3];
-extern uint8_t           g_meas_temp_C[6][3];
-extern int16_t           g_meas_pos_cd[6][3];
-// TEST gait parameters (from main TU)
+extern bool     g_config_loaded;
+extern uint16_t g_config_keys_applied;
+extern uint16_t g_config_loop_hz;
+extern volatile uint8_t  g_fk_stream_mask;
+// Test mode parameters
 extern float    g_test_base_y_mm;
 extern float    g_test_base_x_mm;
 extern float    g_test_step_len_mm;
 extern uint32_t g_test_cycle_ms;
 extern float    g_test_lift_y_mm;
 extern float    g_test_overlap_pct;
+// Safety parameters
+extern volatile bool    g_safety_soft_limits_enabled;
+extern volatile bool    g_safety_collision_enabled;
+extern volatile int16_t g_safety_temp_lockout_c10;
+extern float            g_safety_clearance_mm;
+// OOS and offsets
+extern volatile uint32_t g_servo_oos_mask;
+extern int16_t g_offset_cd[6][3];
+// Last measured values from sparse feedback (updated round-robin)
+extern uint16_t g_meas_vin_mV[6][3]; // millivolts
+extern uint8_t  g_meas_temp_C[6][3]; // temperature in whole deg C
+extern int16_t  g_meas_pos_cd[6][3]; // 0..24000 centidegrees
+// Globals from main sketch
+extern volatile bool g_enabled;
+extern volatile bool g_lockout;
+extern volatile uint8_t g_last_err;
+extern volatile uint32_t g_overrun_count;
+extern volatile uint8_t g_rr_index;
+extern volatile uint8_t g_servo_fb_fail_threshold;
+extern volatile int16_t g_limit_min_cd[6][3];
+extern volatile int16_t g_limit_max_cd[6][3];
+extern volatile uint16_t g_rate_limit_cdeg_per_s;
+extern void setServoId(uint8_t leg, uint8_t joint, uint8_t id);
 
-// Timing probes from main TU (enabled when MARS_TIMING_PROBES)
-#if MARS_TIMING_PROBES
-extern volatile uint16_t g_probe_serial_us;
-extern volatile uint16_t g_probe_send_us;
-extern volatile uint16_t g_probe_fb_us;
-extern volatile uint16_t g_probe_tick_us;
-#endif
-
-// Mode change helpers implemented in main .ino
-extern void modeSetTest();
-extern void modeSetIdle();
-// Synchronous position read helper (centidegrees); returns -1 on failure
-extern int16_t readServoPosCdSync(uint8_t leg, uint8_t joint);
-
-// Config status
-extern bool     g_config_loaded;
-extern uint16_t g_config_keys_applied;
-extern uint16_t g_config_loop_hz;
-
-// Serial input buffer (lives in main .ino)
-extern char    lineBuf[160];
-extern uint8_t lineLen;
-
-// Servo helpers
-extern uint8_t servoId(uint8_t leg, uint8_t joint);
-extern void    setServoId(uint8_t leg, uint8_t joint, uint8_t id);
-extern void    setServoTorqueNow(uint8_t leg, uint8_t joint, bool on);
-
-#ifndef FW_VERSION
-#define FW_VERSION "0.0.0"
-#endif
-
-// Track last command for echoing
-static char g_last_cmd[160] __attribute__((used)) = {0};
+  // Forward declaration for loop Hz apply helper in main sketch
+void configApplyLoopHz(uint16_t hz);
 
 // Local helpers
 static inline void rtrim(char* s)
@@ -124,58 +102,251 @@ static inline char* ltrim(char* s)
   return s;
 }
 
-static inline int legIndexFromToken(const char* t)
-{
-  if (!t) return -1;
-
-  if (!strcmp(t, "LF")) return 0;
-
-  if (!strcmp(t, "LM")) return 1;
-
-  if (!strcmp(t, "LR")) return 2;
-
-  if (!strcmp(t, "RF")) return 3;
-
-  if (!strcmp(t, "RM")) return 4;
-
-  if (!strcmp(t, "RR")) return 5;
-
-  return -1;
+// Centidegrees → radians helper
+static inline float cd_to_rad(int16_t cd_rel) {
+  const float PI_F = 3.14159265358979323846f;
+  return (float)cd_rel * (0.01f * PI_F / 180.0f); // deg = cd*0.01; rad = deg*(pi/180)
 }
 
-static inline int jointIndexFromToken(const char* t)
-{
-  if (!t) return -1;
-
-  if (!strcmp(t, "COXA") || !strcmp(t, "coxa")) return 0;
-
-  if (!strcmp(t, "FEMUR") || !strcmp(t, "femur")) return 1;
-
-  if (!strcmp(t, "TIBIA") || !strcmp(t, "tibia")) return 2;
-
-  return -1;
+static inline int16_t rad_to_cd(float rad) {
+  const float PI_F = 3.14159265358979323846f;
+  float deg = rad * (180.0f / PI_F);
+  long cd = lroundf(deg * 100.0f);
+  if (cd < 0) cd = 0; if (cd > 24000) cd = 24000;
+  return (int16_t)cd;
 }
 
-static inline bool leg_enabled_mask_get(uint8_t leg)
-{
-  return (g_leg_enabled_mask >> leg) & 0x1;
+// Clamp centidegree value to valid servo range [0, 24000]
+static inline int16_t clamp_cd(int32_t v) {
+  if (v < 0) v = 0;
+  else if (v > 24000) v = 24000;
+  return (int16_t)v;
 }
 
-static inline bool joint_enabled_mask_get(uint8_t leg, uint8_t joint)
-{
-  uint8_t idx = (uint8_t)(leg * 3u + joint);
-  return (g_joint_enabled_mask >> idx) & 0x1u;
+bool fk_leg_body(uint8_t leg, int16_t coxa_cd, int16_t femur_cd, int16_t tibia_cd,
+                 float* out_x_mm, float* out_y_mm, float* out_z_mm) {
+  if (leg >= 6 || !out_x_mm || !out_y_mm || !out_z_mm) return false;
+  // Relative angles (centideg from home) → radians
+  int16_t coxa_rel  = (int16_t)(coxa_cd  - g_home_cd[leg][0]);
+  int16_t femur_rel = (int16_t)(femur_cd - g_home_cd[leg][1]);
+  int16_t tibia_rel = (int16_t)(tibia_cd - g_home_cd[leg][2]);
+  float yaw   = cd_to_rad(coxa_rel);
+  float alpha = cd_to_rad(femur_rel);      // femur pitch
+  float beta  = cd_to_rad(tibia_rel);      // tibia relative pitch
+
+  // Link lengths
+  const float a = FEMUR_LENGTH_MM;
+  const float b = TIBIA_LENGTH_MM;
+
+  // Planar projection (simplified elbow-down assumption)
+  float y = -(a * cosf(alpha) + b * cosf(alpha + beta)); // up is +Y; robot foot down → negative
+  float R =  (a * sinf(alpha) + b * sinf(alpha + beta)); // horizontal (sagittal plane) radius from femur base
+
+  // Add coxa standoff
+  float rproj = COXA_LENGTH_MM + R;
+
+  // Rotate by yaw and translate to body frame using chassis offsets
+  float x_local = rproj * sinf(yaw);
+  float z_local = rproj * cosf(yaw);
+  float bx = Robot::COXA_OFFSET[leg][0];
+  float bz = Robot::COXA_OFFSET[leg][1];
+
+  *out_x_mm = bx + x_local;
+  *out_y_mm = y;            // body frame y (vertical)
+  *out_z_mm = bz + z_local;
+  return true;
 }
 
-// Clamp and apply loop frequency from config
-static void configApplyLoopHz(uint16_t hz)
-{
-  if (hz < 50) hz = 50;
+bool fk_leg_both(uint8_t leg, int16_t coxa_cd, int16_t femur_cd, int16_t tibia_cd,
+                 float* out_body_x_mm, float* out_body_y_mm, float* out_body_z_mm,
+                 float* out_leg_x_mm,  float* out_leg_y_mm,  float* out_leg_z_mm) {
+  if (!out_body_x_mm || !out_body_y_mm || !out_body_z_mm || !out_leg_x_mm || !out_leg_y_mm || !out_leg_z_mm)
+    return false;
+  float bx, by, bz;
+  if (!fk_leg_body(leg, coxa_cd, femur_cd, tibia_cd, &bx, &by, &bz)) return false;
+  // Leg-frame components: remove chassis translation
+  float lx = bx - Robot::COXA_OFFSET[leg][0];
+  float lz = bz - Robot::COXA_OFFSET[leg][1];
+  float ly = by; // same vertical component
+  *out_body_x_mm = bx; *out_body_y_mm = by; *out_body_z_mm = bz;
+  *out_leg_x_mm  = lx; *out_leg_y_mm  = ly; *out_leg_z_mm  = lz;
+  return true;
+}
 
-  if (hz > 500) hz = 500;
+// -----------------------------------------------------------------------------
+// IK — compute servo centidegrees for a BODY-frame foot target
+// Returns absolute centidegrees for a right-side leg convention; left legs will
+// be mirrored by the caller around g_home_cd to maintain symmetry.
+// -----------------------------------------------------------------------------
+bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t out_cd[3]) {
+  if (leg >= 6 || !out_cd) return false;
 
-  g_loop_hz = hz;
-  g_config_loop_hz = hz;
+  // In this phase, assume body frame aligned with coxa frame
+  float dx = x_mm;
+  float dy = y_mm;
+  float dz = z_mm;
+
+  float coxa_cdeg = (degrees(atan2f(dx, dz)) * 100.0f) + (float)g_home_cd[leg][0] - 9000.0f;
+  float R = sqrtf(dx * dx + dz * dz) - COXA_LENGTH;
+  if (R < 0.0f) R = 0.0f;
+
+  float D = sqrtf(R * R + dy * dy);
+  float a = FEMUR_LENGTH, b = TIBIA_LENGTH;
+  if (D > (a + b) || D < fabsf(a - b)) return false;
+
+  float alpha1 = asinf(R / D);
+  float alpha2 = acosf((D * D + a * a - b * b) / (2.0f * a * D));
+  float alpha = alpha1 + alpha2;
+  float femur_cdeg = degrees(radians((g_home_cd[leg][1] / 100.0f) - 90.0f) + alpha) * 100.0f;
+
+  float beta = acosf((b * b + a * a - D * D) / (2.0f * a * b));
+  float gamma = PI - beta;
+  float tibia_cdeg = degrees(radians(g_home_cd[leg][2] / 100.0f) + gamma) * 100.0f;
+
+  out_cd[0] = clamp_cd((int32_t)coxa_cdeg);
+  out_cd[1] = clamp_cd((int32_t)femur_cdeg);
+  out_cd[2] = clamp_cd((int32_t)tibia_cdeg);
+  return true;
+}
+
+// Externs provided by other compilation units
+extern int nextToken(const char* s, int start, int len, int* tokStart, int* tokLen);
+extern void printERR(uint8_t code, const char* msg);
+extern CommandType parseCommandType(const char* cmd);
+extern void processCmdHELP(const char* line,int s,int len);
+extern void processCmdSTATUS(const char* line,int s,int len);
+extern void processCmdREBOOT(const char* line,int s,int len);
+extern void processCmdENABLE(const char* line,int s,int len);
+extern void processCmdDISABLE(const char* line,int s,int len);
+extern void processCmdFK(const char* line,int s,int len);
+extern void processCmdLEGS(const char* line,int s,int len);
+extern void processCmdSERVOS(const char* line,int s,int len);
+extern void processCmdLEG(const char* line,int s,int len);
+extern void processCmdSERVO(const char* line,int s,int len);
+extern void processCmdRAW(const char* line,int s,int len);
+extern void processCmdRAW3(const char* line,int s,int len);
+extern void processCmdFOOT(const char* line,int s,int len);
+extern void processCmdFEET(const char* line,int s,int len);
+extern void processCmdMODE(const char* line,int s,int len);
+extern void processCmdI(const char* line,int s,int len);
+extern void processCmdT(const char* line,int s,int len);
+extern void processCmdTEST(const char* line,int s,int len);
+extern void processCmdSTAND(const char* line,int s,int len);
+extern void processCmdSAFETY(const char* line,int s,int len);
+extern void processCmdHOME(const char* line,int s,int len);
+extern void processCmdSAVEHOME(const char* line,int s,int len);
+extern void processCmdOFFSET(const char* line,int s,int len);
+
+extern char    lineBuf[160];
+extern uint8_t lineLen;
+
+// -----------------------------------------------------------------------------
+// handleLine — tokenizes first word and dispatches via CommandType enum.
+// -----------------------------------------------------------------------------
+void handleLine(const char* line) {
+  if (!line) return;
+  int len = (int)strlen(line);
+  int s = 0, ts = 0, tl = 0;
+  s = nextToken(line, s, len, &ts, &tl);
+  if (tl <= 0) return; // empty line
+
+  char cmd[16];
+  int n = (tl < (int)sizeof(cmd)-1) ? tl : (int)sizeof(cmd)-1;
+  memcpy(cmd, line + ts, n); cmd[n] = 0;
+  for (int i = 0; cmd[i]; ++i) cmd[i] = (char)toupper(cmd[i]);
+
+  CommandType ct = parseCommandType(cmd);
+  switch (ct) {
+    case CMD_HELP:      processCmdHELP(line, s, len); break;
+    case CMD_STATUS:    processCmdSTATUS(line, s, len); break;
+    case CMD_REBOOT:    processCmdREBOOT(line, s, len); break;
+    case CMD_ENABLE:    processCmdENABLE(line, s, len); break;
+    case CMD_DISABLE:   processCmdDISABLE(line, s, len); break;
+    case CMD_FK:        processCmdFK(line, s, len); break;
+    case CMD_LEGS:      processCmdLEGS(line, s, len); break;
+    case CMD_SERVOS:    processCmdSERVOS(line, s, len); break;
+    case CMD_LEG:       processCmdLEG(line, s, len); break;
+    case CMD_SERVO:     processCmdSERVO(line, s, len); break;
+    case CMD_RAW:       processCmdRAW(line, s, len); break;
+    case CMD_RAW3:      processCmdRAW3(line, s, len); break;
+    case CMD_FOOT:      processCmdFOOT(line, s, len); break;
+    case CMD_FEET:      processCmdFEET(line, s, len); break;
+    case CMD_MODE:      processCmdMODE(line, s, len); break;
+    case CMD_I:         processCmdI(line, s, len); break;
+    case CMD_T:         processCmdT(line, s, len); break;
+    case CMD_TEST:      processCmdTEST(line, s, len); break;
+    case CMD_STAND:     processCmdSTAND(line, s, len); break;
+    case CMD_SAFETY:    processCmdSAFETY(line, s, len); break;
+    case CMD_HOME:      processCmdHOME(line, s, len); break;
+    case CMD_SAVEHOME:  processCmdSAVEHOME(line, s, len); break;
+    case CMD_OFFSET:    processCmdOFFSET(line, s, len); break;
+    default:            printERR(1, "UNKNOWN_CMD"); break;
+  }
+
+  // Reflect the processed command back to the host
+  Serial.print(F(" > "));
+  Serial.print(line);
+  Serial.print(F("\r\n"));
+}
+
+// -----------------------------------------------------------------------------
+// buffersInit — initialize serial parsing state + tri-state buffers.
+// -----------------------------------------------------------------------------
+void buffersInit() {
+  lineLen = 0; lineBuf[0] = '\0';
+  for (uint8_t i = 0; i < 6; ++i) {
+    int pin = Robot::BUFFER_ENABLE_PINS[i];
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW); // LOW -> RX (driver high-Z)
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Minimal splash — brief non-blocking banner and config summary
+// -----------------------------------------------------------------------------
+void splash() {
+  if (!Serial) return;
+  Serial.print(Robot::SPLASH_BANNER);
+  Serial.print(F("MARS — Modular Autonomous Robotic System\r\n"));
+  Serial.print(F("FW "));
+#ifdef FW_VERSION
+  Serial.print(FW_VERSION);
+#else
+  Serial.print(F("unknown"));
+#endif
+  Serial.print(F(" build=")); Serial.print(__DATE__); Serial.print(F(" ")); Serial.print(__TIME__);
+  Serial.print(F(" loop_hz=")); Serial.print((int)g_loop_hz);
+  Serial.print(F(" UARTs: ")); Serial.print(Robot::UART_MAP_SUMMARY);
+  Serial.print(F(" cfg=")); Serial.print(g_config_loaded ? 1 : 0);
+  Serial.print(F(" keys=")); Serial.print((int)g_config_keys_applied);
+  Serial.print(F(" cfg_loop_hz=")); Serial.print((int)g_config_loop_hz);
+  Serial.print(F("\r\n"));
+}
+
+// -----------------------------------------------------------------------------
+// Serial line reader — fills lineBuf and dispatches on newline
+// -----------------------------------------------------------------------------
+void processSerial() {
+  while (Serial && Serial.available() > 0) {
+    int ch = Serial.read();
+    if (ch < 0) break;
+    if (ch == '\r') continue;
+    if (ch == '\n') {
+      if (lineLen > 0) {
+        lineBuf[lineLen] = 0;
+        handleLine(lineBuf);
+        lineLen = 0;
+      }
+    } else {
+      // Reserve one byte for null-terminator when dispatching
+      if (lineLen < (uint8_t)(sizeof(lineBuf) - 1)) {
+        lineBuf[lineLen++] = (char)ch;
+      } else {
+        // overflow: reset buffer to avoid partial commands lingering
+        lineLen = 0;
+      }
+    }
+  }
 }
 
 // Parse a key=value pair from config
@@ -403,6 +574,10 @@ static void configParseKV(char* key, char* val)
   }
 }
 
+// -----------------------------------------------------------------------------
+// Config loader — minimal placeholder that marks config as not loaded.
+// Extend later to parse /config.txt keys as needed.
+// -----------------------------------------------------------------------------
 void configLoad()
 {
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
@@ -480,163 +655,35 @@ void configLoad()
 #endif
 }
 
-// Splash banner
-void splash()
-{
-  if (!Serial) return;
+// -----------------------------------------------------------------------------
+// Missing helpers required by commandprocessor.ino
+//  - Tokenizer
+//  - OK/ERR/HELP/STATUS printers
+//  - Reboot
+//  - Angle offset read/adjust/write (stubbed with in-memory table)
+// -----------------------------------------------------------------------------
 
-  // ASCII banner (kept short) and concise runtime summary per spec
-  Serial.print(R"RAW(
- +----------------------------------+
- |  __  __    _    ____  ____       |
- | |  \/  |  / \  |  _ \/ ___|      |
- | | |\/| | / _ \ | |_) \___ \      |
- | | |  | |/ ___ \|  _ < ___) |     |
- | |_|  |_/_/   \_\_| \_\____/      |
- |                                  |
- +----------------------------------+
-)RAW");
-
-  Serial.print(F("MARS — Modular Autonomous Robotic System\r\n"));
-  Serial.print(F("Build: ")); Serial.print(__DATE__); Serial.print(F(" ")); Serial.print(__TIME__);
-  Serial.print(F(" | fw=")); Serial.print(FW_VERSION);
-  Serial.print(F(" | loop_hz=")); Serial.print(g_loop_hz);
-  Serial.print(F("\r\n"));
-
-  // UART mapping summary (from robot_config.h)
-  Serial.print(F("UART: ")); Serial.print(Robot::UART_MAP_SUMMARY); Serial.print(F("\r\n"));
-
-  // Config status
-  Serial.print(F("config: sd=")); Serial.print(g_config_loaded ? 1 : 0);
-  Serial.print(F(" keys=")); Serial.print((unsigned int)g_config_keys_applied);
-  Serial.print(F(" cfg_loop_hz=")); Serial.print(g_config_loop_hz);
-  Serial.print(F("\r\n"));
-}
-
-// IK helpers
-static inline int16_t clamp_cd(int32_t cd)
-{
-  if (cd < 0) cd = 0;
-
-  if (cd > 24000) cd = 24000;
-
-  return (int16_t)cd;
-}
-
-bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t out_cd[3])
-{
-  if (leg >= 6 || !out_cd) return false;
-
-  // In this phase, assume body frame aligned with coxa frame
-  float dx = x_mm;
-  float dy = y_mm;
-  float dz = z_mm;
-
-  float coxa_cdeg = (degrees(atan2f(dx, dz)) * 100.0f) + (float)g_home_cd[leg][0] - 9000.0f;
-  float R = sqrtf(dx * dx + dz * dz) - COXA_LENGTH;
-  if (R < 0.0f) R = 0.0f;
-
-  float D = sqrtf(R * R + dy * dy);
-  float a = FEMUR_LENGTH, b = TIBIA_LENGTH;
-  if (D > (a + b) || D < fabsf(a - b)) return false;
-
-  float alpha1 = asinf(R / D);
-  float alpha2 = acosf((D * D + a * a - b * b) / (2.0f * a * D));
-  float alpha = alpha1 + alpha2;
-  float femur_cdeg = degrees(radians((g_home_cd[leg][1] / 100.0f) - 90.0f) + alpha) * 100.0f;
-
-  float beta = acosf((b * b + a * a - D * D) / (2.0f * a * b));
-  float gamma = PI - beta;
-  float tibia_cdeg = degrees(radians(g_home_cd[leg][2] / 100.0f) + gamma) * 100.0f;
-
-  out_cd[0] = clamp_cd((int32_t)coxa_cdeg);
-  out_cd[1] = clamp_cd((int32_t)femur_cdeg);
-  out_cd[2] = clamp_cd((int32_t)tibia_cdeg);
-  return true;
-}
-
-// Serial helpers
-void processSerial()
-{
-  while (Serial && Serial.available() > 0)
-
-  {
-    int c = Serial.read();
-    if (c == '\r')
-
-    {
-      continue;
-    }
-
-    if (c == '\n')
-
-    {
-      lineBuf[lineLen] = '\0';
-      if (lineLen > 0)
-
-      {
-        size_t n = strlen(lineBuf);
-        if (n >= sizeof(g_last_cmd)) n = sizeof(g_last_cmd) - 1;
-
-        memcpy(g_last_cmd, lineBuf, n);
-        g_last_cmd[n] = 0;
-        handleLine(lineBuf);
-      }
-
-      lineLen = 0;
-    }
-    else if ((size_t)lineLen + 1 < sizeof(lineBuf))
-
-    {
-      lineBuf[lineLen++] = (char)c;
-    }
-    else
-
-    {
-      lineLen = 0; // overflow -> reset
-    }
-  }
-}
-
-int nextToken(const char* s, int start, int len, int* tokStart, int* tokLen)
-{
+int nextToken(const char* s, int start, int len, int* tokStart, int* tokLen) {
+  if (!s || start < 0 || len < 0) { if (tokStart) *tokStart = 0; if (tokLen) *tokLen = 0; return 0; }
   int i = start;
-  while (i < len && isspace((int)s[i]))
-
-  {
-    ++i;
-  }
-
-  int b = i;
-  while (i < len && !isspace((int)s[i]))
-
-  {
-    ++i;
-  }
-
-  int e = i;
-  *tokStart = b;
-  *tokLen = (e > b) ? (e - b) : 0;
-  return i;
+  // Skip leading spaces/tabs
+  while (i < len && (s[i] == ' ' || s[i] == '\t')) ++i;
+  if (i >= len) { if (tokStart) *tokStart = 0; if (tokLen) *tokLen = 0; return len; }
+  int j = i;
+  while (j < len && s[j] != ' ' && s[j] != '\t') ++j;
+  if (tokStart) *tokStart = i; if (tokLen) *tokLen = (j - i);
+  return j;
 }
 
-void printOK()
-{
-  Serial.print(F("OK "));
-  Serial.print(g_last_cmd);
-  Serial.print(F("\r\n"));
+void printOK() {
+  Serial.print(F("OK"));
 }
 
-void printERR(uint8_t code, const char* msg)
-{
-  g_last_err = code;
+void printERR(uint8_t code, const char* msg) {
   Serial.print(F("ERR "));
-  Serial.print((int)code);
+  Serial.print((unsigned int)code);
   Serial.print(F(" "));
-  Serial.print(msg);
-  Serial.print(F(" "));
-  Serial.print(g_last_cmd);
-  Serial.print(F("\r\n"));
+  if (msg) Serial.print(msg);
 }
 
 void printSTATUS()
@@ -814,673 +861,98 @@ void printSTATUS()
   Serial.print(F("\r\n"));
 }
 
-// REMINDER: When commands change, update this HELP output and docs/PROJECT_SPEC.md.
-void printHELP()
-{
-  Serial.print(F("CMDS:\r\n"));
-  Serial.print(F("  HELP\r\n"));
-  Serial.print(F("  STATUS\r\n"));
-  Serial.print(F("  ENABLE | DISABLE\r\n"));
-  Serial.print(F("  LEG <LEG|ALL> <ENABLE|DISABLE>\r\n"));
-  Serial.print(F("  SERVO <LEG|ALL> <JOINT|ALL> <ENABLE|DISABLE>\r\n"));
-  Serial.print(F("  MODE <TEST|IDLE>\r\n"));
-  Serial.print(F("  I  (shortcut for MODE IDLE)\r\n"));
-  Serial.print(F("  T  (shortcut for MODE TEST)\r\n"));
-  Serial.print(F("  TEST CYCLE <ms>     (750..10000)\r\n"));
-  Serial.print(F("  TEST HEIGHT <mm>    (ground height; negative is down)\r\n"));
-  Serial.print(F("  TEST BASEX <mm>     (lateral offset)\r\n"));
-  Serial.print(F("  TEST STEPLEN <mm>   (forward/back amplitude)\r\n"));
-  Serial.print(F("  LEGS\r\n"));
-  Serial.print(F("  SERVOS\r\n"));
-  Serial.print(F("  REBOOT\r\n"));
-  Serial.print(F("  STAND\r\n"));
-  Serial.print(F("  HOME\r\n"));
-  Serial.print(F("  SAVEHOME\r\n"));
-  Serial.print(F("  FOOT <LEG x y z>\r\n"));
-  Serial.print(F("  FEET <x1 y1 z1 ... x6 y6 z6>  (order: LF,LM,LR,RF,RM,RR)\r\n"));
-  Serial.print(F("  RAW <LEG> <JOINT> <centideg>\r\n"));
-  Serial.print(F("  RAW3 <LEG> <c_cd f_cd t_cd>\r\n"));
-    Serial.print(F("  TEST CYCLE <ms>     (750..10000)\r\n"));
-    Serial.print(F("  TEST HEIGHT <mm>    (ground height; negative is down)\r\n"));
-    Serial.print(F("  TEST BASEX <mm>     (lateral offset)\r\n"));
-    Serial.print(F("  TEST STEPLEN <mm>   (forward/back amplitude)\r\n"));
-    Serial.print(F("  TEST LIFT <mm>      (step height / lift amount)\r\n"));
-  Serial.print(F("  TEST OVERLAP <pct>  (0..25, percent of total cycle for overlap; persisted to /config.txt)\r\n"));
-}
-
-void rebootNow()
-{
-  __disable_irq();
-  SCB_AIRCR = 0x05FA0004; // request system reset
-  while (1)
-
-  {
-  }
-}
-
-void handleLine(const char* line)
-{
-  int len = (int)strlen(line);
-  int s = 0, ts = 0, tl = 0;
-  s = nextToken(line, s, len, &ts, &tl);
-  if (tl <= 0) return;
-
-  char cmd[16];
-  int n = min(tl, (int)sizeof(cmd) - 1);
-  memcpy(cmd, line + ts, n); cmd[n] = 0;
-  for (int i = 0; cmd[i]; ++i) cmd[i] = toupper(cmd[i]);
-
-  if (!strcmp(cmd, "HELP"))
-
-  {
-    printHELP();
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "STATUS"))
-
-  {
-    printSTATUS();
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "REBOOT"))
-
-  {
-    printOK();
-    Serial.flush();
-    delay(10);
-    rebootNow();
-    return;
-  }
-
-  if (!strcmp(cmd, "ENABLE"))
-
-  {
-    g_enabled = true; g_last_err = E_OK;
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "DISABLE"))
-
-  {
-    g_enabled = false; g_last_err = E_OK;
-    for (int L = 0; L < 6; ++L)
-
-    {
-      for (int J = 0; J < 3; ++J)
-
-      {
-        setServoTorqueNow((uint8_t)L, (uint8_t)J, false);
-      }
-    }
-
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "LEGS"))
-
-  {
-    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
-    Serial.print(F("LEGS "));
-    for (int i = 0; i < 6; ++i)
-
-    {
-      if (i) Serial.print(F(" "));
-
-      Serial.print(names[i]); Serial.print(F("="));
-      Serial.print(leg_enabled_mask_get((uint8_t)i) ? 1 : 0);
-    }
-    Serial.print(F("\r\n"));
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "SERVOS"))
-
-  {
-    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
-    Serial.print(F("SERVOS "));
-    for (int i = 0; i < 6; ++i)
-
-    {
-      if (i) Serial.print(F(" "));
-
-      Serial.print(names[i]); Serial.print(F("="));
-      for (int j = 0; j < 3; ++j)
-
-      {
-        Serial.print(joint_enabled_mask_get((uint8_t)i, (uint8_t)j) ? 1 : 0);
-      }
-    }
-    Serial.print(F("\r\n"));
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "LEG"))
-  {
-    // LEG <LEG|ALL> <ENABLE|DISABLE>
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char legt[4] = {0}; int nl = min(tl, 3); memcpy(legt, line + ts, nl); for (int i = 0; i < nl; ++i) legt[i] = toupper(legt[i]);
-
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char act[10] = {0}; int na = min(tl, 9); memcpy(act, line + ts, na); for (int i = 0; i < na; ++i) act[i] = toupper(act[i]);
-
-    bool doEnable = !strcmp(act, "ENABLE");
-    bool doDisable = !strcmp(act, "DISABLE");
-    if (!doEnable && !doDisable) { printERR(E_PARSE, "BAD_ARG"); return; }
-
-    auto apply_leg = [&](int L)
-    {
-      if (L < 0 || L >= 6) return;
-      if (doEnable) {
-        g_leg_enabled_mask |= (1u << L);
-        if (g_enabled) {
-          for (uint8_t J = 0; J < 3; ++J) {
-            uint8_t idx = (uint8_t)(L * 3u + J);
-            if ((g_joint_enabled_mask >> idx) & 1u) {
-              setServoTorqueNow((uint8_t)L, J, true);
-            }
-          }
-        }
-      } else {
-        g_leg_enabled_mask &= ~(1u << L);
-        for (uint8_t J = 0; J < 3; ++J) {
-          setServoTorqueNow((uint8_t)L, J, false);
-        }
-      }
-    };
-
-    if (!strcmp(legt, "ALL")) {
-      for (int L = 0; L < 6; ++L) apply_leg(L);
-    } else {
-      int leg = legIndexFromToken(legt);
-      if (leg < 0) { printERR(E_PARSE, "BAD_LEG"); return; }
-      apply_leg(leg);
-    }
-
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "SERVO"))
-  {
-    // SERVO <LEG|ALL> <JOINT|ALL> <ENABLE|DISABLE>
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char legt[4] = {0}; int nl = min(tl, 3); memcpy(legt, line + ts, nl); for (int i = 0; i < nl; ++i) legt[i] = toupper(legt[i]);
-
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char jtok[8] = {0}; int nj = min(tl, 7); memcpy(jtok, line + ts, nj); for (int i = 0; i < nj; ++i) jtok[i] = toupper(jtok[i]);
-
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char act[10] = {0}; int na = min(tl, 9); memcpy(act, line + ts, na); for (int i = 0; i < na; ++i) act[i] = toupper(act[i]);
-
-    bool doEnable = !strcmp(act, "ENABLE");
-    bool doDisable = !strcmp(act, "DISABLE");
-    if (!doEnable && !doDisable) { printERR(E_PARSE, "BAD_ARG"); return; }
-
-    auto apply_servo = [&](int L, int J)
-    {
-      if (L < 0 || L >= 6 || J < 0 || J >= 3) return;
-      uint8_t idx = (uint8_t)(L * 3u + J);
-      if (doEnable) {
-        g_joint_enabled_mask |= (1u << idx);
-        if (g_enabled && ((g_leg_enabled_mask >> L) & 1u)) {
-          setServoTorqueNow((uint8_t)L, (uint8_t)J, true);
-        }
-      } else {
-        g_joint_enabled_mask &= ~(1u << idx);
-        setServoTorqueNow((uint8_t)L, (uint8_t)J, false);
-      }
-    };
-
-    if (!strcmp(legt, "ALL")) {
-      if (!strcmp(jtok, "ALL")) {
-        for (int L = 0; L < 6; ++L) {
-          for (int J = 0; J < 3; ++J) apply_servo(L, J);
-        }
-      } else {
-        int J = jointIndexFromToken(jtok);
-        if (J < 0) { printERR(E_PARSE, "BAD_JOINT"); return; }
-        for (int L = 0; L < 6; ++L) apply_servo(L, J);
-      }
-    } else {
-      int leg = legIndexFromToken(legt);
-      if (leg < 0) { printERR(E_PARSE, "BAD_LEG"); return; }
-      if (!strcmp(jtok, "ALL")) {
-        for (int J = 0; J < 3; ++J) apply_servo(leg, J);
-      } else {
-        int J = jointIndexFromToken(jtok);
-        if (J < 0) { printERR(E_PARSE, "BAD_JOINT"); return; }
-        apply_servo(leg, J);
-      }
-    }
-
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "RAW"))
-
-  {
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char legt[4] = {0}; int nl = min(tl, 3); memcpy(legt, line + ts, nl); for (int i = 0; i < nl; ++i) legt[i] = toupper(legt[i]);
-    int leg = legIndexFromToken(legt); if (leg < 0) { printERR(E_PARSE, "BAD_LEG"); return; }
-
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char jt[8] = {0}; int nj = min(tl, 7); memcpy(jt, line + ts, nj); for (int i = 0; i < nj; ++i) jt[i] = toupper(jt[i]);
-    int joint = jointIndexFromToken(jt); if (joint < 0) { printERR(E_PARSE, "BAD_JOINT"); return; }
-
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char nb[16] = {0}; int nn = min(tl, 15); memcpy(nb, line + ts, nn); nb[nn] = 0; long v = atol(nb);
-    if (v < 0) v = 0; if (v > 24000) v = 24000;
-
-    g_cmd_cd[leg][joint] = (int16_t)v;
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "RAW3"))
-
-  {
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char legt[4] = {0}; int nl = min(tl, 3); memcpy(legt, line + ts, nl); for (int i = 0; i < nl; ++i) legt[i] = toupper(legt[i]);
-    int leg = legIndexFromToken(legt); if (leg < 0) { printERR(E_PARSE, "BAD_LEG"); return; }
-
-    long vals[3];
-    for (int j = 0; j < 3; ++j)
-
-    {
-      s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-      char nb[16] = {0}; int nn = min(tl, 15); memcpy(nb, line + ts, nn); nb[nn] = 0; long v = atol(nb);
-      if (v < 0) v = 0; if (v > 24000) v = 24000; vals[j] = v;
-
-    }
-
-    g_cmd_cd[leg][0] = (int16_t)vals[0];
-    g_cmd_cd[leg][1] = (int16_t)vals[1];
-    g_cmd_cd[leg][2] = (int16_t)vals[2];
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "FOOT"))
-
-  {
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char legt[4] = {0}; int nl = min(tl, 3); memcpy(legt, line + ts, nl); for (int i = 0; i < nl; ++i) legt[i] = toupper(legt[i]);
-    int leg = legIndexFromToken(legt); if (leg < 0) { printERR(E_PARSE, "BAD_LEG"); return; }
-
-    float vals[3];
-    for (int j = 0; j < 3; ++j)
-
-    {
-      s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-      char nb[24] = {0}; int nn = min(tl, 23); memcpy(nb, line + ts, nn); nb[nn] = 0; vals[j] = atof(nb);
-    }
-
-    int16_t out[3];
-    if (!calculateIK((uint8_t)leg, vals[0], vals[1], vals[2], out))
-
-    {
-      printERR(E_PARSE, "IK_FAIL");
-      return;
-    }
-
-    // Mirror left legs on coxa around home for symmetry
-    bool isRight = (legt[0] == 'R');
-    if (isRight)
-
-    {
-      g_cmd_cd[leg][0] = out[0];
-      g_cmd_cd[leg][1] = out[1];
-      g_cmd_cd[leg][2] = out[2];
-    }
-    else
-
-    {
-      g_cmd_cd[leg][0] = 2 * g_home_cd[leg][0] - out[0];
-      g_cmd_cd[leg][1] = 2 * g_home_cd[leg][1] - out[1];
-      g_cmd_cd[leg][2] = 2 * g_home_cd[leg][2] - out[2];
-    }
-
-    printOK();
-    return;
-  }
-
-  if (!strcmp(cmd, "FEET"))
-
-  {
-    float p[6][3];
-    for (int i = 0; i < 6; ++i)
-
-    {
-      for (int j = 0; j < 3; ++j)
-
-      {
-        s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-        char nb[24] = {0}; int nn = min(tl, 23); memcpy(nb, line + ts, nn); nb[nn] = 0; p[i][j] = atof(nb);
-      }
-    }
-
-    for (int L = 0; L < 6; ++L)
-
-    {
-      int16_t out[3];
-      if (!calculateIK((uint8_t)L, p[L][0], p[L][1], p[L][2], out))
-
-      {
-        printERR(E_PARSE, "IK_FAIL");
-        return;
-      }
-
-      // Mirror left legs around home on coxa
-      bool isRight = (L >= 3);
-      if (isRight)
-
-      {
-        g_cmd_cd[L][0] = out[0];
-        g_cmd_cd[L][1] = out[1];
-        g_cmd_cd[L][2] = out[2];
-      }
-      else
-
-      {
-        g_cmd_cd[L][0] = 2 * g_home_cd[L][0] - out[0];
-        g_cmd_cd[L][1] = 2 * g_home_cd[L][1] - out[1];
-        g_cmd_cd[L][2] = 2 * g_home_cd[L][2] - out[2];
-      }
-    }
-
-    printOK();
-    return;
-  }
-
-  // MODE handler (TEST/IDLE)
-  if (!strcmp(cmd, "MODE"))
-  {
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char mtok[8] = {0}; int nm = min(tl, 7); memcpy(mtok, line + ts, nm); for (int i = 0; i < nm; ++i) mtok[i] = toupper(mtok[i]);
-    if (!strcmp(mtok, "TEST")) {
-      modeSetTest();
-      printOK();
-      return;
-    } else if (!strcmp(mtok, "IDLE")) {
-      modeSetIdle();
-      printOK();
-      return;
-    }
-    printERR(E_PARSE, "BAD_ARG");
-    return;
-  }
-
-  // 'I' — shortcut for MODE IDLE
-  if (!strcmp(cmd, "I"))
-  {
-    modeSetIdle();
-    printOK();
-    return;
-  }
-
-  // 'T' — shortcut for MODE TEST
-  if (!strcmp(cmd, "T"))
-  {
-    modeSetTest();
-    printOK();
-    return;
-  }
-
-  // TEST parameter commands
-  if (!strcmp(cmd, "TEST"))
-  {
-    // TEST <CYCLE|HEIGHT|BASEX|STEPLEN|LIFT> <value>
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char sub[12] = {0}; int ns = min(tl, 11); memcpy(sub, line + ts, ns); for (int i = 0; i < ns; ++i) sub[i] = toupper(sub[i]);
-
-    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(E_PARSE, "BAD_ARG"); return; }
-    char vb[24] = {0}; int nv = min(tl, 23); memcpy(vb, line + ts, nv); vb[nv] = 0;
-
-    if (!strcmp(sub, "CYCLE")) {
-      long ms = atol(vb);
-      if (ms < 750) ms = 750; if (ms > 10000) ms = 10000;
-      g_test_cycle_ms = (uint32_t)ms;
-      printOK();
-      return;
-    } else if (!strcmp(sub, "HEIGHT")) {
-      g_test_base_y_mm = atof(vb);
-      printOK();
-      return;
-    } else if (!strcmp(sub, "BASEX")) {
-      g_test_base_x_mm = atof(vb);
-      printOK();
-      return;
-    } else if (!strcmp(sub, "STEPLEN")) {
-      float v = atof(vb);
-      if (v < 0.0f) v = 0.0f;
-      g_test_step_len_mm = v;
-      printOK();
-      return;
-    } else if (!strcmp(sub, "LIFT")) {
-      float v = atof(vb);
-      if (v < 0.0f) v = 0.0f;
-      g_test_lift_y_mm = v;
-      printOK();
-      return;
-    } else if (!strcmp(sub, "OVERLAP")) {
-      // Persisted runtime parameter: percent of total cycle reserved for overlap (0..25)
-      float v = atof(vb);
-      if (v < 0.0f) v = 0.0f; if (v > 25.0f) v = 25.0f;
-      g_test_overlap_pct = v;
-
-#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-      if (!SD.begin(BUILTIN_SDCARD)) { printERR(E_BUS_IO, "NO_SD"); return; }
-
-      // Stream copy config with replacement of test.trigait.overlap_pct, append if missing
-      File fin = SD.open("/config.txt", FILE_READ);
-      File fout = SD.open("/config.tmp", FILE_WRITE);
-      if (!fout) { if (fin) fin.close(); printERR(E_BUS_IO, "SD_WRITE_FAIL"); return; }
-      bool replaced = false;
-      if (fin) {
-        static char linebuf[256]; int llen = 0;
-        while (fin.available()) {
-          int ch2 = fin.read(); if (ch2 < 0) break;
-          if (ch2 == '\r') continue;
-          if (ch2 == '\n') {
-            linebuf[llen] = 0;
-            const char* p = linebuf; while (*p == ' ' || *p == '\t') ++p;
-            const char* key = "test.trigait.overlap_pct=";
-            size_t klen = strlen(key);
-            if (strncmp(p, key, klen) == 0) {
-              // Replace with new value (integer percent)
-              fout.print(key);
-              long iv = lroundf(g_test_overlap_pct);
-              fout.print((int)iv);
-              fout.print('\n');
-              replaced = true;
-            } else {
-              fout.print(linebuf); fout.print('\n');
-            }
-            llen = 0;
-          } else if (llen + 1 < (int)sizeof(linebuf)) {
-            linebuf[llen++] = (char)ch2;
-          } else {
-            // overflow: flush partial as-is
-            linebuf[llen] = 0; fout.print(linebuf); fout.print('\n'); llen = 0;
-          }
-        }
-        fin.close();
-      }
-      if (!replaced) {
-        fout.print("test.trigait.overlap_pct=");
-        long iv = lroundf(g_test_overlap_pct);
-        fout.print((int)iv);
-        fout.print('\n');
-      }
-      fout.close();
-      SD.remove("/config.txt");
-      SD.rename("/config.tmp", "/config.txt");
-      printOK();
-      return;
+// Minimal HELP — authoritative list here to avoid duplication.
+void printHELP() {
+  // Header with firmware version
+  Serial.print(F("HELP FW "));
+#ifdef FW_VERSION
+  Serial.print(FW_VERSION);
 #else
-      printERR(E_BUS_IO, "NO_SD");
-      return;
+  Serial.print(F("unknown"));
 #endif
-    }
-    printERR(E_PARSE, "BAD_ARG");
-    return;
-  }
+  Serial.print(F("\r\n"));
 
-  if (!strcmp(cmd, "STAND"))
-  {
-    // IK a neutral stance at base X/Y with Z=0 for all legs.
-    // Use the same base values as TEST gait to keep behavior consistent.
-    const float BASE_Y = g_test_base_y_mm; // mm (negative is down)
-    const float BASE_X = g_test_base_x_mm;  // mm (lateral)
-    for (int L = 0; L < 6; ++L) {
-      int16_t out[3];
-      bool ok = calculateIK((uint8_t)L, BASE_X, BASE_Y, 0.0f, out);
-      if (!ok) { printERR(E_PARSE, "IK_FAIL"); return; }
-      bool isRight = (L >= 3);
-      if (isRight) {
-        g_cmd_cd[L][0] = out[0];
-        g_cmd_cd[L][1] = out[1];
-        g_cmd_cd[L][2] = out[2];
-      } else {
-        // Mirror around home for left legs to match current convention
-        g_cmd_cd[L][0] = (int16_t)(2 * g_home_cd[L][0] - out[0]);
-        g_cmd_cd[L][1] = (int16_t)(2 * g_home_cd[L][1] - out[1]);
-        g_cmd_cd[L][2] = (int16_t)(2 * g_home_cd[L][2] - out[2]);
-      }
-    }
-    printOK();
-    return;
-  }
+  // System / meta
+  Serial.print(F("[SYSTEM]\r\n"));
+  Serial.print(F("  HELP                      Show this help\r\n"));
+  Serial.print(F("  STATUS                    Show system status summary\r\n"));
+  Serial.print(F("  REBOOT                    Reboot controller\r\n"));
 
-  // HOME — move enabled, in-service servos to their home positions
-  if (!strcmp(cmd, "HOME"))
-  {
-    for (int L = 0; L < 6; ++L) {
-      if (!leg_enabled_mask_get((uint8_t)L)) continue;
-      for (int J = 0; J < 3; ++J) {
-        int idx = L * 3 + J;
-        bool jointEn = joint_enabled_mask_get((uint8_t)L, (uint8_t)J);
-        bool inService = ((g_servo_oos_mask >> idx) & 1u) == 0;
-        if (jointEn && inService) {
-          g_cmd_cd[L][J] = g_home_cd[L][J];
-        }
-      }
-    }
-    printOK();
-    return;
-  }
+  // Enable / disable
+  Serial.print(F("[ENABLE]\r\n"));
+  Serial.print(F("  ENABLE                    Global enable (torque allowed)\r\n"));
+  Serial.print(F("  DISABLE                   Global disable (torque off)\r\n"));
+  Serial.print(F("  LEGS                      List per-leg enable mask\r\n"));
+  Serial.print(F("  LEG <LEG|ALL> <ENABLE|DISABLE>    Enable/disable leg(s)\r\n"));
+  Serial.print(F("  SERVOS                    List per-servo enable mask\r\n"));
+  Serial.print(F("  SERVO <LEG|ALL> <JOINT|ALL> <ENABLE|DISABLE>  Enable/disable joint(s)\r\n"));
 
-  // SAVEHOME — read positions for enabled, in-service servos and persist to /config.txt as home_cd.<LEG>.<joint>=<cd>
-  if (!strcmp(cmd, "SAVEHOME"))
-  {
-#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-    if (!SD.begin(BUILTIN_SDCARD)) { printERR(E_BUS_IO, "NO_SD"); return; }
+  // Motion / command targets
+  Serial.print(F("[MOTION]\r\n"));
+  Serial.print(F("  STAND                     Move enabled legs to neutral IK stance\r\n"));
+  Serial.print(F("  FOOT <LEG> <x y z>        IK move single leg (mm, body frame)\r\n"));
+  Serial.print(F("  FEET <x1 y1 z1 ... x6 y6 z6>  IK move all 6 legs (LF..RR)\r\n"));
+  Serial.print(F("  RAW <LEG> <JOINT> <cd>    Direct joint target (centideg)\r\n"));
+  Serial.print(F("  RAW3 <LEG> <c f t>        Direct 3-joint targets (centideg)\r\n"));
 
-    // Build updates and track which keys we replace
-    struct Update { uint8_t L; uint8_t J; int16_t cd; bool have; bool replaced; };
-    Update ups[18]; int upCount = 0;
-    for (uint8_t L = 0; L < 6; ++L) {
-      if (!leg_enabled_mask_get(L)) continue;
-      for (uint8_t J = 0; J < 3; ++J) {
-        int idx = L * 3 + J;
-        bool jointEn = joint_enabled_mask_get(L, J);
-        bool inService = ((g_servo_oos_mask >> idx) & 1u) == 0;
-        if (!jointEn || !inService) continue;
-        int16_t cd = readServoPosCdSync(L, J);
-        if (cd >= 0) {
-          ups[upCount++] = {L, J, cd, true, false};
-          g_home_cd[L][J] = cd; // update runtime home as well
-        }
-      }
-    }
-    // Open existing config for read; temp for write
-    File fin = SD.open("/config.txt", FILE_READ);
-    File fout = SD.open("/config.tmp", FILE_WRITE);
-    if (!fout) { if (fin) fin.close(); printERR(E_BUS_IO, "SD_WRITE_FAIL"); return; }
-    const char* legNames[6] = {"LF","LM","LR","RF","RM","RR"};
-    const char* jointNames[3] = {"coxa","femur","tibia"};
-    if (fin) {
-      // Stream copy with replacements
-      static char line[256]; int len = 0;
-      while (fin.available()) {
-        int ch = fin.read(); if (ch < 0) break;
-        if (ch == '\r') continue;
-        if (ch == '\n') {
-          line[len] = 0;
-          bool didReplace = false;
-          // Try to match any key
-          for (int i = 0; i < upCount; ++i) {
-            char key[40];
-            snprintf(key, sizeof(key), "home_cd.%s.%s=", legNames[ups[i].L], jointNames[ups[i].J]);
-            const char* p = line; while (*p == ' ' || *p == '\t') ++p;
-            if (strncmp(p, key, strlen(key)) == 0) {
-              // Write updated key
-              fout.print(key);
-              fout.print((int)ups[i].cd);
-              fout.print('\n');
-              ups[i].replaced = true;
-              didReplace = true;
-              break;
-            }
-          }
-          if (!didReplace) {
-            fout.print(line);
-            fout.print('\n');
-          }
-          len = 0;
-        } else if (len + 1 < (int)sizeof(line)) {
-          line[len++] = (char)ch;
-        } else {
-          // overflow: flush partial line as-is
-          line[len] = 0; fout.print(line); fout.print('\n'); len = 0;
-        }
-      }
-      fin.close();
-    }
-    // Append any keys not replaced
-    for (int i = 0; i < upCount; ++i) {
-      if (!ups[i].replaced) {
-        fout.print("home_cd."); fout.print(legNames[ups[i].L]); fout.print("."); fout.print(jointNames[ups[i].J]); fout.print("="); fout.print((int)ups[i].cd); fout.print('\n');
-      }
-    }
-    fout.close();
-    // Replace original
-    SD.remove("/config.txt");
-    SD.rename("/config.tmp", "/config.txt");
-    printOK();
-    return;
-#else
-    printERR(E_BUS_IO, "NO_SD");
-    return;
-#endif
-  }
+  // Geometry / calibration
+  Serial.print(F("[GEOMETRY]\r\n"));
+  Serial.print(F("  FK <LEG|ALL> <ON|OFF>     Toggle FK body-frame stream per leg\r\n"));
+  Serial.print(F("  HOME                      Move enabled in-service servos to home_cd\r\n"));
+  Serial.print(F("  SAVEHOME                  Capture current positions as new home_cd (enabled/in-service)\r\n"));
+  Serial.print(F("  OFFSET LIST               List hardware angle offsets (centideg)\r\n"));
+  Serial.print(F("  OFFSET CLEAR <LEG|ALL> <JOINT|ALL>  Clear hardware angle offsets\r\n"));
 
-  printERR(2, "UNKNOWN_CMD");
+  // Mode / test / shortcuts
+  Serial.print(F("[MODE]\r\n"));
+  Serial.print(F("  MODE <TEST|IDLE>          Set operating mode\r\n"));
+  Serial.print(F("  T                         Shortcut: MODE TEST\r\n"));
+  Serial.print(F("  I                         Shortcut: MODE IDLE\r\n"));
+  Serial.print(F("  TEST CYCLE <ms>           Set tripod phase duration (750..10000)\r\n"));
+  Serial.print(F("  TEST HEIGHT <mm>          Set ground height (Y, negative down)\r\n"));
+  Serial.print(F("  TEST BASEx <mm>           Set lateral X base offset\r\n"));
+  Serial.print(F("  TEST STEPLEN <mm>         Set forward/back amplitude (|Z|)\r\n"));
+  Serial.print(F("  TEST LIFT <mm>            Set swing lift height (Y)\r\n"));
+  Serial.print(F("  TEST OVERLAP <pct>        Set overlap percent (0..25)\r\n"));
+
+  // Safety
+  Serial.print(F("[SAFETY]\r\n"));
+  Serial.print(F("  SAFETY LIST               Show safety state/config\r\n"));
+  Serial.print(F("  SAFETY SOFTLIMITS <ON|OFF>  Toggle soft joint limits\r\n"));
+  Serial.print(F("  SAFETY COLLISION <ON|OFF>   Toggle foot keep-out check\r\n"));
+  Serial.print(F("  SAFETY TEMPLOCK <C>       Set over-temp lockout threshold (Celsius)\r\n"));
+  Serial.print(F("  SAFETY CLEARANCE <mm>     Set foot-to-foot clearance (X/Z plane)\r\n"));
+  Serial.print(F("  SAFETY OVERRIDE <ALL|TEMP|COLLISION|NONE>  Override lockout causes\r\n"));
+
+  // Notes
+  Serial.print(F("[NOTES]\r\n"));
+  Serial.print(F("  Units: angles=centideg (0..24000); positions=mm (body frame). Left legs mirror IK angles.\r\n"));
 }
 
-void buffersInit()
-{
-  // Reset serial parsing buffers
-  lineLen = 0;
-  lineBuf[0] = '\0';
-  g_last_cmd[0] = '\0';
-
-  // Initialize 74HC126 buffer enable pins: LOW = RX (high-Z), HIGH = TX drive
-  for (uint8_t i = 0; i < 6; ++i)
-
-  {
-
-    int pin = Robot::BUFFER_ENABLE_PINS[i];
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, LOW); // default to RX (high-Z driver)
-  }
+void rebootNow() {
+  // Trigger ARM system reset via Application Interrupt and Reset Control Register
+  volatile uint32_t* AIRCR = (volatile uint32_t*)0xE000ED0C;
+  const uint32_t VECTKEY = 0x5FA << 16;
+  *AIRCR = VECTKEY | (1u << 2); // SYSRESETREQ bit
+  while (1) { /* wait for reset */ }
 }
+
+// In-memory angle offset cache per-servo ID (units; ±125)
+static int16_t s_angle_offset_units[256] = {0};
+
+int angle_offset_read(uint8_t id) {
+  return (int)s_angle_offset_units[id];
+}
+
+bool angle_offset_adjust(uint8_t id, int8_t delta) {
+  int v = (int)s_angle_offset_units[id] + (int)delta;
+  if (v < -125) v = -125; if (v > 125) v = 125;
+  s_angle_offset_units[id] = (int16_t)v;
+  return true;
+}
+
+bool angle_offset_write(uint8_t id) {
+  (void)id; // Persist to hardware not yet implemented
+  return true;
+}
+

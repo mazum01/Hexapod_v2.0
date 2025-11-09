@@ -7,23 +7,23 @@ class LoopTimerClass
 {
 
   public:
-  LoopTimerClass( long frequency );
-  long DeltaT();
-  long LoopDeltaT();
-  long TargetDeltaT();
-  float DeltaTseconds();
-  bool Update();
-  void SetFrequency(long frequency);
-  
+    LoopTimerClass( long frequency );
+    long DeltaT();
+    long LoopDeltaT();
+    long TargetDeltaT();
+    float DeltaTseconds();
+    bool Update();
+    void SetFrequency(long frequency);
+
   private:
-  
-  // Loop timing variables
-  long _loopHz;
-  unsigned long _dTTarget; // target loop cycle time in microseconds (1,000,000 us / Hz)
-  unsigned long _loopdT; // actual loop cycle time in microseconds
-  unsigned long _dT; // last triggered loop cycle time (should ~= _dTTarget)
-  float _dTs; // the actual loop cycle time in seconds
-  unsigned long _loopStartms; // starting micros() timestamp for computing dT
+
+    // Loop timing variables
+    long _loopHz;
+    unsigned long _dTTarget; // target loop cycle time in microseconds (1,000,000 us / Hz)
+    unsigned long _loopdT; // actual loop cycle time in microseconds
+    unsigned long _dT; // last triggered loop cycle time (should ~= _dTTarget)
+    float _dTs; // the actual loop cycle time in seconds
+    unsigned long _loopStartms; // starting micros() timestamp for computing dT
 };
 
 LoopTimerClass::LoopTimerClass( long frequency )
@@ -80,7 +80,7 @@ bool LoopTimerClass::Update()
     _dT = _loopdT;
     _dTs = ((float) _dT) / 1000000.0;
     timerFired = true;
-  }    
+  }
 
   return timerFired;
 }

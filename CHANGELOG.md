@@ -1,4 +1,81 @@
+## 2025-11-08
+- HELP: Restored multi-line categorized HELP output with sections (System, Enable/Disable, Motion, Geometry/Calibration, Mode/Test, Safety). Strings in PROGMEM via F(); CRLF line endings.
+- Version: Bumped FW_VERSION to 0.1.76.
+
+## 2025-11-08
+- STATUS: Restored multi-line STATUS with grouped content: system/config, test parameters, safety toggles, leg/joint enables, offsets grid, OOS mask, and FK mask. Kept strings in PROGMEM via F().
+- Version: Bumped FW_VERSION to 0.1.75.
+
+## 2025-11-08
+- Startup: Restored/enhanced non-blocking startup splash with build date/time and concise runtime summary (FW, loop_hz, UART mapping, config status).
+- Version: Bumped FW_VERSION to 0.1.74.
+
+## 2025-11-08
+- UX: Echo the processed serial command back to the host in the form `> <line>` immediately after the handler runs. Helps logging and CLI interop.
+- Version: Bumped FW_VERSION to 0.1.73.
+
+## 2025-11-08
+- Fix: Cleaned up `functions.ino` by removing orphaned legacy command code and unmatched preprocessor fragments; restored a minimal `handleLine` shim that delegates exclusively to the modular dispatcher and a compact `buffersInit`. Resolved compile diagnostics in this unit.
+- Fix: Reintroduced lightweight FK helpers `fk_leg_body` and `fk_leg_both` into `functions.ino` after refactor to resolve undefined reference at link time and restore FK telemetry and estimates.
+- Fix: Restored/stubbed helper functions required by modular commandprocessor (printOK/ERR, HELP/STATUS, nextToken, rebootNow, angle_offset_*) to close remaining undefined references. Added minimal in-memory angle offset cache. Bumped FW_VERSION.
+- Version: Bumped FW_VERSION to 0.1.72.
+
+## 2025-11-08
+- Refactor: Removed the legacy if/else command chain from `functions.ino`; `handleLine` now delegates exclusively to the modular dispatcher in `commandprocessor.ino`.
+- Version: Bumped FW_VERSION to 0.1.70.
+
+## 2025-11-08
+- Commands: Wired the new modular dispatcher into `handleLine` in `functions.ino`. The legacy if/else chain was removed and all serial commands now route through `commandprocessor.ino`'s enum-based switch and per-command handlers.
+- Behavior: No functional changes expected; this consolidates command handling so features like `OFFSET` and `SAVEHOME` reliably execute through the new path.
+- Version: Bumped FW_VERSION to 0.1.69.
+
 # Changelog
+
+## 2025-11-08
+- Fix: Cleaned up `functions.ino` by removing orphaned legacy command code and unmatched preprocessor fragments; restored a minimal `handleLine` shim that delegates exclusively to the modular dispatcher and a compact `buffersInit`. Resolved compile diagnostics in this unit.
+- Fix: Reintroduced lightweight forward kinematics helpers `fk_leg_body` and `fk_leg_both` (removed during refactor) to resolve linker undefined reference and restore FK-based telemetry and foot position estimation.
+- Version: Bumped FW_VERSION to 0.1.71.
+
+## 2025-11-07
+- Refactor: Introduced modular command processor (`commandprocessor.ino`) with an enum-based dispatcher and per-command handler routines (HELP, STATUS, REBOOT, ENABLE, DISABLE, FK, LEGS, SERVOS, LEG, SERVO, RAW, RAW3, FOOT, FEET, MODE, I, T, TEST, STAND, SAFETY, HOME, SAVEHOME, OFFSET). Improves maintainability and isolates parsing logic from core firmware loop.
+- Readability: Expanded previously dense one-line handlers into structured blocks; corrected preprocessor directive placement (column 0) to avoid Teensy compile errors; added shared header `command_types.h` to expose `CommandType` before Arduino auto-generated prototypes.
+- Build: Resolved 'CommandType does not name a type' error by moving enum to header included early; no functional changes to command behaviors.
+- Version: Bumped FW_VERSION to 0.1.68.
+- Calibration: `SAVEHOME` now adjusts and saves each servo's hardware angle offset so the current physical neutral maps to 12000 cd (±30° clamp). Residual is persisted to `/config.txt` as `home_cd.<LEG>.<joint>` to preserve exactness.
+- Commands: Added `OFFSET LIST` (report per-servo angle offsets in centideg) and `OFFSET CLEAR <LEG|ALL> <JOINT|ALL>` (clear hardware offsets; homes updated to maintain pose).
+- STATUS: New `offset_cd` grid shows current hardware angle offsets per leg/joint (centidegrees).
+- Docs: Updated spec with calibration flow and new commands.
+- Version: Bumped FW_VERSION to 0.1.67.
+
+## 2025-11-04
+- Telemetry: Added `FK <LEG|ALL> <ON|OFF>` command to toggle FK body-frame stream per leg. RR_FK output is now gated by a mask (defaults to LM only to preserve prior behavior).
+- Version: Bumped FW_VERSION to 0.1.65.
+
+## 2025-11-04
+- Docs: Updated `docs/PROJECT_SPEC.md` to document the full SAFETY command suite (LIST/OVERRIDE/SOFTLIMITS/COLLISION/TEMPLOCK/CLEARANCE), expanded STATUS grouped sections, and added implemented config keys (`safety.soft_limits`, `safety.collision`, `safety.temp_lockout_c`, and `test.trigait.overlap_pct`).
+- Version: Bumped FW_VERSION to 0.1.64.
+
+## 2025-11-03
+- UX: Synced HELP with implemented commands (added SAFETY SOFTLIMITS/COLLISION/TEMPLOCK; removed duplicates). Reworked STATUS into grouped sections for readability without changing semantics.
+- Version: Bumped FW_VERSION to 0.1.63.
+
+## 2025-11-03
+	- `safety.soft_limits=<true|false>` — clamps commanded joints to configured min/max when true.
+	- `safety.collision=<true|false>` — enables/disables foot-to-foot keep-out checks.
+	- `safety.temp_lockout_c=<C>` — sets over-temperature lockout threshold in Celsius.
+
+## 2025-11-03
+- Telemetry: Print FK body-frame foot position (x/y/z) for the leg served in the round-robin feedback each tick to aid bring-up.
+- Version: Bumped FW_VERSION to 0.1.62.
+
+## 2025-11-03
+- Safety: FOOT/FEET collision checks now use FK-estimated body-frame positions (X/Z) to predict post-command clearance, matching the loop's FK-based safety and reducing startup false positives.
+- Version: Bumped FW_VERSION to 0.1.60.
+
+## 2025-11-03
+- Safety: Added simple foot-to-foot keep-out in the X/Z plane. New serial command `SAFETY CLEARANCE <mm>` and config key `safety.clearance_mm` control the minimum clearance between feet; violation triggers a safety lockout (E40 COLLISION). STATUS prints `safety_clearance_mm`.
+- Safety UX: Added `SAFETY LIST` and `SAFETY OVERRIDE <ALL|TEMP|COLLISION|NONE>`; STATUS now includes a compact safety summary `safety=<state> cause=0x.. override=0x..`.
+- Version: Bumped FW_VERSION to 0.1.59.
 
 ## 2025-11-03
 - TEST mode UX: Added `TEST OVERLAP <pct>` (0..25) to adjust the overlap window at runtime. The value is persisted to `/config.txt` as `test.trigait.overlap_pct`.
