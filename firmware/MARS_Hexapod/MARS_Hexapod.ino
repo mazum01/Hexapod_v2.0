@@ -3,6 +3,23 @@
   Hexapod v2.0 Controller (Teensy 4.1)
 
   Change log (top N entries)
+  - 2025-11-08: HELP: Restored multi-line categorized HELP (System, Enable/Disable, Motion, Geometry/Calibration, Mode/Test, Safety) with CRLF and F() strings. FW 0.1.76. (author: copilot)
+  - 2025-11-08: STATUS: Restored multi-line STATUS with system/config, test params, safety toggles, leg/joint enables, offset grid, OOS mask, and FK mask. FW 0.1.75. (author: copilot)
+  - 2025-11-08: Startup splash restored with build date/time and compact summary (non-blocking). FW 0.1.74. (author: copilot)
+  - 2025-11-08: UX: Echo the processed serial command back to host ("> <line>") after handlers run to aid logging/debug. FW 0.1.73. (author: copilot)
+  - 2025-11-08: Restore/stub helper functions required by modular command processor (printOK/ERR, HELP/STATUS, nextToken, rebootNow, angle_offset_*); confirm FK helpers present. Addresses undefined references at link time after refactor. FW 0.1.72. (author: copilot)
+  - 2025-11-08: Remove legacy if/else command chain from functions.ino; handleLine now delegates exclusively to the modular dispatcher in commandprocessor.ino. FW 0.1.70. (author: copilot)
+  - 2025-11-08: Wire modular dispatcher into handleLine; replace legacy if/else chain with enum-based switch; all commands now route through commandprocessor.ino (OFFSET/SAVEHOME/SAFETY etc.). FW 0.1.69. (author: copilot)
+  - 2025-11-07: Refactor: modular command processor with per-command handlers and enum-based dispatcher moved to commandprocessor.ino; readability pass and preprocessor fixes. FW 0.1.68. (author: copilot)
+  - 2025-11-07: Calibration: SAVEHOME now adjusts and saves servo hardware angle offsets to center at 12000 cd (±30° clamp); persists residual homes; added OFFSET LIST/CLEAR and STATUS offset_cd grid. FW 0.1.67. (author: copilot)
+  - 2025-11-05: Telemetry: RR_FK now includes leg-frame position (lx/ly/lz, mm, origin at hip) and raw joint angles (c/f/t in centideg). FW 0.1.66. (author: copilot)
+  - 2025-11-04: Telemetry: Added `FK <LEG|ALL> <ON|OFF>` command to toggle FK body-frame stream per leg; RR_FK now gated by mask (defaults to LM only to preserve prior behavior). FW 0.1.65. (author: copilot)
+  - 2025-11-04: Docs: Updated PROJECT_SPEC with full SAFETY subcommands (LIST/OVERRIDE/SOFTLIMITS/COLLISION/TEMPLOCK/CLEARANCE), grouped STATUS description, and added implemented config keys (safety.*, test.trigait.overlap_pct). FW 0.1.64. (author: copilot)
+  - 2025-11-03: UX: Synced HELP with implemented commands (added SAFETY SOFTLIMITS/COLLISION/TEMPLOCK; removed duplicates) and reformatted STATUS into grouped sections for readability. FW 0.1.63. (author: copilot)
+  - 2025-11-03: Telemetry: Print FK body-frame foot position (x/y/z) for the leg served in the round-robin feedback each tick to aid bring-up. FW 0.1.62. (author: copilot)
+  - 2025-11-03: Safety config: Added toggles for soft limits and collision checks, and a configurable over-temp lockout threshold. New config keys: safety.soft_limits, safety.collision, safety.temp_lockout_c. New serial: SAFETY SOFTLIMITS, SAFETY COLLISION, SAFETY TEMPLOCK. STATUS/SAFETY LIST updated. FW 0.1.61. (author: copilot)
+  - 2025-11-03: Safety: FOOT/FEET collision checks now use FK-estimated body-frame foot positions (X/Z) to predict post-command clearance; avoids startup false positives and aligns with loop safety; version bump to 0.1.60. (author: copilot)
+  - 2025-11-03: Safety: Added simple foot-to-foot keep-out check in X/Z plane with configurable clearance; new serial cmd 'SAFETY CLEARANCE <mm>' and config key 'safety.clearance_mm'; SAFETY LIST/OVERRIDE and STATUS safety summary; version bump to 0.1.59. (author: copilot)
   - 2025-11-03: TEST: Added runtime command `TEST OVERLAP <pct>` (0..25) with persistence to /config.txt; STATUS shows overlap_pct; version bump to 0.1.58. (author: copilot)
   - 2025-11-03: TEST: Added overlap_pct (config) to yield brief both-tripods stance; version bump to 0.1.56. (author: copilot)
   - 2025-11-03: STATUS: Uptime is now wrap-safe (64-bit accumulator across millis rollover) and printed as D/H/M/S/ms; version bump to 0.1.55. (author: copilot)
@@ -75,6 +92,7 @@
 #include <Arduino.h>
 #include <ctype.h>
 #include "LoopTimer.hpp"
+#include "command_types.h"
 #if MARS_ENABLE_SD
 #include <SD.h>
 #endif
@@ -112,7 +130,7 @@ int16_t readServoPosCdSync(uint8_t leg, uint8_t joint);
 
 // Firmware version (override at compile time with -DFW_VERSION="x.y.z")
 #ifndef FW_VERSION
-#define FW_VERSION "0.1.58"
+#define FW_VERSION "0.1.76"
 #endif
 
 // -----------------------------------------------------------------------------
@@ -154,10 +172,16 @@ static constexpr uint8_t LEG_SERVOS = 3;
 enum JointIdx : uint8_t { JOINT_COXA = 0, JOINT_FEMUR = 1, JOINT_TIBIA = 2 };
 
 // Robot geometry now provided by robot_config.h
+// FK and body-frame foot estimates
+extern bool    fk_leg_body(uint8_t leg, int16_t coxa_cd, int16_t femur_cd, int16_t tibia_cd,
+                           float* out_x_mm, float* out_y_mm, float* out_z_mm);
+extern bool    fk_leg_both(uint8_t leg, int16_t coxa_cd, int16_t femur_cd, int16_t tibia_cd,
+                           float* out_body_x_mm, float* out_body_y_mm, float* out_body_z_mm,
+                           float* out_leg_x_mm,  float* out_leg_y_mm,  float* out_leg_z_mm);
 
 // Loop timing
 static const uint16_t LOOP_HZ_DEFAULT = 100; // default set lower for overrun testing (spec target is 166)
-static volatile uint16_t g_loop_hz = LOOP_HZ_DEFAULT;
+volatile uint16_t g_loop_hz = LOOP_HZ_DEFAULT;
 static const float TICK_MS_DEFAULT = 1000.0f / LOOP_HZ_DEFAULT; // ~6.024 ms
 
 // ISR-based tick trigger
@@ -177,19 +201,22 @@ float    g_test_overlap_pct = 5.0f;     // percent of per-phase time reserved as
 
 // System state
 enum MarsMode : uint8_t { MODE_IDLE = 0, MODE_TEST = 1, MODE_LOCKOUT = 2 };
-static volatile bool g_enabled = false;
-static volatile bool g_lockout = false; // safety lockout flag
+volatile bool g_enabled = false;
+volatile bool g_lockout = false; // safety lockout flag
 
 // Collision detection removed; no externs or forward-declarations here.
 static volatile MarsMode g_mode = MODE_IDLE;
-static volatile uint8_t g_last_err = 0; // 0 = OK
-static volatile uint32_t g_overrun_count = 0; // counts ticks exceeding period
+volatile uint8_t g_last_err = 0; // 0 = OK
+volatile uint32_t g_overrun_count = 0; // counts ticks exceeding period
 static volatile uint16_t g_overrun_since_adjust = 0; // consecutive overruns since last rate change
 static volatile uint16_t g_ok_since_adjust = 0;       // consecutive on-time ticks since last rate change
 // Config status (SD)
 bool g_config_loaded = false;
 uint16_t g_config_keys_applied = 0;
 uint16_t g_config_loop_hz = LOOP_HZ_DEFAULT;
+
+// FK stream control: 6-bit mask (LF..RR). Default to LM only to preserve prior behavior.
+volatile uint8_t g_fk_stream_mask = (1u << 1);
 
 // Timing probes (compile-time optional)
 #if MARS_TIMING_PROBES
@@ -205,6 +232,7 @@ static uint32_t g_boot_ms = 0;
 enum LockoutCauseBits : uint16_t {
   LOCKOUT_CAUSE_NONE = 0,
   LOCKOUT_CAUSE_TEMP = 1u << 0,
+  LOCKOUT_CAUSE_COLLISION = 1u << 1,
   // Reserved for future causes (soft limit, collision, estop, etc.)
 };
 static volatile uint16_t g_lockout_causes = LOCKOUT_CAUSE_NONE; // snapshot at lockout
@@ -213,23 +241,47 @@ static volatile uint16_t g_override_mask  = LOCKOUT_CAUSE_NONE; // user override
 static volatile bool g_lockout_temp_trip[NUM_LEGS][LEG_SERVOS] = { { false } };
 static volatile int16_t g_lockout_temp_c10[NUM_LEGS][LEG_SERVOS] = { { 0 } };
 
+// Safety: configurable foot-to-foot keep-out clearance (mm) in X/Z plane
+float g_safety_clearance_mm = 60.0f;
+
+// Safety toggles and thresholds (runtime-configurable; loaded from /config.txt)
+// - Soft joint limits enable: clamp commands to configured min/max
+// - Collision check enable: enable/disable foot-to-foot keep-out test
+// - Temperature lockout threshold in 0.1 C units (default 80.0 C)
+volatile bool   g_safety_soft_limits_enabled = true;
+volatile bool   g_safety_collision_enabled   = true;
+volatile int16_t g_safety_temp_lockout_c10   = 800; // 80.0 C
+
+// Track last commanded foot targets (body frame, mm) to evaluate keep-out
+float g_foot_target_x_mm[NUM_LEGS] = {0};
+float g_foot_target_z_mm[NUM_LEGS] = {0};
+
+// FK-based foot position estimates in BODY frame (mm)
+float g_foot_body_x_mm[NUM_LEGS] = {0};
+float g_foot_body_y_mm[NUM_LEGS] = {0};
+float g_foot_body_z_mm[NUM_LEGS] = {0};
+
+// FK helpers declared below once joint/home arrays are defined
+
 // Commanded joint targets (centidegrees) per leg/joint. IK/commands will write here.
 static volatile int16_t g_cmd_cd[NUM_LEGS][3] = { {0} };
 // Home positions (centidegrees) per leg/joint; loaded from SD config; default 12000
-static volatile int16_t g_home_cd[NUM_LEGS][LEG_SERVOS] = {
+volatile int16_t g_home_cd[NUM_LEGS][LEG_SERVOS] = {
   {12000, 12000, 12000}, {12000, 12000, 12000}, {12000, 12000, 12000},
   {12000, 12000, 12000}, {12000, 12000, 12000}, {12000, 12000, 12000}
 };
 // Soft joint limits (absolute centidegrees). Defaults to full range; load from SD config.
-static volatile int16_t g_limit_min_cd[NUM_LEGS][LEG_SERVOS] = {
+volatile int16_t g_limit_min_cd[NUM_LEGS][LEG_SERVOS] = {
   {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}, {0, 0, 0}
 };
-static volatile int16_t g_limit_max_cd[NUM_LEGS][LEG_SERVOS] = {
+volatile int16_t g_limit_max_cd[NUM_LEGS][LEG_SERVOS] = {
   {24000, 24000, 24000}, {24000, 24000, 24000}, {24000, 24000, 24000},
   {24000, 24000, 24000}, {24000, 24000, 24000}, {24000, 24000, 24000}
 };
+// Persistent hardware offset values (centideg) per servo (derived from angle_offset_* units*24)
+int16_t g_offset_cd[NUM_LEGS][LEG_SERVOS] = { {0} };
 // Rate limiting config: max joint speed in centideg/s (applied as per-tick cd delta clamp). Safe default 360.00 deg/s => 36000 cdeg/s
-static volatile uint16_t g_rate_limit_cdeg_per_s = 36000u;
+volatile uint16_t g_rate_limit_cdeg_per_s = 36000u;
 // Last sent command (centidegrees) for per-tick rate limiting
 static volatile int16_t g_last_sent_cd[NUM_LEGS][LEG_SERVOS] = {
   {12000, 12000, 12000}, {12000, 12000, 12000}, {12000, 12000, 12000},
@@ -258,16 +310,101 @@ static inline void setJointEnabled(uint8_t leg, uint8_t joint, bool en) {
 }
 
 // Round-robin index 0..17
-static volatile uint8_t g_rr_index = 0;
+volatile uint8_t g_rr_index = 0;
 
 // Last measured values from sparse feedback (updated round-robin)
-static uint16_t g_meas_vin_mV[NUM_LEGS][LEG_SERVOS] = { {0} }; // millivolts
-static uint8_t  g_meas_temp_C[NUM_LEGS][LEG_SERVOS] = { {0} }; // temperature in whole deg C
-static int16_t  g_meas_pos_cd[NUM_LEGS][LEG_SERVOS] = { {0} }; // 0..24000 centidegrees
+uint16_t g_meas_vin_mV[NUM_LEGS][LEG_SERVOS] = { {0} }; // millivolts
+uint8_t  g_meas_temp_C[NUM_LEGS][LEG_SERVOS] = { {0} }; // temperature in whole deg C
+int16_t  g_meas_pos_cd[NUM_LEGS][LEG_SERVOS] = { {0} }; // 0..24000 centidegrees
+// Forward kinematics: derive BODY-frame foot position from absolute joint centidegrees
+// ----------------------------------------------------------------------------
+// Forward kinematics (FK): Compute BODY-frame foot position (x,y,z) from joint angles
+// ----------------------------------------------------------------------------
+// Purpose
+//   Given measured/estimated joint angles for one leg — Coxa (hip yaw), Femur (hip pitch),
+//   and Tibia (knee pitch) — this routine computes the foot position in the robot BODY frame
+//   in millimeters.
+//
+// Frames and conventions
+//   BODY frame axes:
+//     x: lateral (left +, right - or vice-versa depending on leg, see offset usage)
+//     y: vertical (up positive)
+//     z: forward (front positive)
+//   Joint angles:
+//     - All joint angles are provided as absolute centidegrees (cd) from the servos.
+//     - We convert them to degrees/radians relative to each joint’s configured home
+//       g_home_cd[leg][joint]. The home convention matches calculateIK().
+//     - Coxa (yaw) rotates around the vertical (BODY y) axis and orients the leg’s sagittal plane.
+//     - Femur and Tibia rotate in that sagittal plane (pitch).
+//
+// Geometry
+//   - COXA_LENGTH: horizontal standoff from hip yaw axis to the femur joint axis (mm).
+//   - FEMUR_LENGTH (a): femur link length (mm).
+//   - TIBIA_LENGTH (b): tibia link length (mm).
+//   - Robot::COXA_OFFSET[leg] = (bx, bz): BODY-frame horizontal location (x,z) of the hip yaw axis
+//     for each leg, i.e., the leg’s mounting point on the chassis.
+//
+// Algorithm overview
+//   1) Yaw orientation:
+//      - The Coxa yaw angle yaw rotates the leg’s sagittal plane around BODY y.
+//      - We first solve 2D forward kinematics in that sagittal plane, then rotate the resulting
+//        horizontal projection by yaw into (x,z), and finally translate by (bx,bz).
+//   2) Planar 2-link FK for femur/tibia in sagittal plane:
+//      - Let a = FEMUR_LENGTH, b = TIBIA_LENGTH.
+//      - Define femur pitch alpha (relative to vertical) and tibia relative angle gamma (knee).
+//        These angles are derived from the absolute servo centidegrees and home angles to match
+//        the IK convention used elsewhere in this codebase.
+//      - The straight-line distance from femur base to foot is
+//            D = sqrt(a^2 + b^2 + 2 a b cos(gamma))
+//        (law of cosines; gamma = interior knee angle between femur and tibia).
+//      - The elbow angle at the femur base that places the foot at distance D is
+//            alpha2 = arccos((D^2 + a^2 - b^2) / (2 a D))
+//        and the absolute femur inclination from vertical to foot is
+//            alpha1 = alpha - alpha2.
+//      - Then the vertical and horizontal (in-plane) components from the femur base are
+//            y = D cos(alpha1)
+//            R = D sin(alpha1)
+//   3) Add Coxa radial and rotate by yaw:
+//      - Add COXA_LENGTH in the horizontal (in-plane) direction, so the horizontal radius
+//        from the yaw axis to the foot projection is rproj = COXA_LENGTH + R.
+//      - Convert this radial to BODY-frame x/z using yaw:
+//            x_local = rproj sin(yaw)
+//            z_local = rproj cos(yaw)
+//   4) Translate by chassis mount offset to BODY frame:
+//            out_x = bx + x_local
+//            out_y = y
+//            out_z = bz + z_local
+//
+// References
+//   - Planar 2-DOF arm forward kinematics (law of cosines form):
+//       https://en.wikipedia.org/wiki/Forward_kinematics#Example:_Planar_2-DOF_robot
+//   - Law of cosines and elbow-up/down solutions for 2-link manipulators:
+//       https://en.wikipedia.org/wiki/Law_of_cosines
+//   - Craig, J. J., Introduction to Robotics: Mechanics and Control, 3rd ed.,
+//       Chapter 2 (planar manipulators) — standard treatment of 2R kinematics.
+//   - Murray, Li, Sastry, "A Mathematical Introduction to Robotic Manipulation",
+//       Section 2.2 (planar kinematics) — freely available online.
+//
+// Notes
+//   - Angle offsets: The +90° (for femur) and +90°/home centidegree adjustments below align
+//     this FK with calculateIK()’s convention so that FK(IK(target)) ≈ target.
+//   - Sign conventions differ across robots; the formulas are invariant but the offset/signs
+//     here are chosen to match this hardware’s mechanical zeroes and mounting.
+// ----------------------------------------------------------------------------
+// fk_leg_body moved to functions.ino
+
+static inline void updateFootBodyEstimates() {
+  for (uint8_t L = 0; L < NUM_LEGS; ++L) {
+    int16_t c = g_meas_pos_cd[L][0] ? g_meas_pos_cd[L][0] : g_last_sent_cd[L][0];
+    int16_t f = g_meas_pos_cd[L][1] ? g_meas_pos_cd[L][1] : g_last_sent_cd[L][1];
+    int16_t t = g_meas_pos_cd[L][2] ? g_meas_pos_cd[L][2] : g_last_sent_cd[L][2];
+    (void)fk_leg_body(L, c, f, t, &g_foot_body_x_mm[L], &g_foot_body_y_mm[L], &g_foot_body_z_mm[L]);
+  }
+}
 // Feedback reliability tracking and out-of-service masking
 volatile uint8_t g_fb_fail_count[NUM_LEGS][LEG_SERVOS] = { {0} };
 volatile uint32_t g_servo_oos_mask = 0; // 18-bit mask: bit index (leg*3 + joint)
-static volatile uint8_t g_servo_fb_fail_threshold = 3; // configurable via /config.txt oos.fail_threshold
+volatile uint8_t g_servo_fb_fail_threshold = 3; // configurable via /config.txt oos.fail_threshold
 // OOS helpers
 static inline uint8_t servoFlatIndex(uint8_t leg, uint8_t joint) {
   return (uint8_t)(leg * LEG_SERVOS + joint);
@@ -336,8 +473,8 @@ static LX16ABus g_bus[NUM_LEGS];
 // servoBusesInit moved to functions.ino
 
 // Pre-allocated LX16AServo objects per leg/joint to avoid per-tick construction overhead
-static LX16AServo* g_servo[NUM_LEGS][LEG_SERVOS] = { { nullptr } };
-alignas(LX16AServo) static uint8_t g_servo_mem[NUM_LEGS][LEG_SERVOS][sizeof(LX16AServo)];
+LX16AServo* g_servo[NUM_LEGS][LEG_SERVOS] = { { nullptr } };
+alignas(LX16AServo) uint8_t g_servo_mem[NUM_LEGS][LEG_SERVOS][sizeof(LX16AServo)];
 static void servoObjectsInit() {
   for (uint8_t L = 0; L < NUM_LEGS; ++L)
 
@@ -369,7 +506,6 @@ void setServoTorqueNow(uint8_t leg, uint8_t joint, bool on) {
 }
 
 // --- Safety helpers ---
-static constexpr int16_t SERVO_TEMP_LOCKOUT_C10 = 800; // 80.0 C in 0.1 C units
 static inline void safetyLockoutTemp(uint8_t leg, uint8_t joint, int16_t temp_c10) {
   if (g_lockout) return; // already locked out
 
@@ -386,7 +522,7 @@ static inline void safetyLockoutTemp(uint8_t leg, uint8_t joint, int16_t temp_c1
 
     {
       uint8_t tC = g_meas_temp_C[L][J];
-      bool trip = (tC >= (SERVO_TEMP_LOCKOUT_C10 / 10));
+      bool trip = (tC >= (g_safety_temp_lockout_c10 / 10));
       g_lockout_temp_trip[L][J] = trip;
       g_lockout_temp_c10[L][J] = tC * 10; // still store in c10 for lockout logic
     }
@@ -398,6 +534,23 @@ static inline void safetyLockoutTemp(uint8_t leg, uint8_t joint, int16_t temp_c1
     for (uint8_t J = 0; J < LEG_SERVOS; ++J)
 
     {
+      setServoTorqueNow(L, J, false);
+    }
+  }
+}
+
+// Collision lockout helper: enters LOCKOUT, disables enable, torques off all servos
+static inline void safetyLockoutCollision(uint8_t legA, uint8_t legB) {
+  (void)legA; (void)legB; // reserved for future reporting
+  if (g_lockout) return; // already locked out
+  g_lockout = true;
+  g_enabled = false;
+  g_last_err = E_LOCKOUT;
+  g_mode = MODE_LOCKOUT;
+  g_lockout_causes |= LOCKOUT_CAUSE_COLLISION;
+  // Immediately torque off all servos
+  for (uint8_t L = 0; L < NUM_LEGS; ++L) {
+    for (uint8_t J = 0; J < LEG_SERVOS; ++J) {
       setServoTorqueNow(L, J, false);
     }
   }
@@ -471,8 +624,22 @@ static void servoBusesInit(uint32_t baud = Robot::SERVO_BAUD_DEFAULT);
 // Morphology offsets available as Robot::COXA_OFFSET (see robot_config.h)
 
 // Mode setters (exposed so command handler can change modes)
-void modeSetTest() { g_mode = MODE_TEST; }
-void modeSetIdle() { g_mode = MODE_IDLE; }
+void modeSetTest() {
+  g_mode = MODE_TEST;
+}
+void modeSetIdle() {
+  g_mode = MODE_IDLE;
+}
+
+// Apply a new loop frequency from config or runtime request.
+// Adjusts loop timer and mirrors into g_config_loop_hz for STATUS/reporting.
+void configApplyLoopHz(uint16_t hz) {
+  if (hz < 30) hz = 30;          // enforce a safe minimum to avoid overrun storms
+  if (hz > 500) hz = 500;        // conservative upper bound for Teensy 4.1 + IO
+  g_loop_hz = hz;
+  g_config_loop_hz = hz;
+  g_loopTimer.SetFrequency(g_loop_hz);
+}
 
 int16_t readServoPosCdSync(uint8_t leg, uint8_t joint) {
   if (leg >= NUM_LEGS || joint >= LEG_SERVOS) return -1;
@@ -507,6 +674,12 @@ void setup() {
       g_last_sent_cd[L][J] = g_home_cd[L][J];
     }
   }
+  // Initialize foot estimates from home positions to avoid false startup collisions
+  updateFootBodyEstimates();
+  for (uint8_t L = 0; L < NUM_LEGS; ++L) {
+    g_foot_target_x_mm[L] = g_foot_body_x_mm[L];
+    g_foot_target_z_mm[L] = g_foot_body_z_mm[L];
+  }
 
   buffersInit();
   servoBusesInit();
@@ -519,10 +692,8 @@ void setup() {
 static void servoBusesInit(uint32_t baud) {
   (void)baud;
   for (uint8_t i = 0; i < NUM_LEGS; ++i)
-
   {
     if (SERVO_BUS[i])
-
     {
       // Initialize underlying HardwareSerial and half-duplex control pins
       SERVO_BUS[i]->begin(Robot::SERVO_BAUD_DEFAULT);
@@ -590,14 +761,14 @@ static void loopTick() {
       phase_start_ms = test_last_ms;
     }
 
-  // determine step progression with single overlap window at end-of-phase
-  // overlap_pct is defined as percent of TOTAL CYCLE; per transition window = r * PHASE_MS
-  uint32_t elapsed = now - phase_start_ms;
-  uint32_t overlap_ms = (uint32_t)(g_test_overlap_pct * 0.01f * (float)PHASE_MS);
-  if (overlap_ms > PHASE_MS) overlap_ms = PHASE_MS; // cap to phase length
-  uint32_t active_ms = PHASE_MS - overlap_ms; // active swing progression runs from 0..active_ms
-  float t_active = (elapsed >= active_ms) ? 1.0f : ((active_ms > 0) ? ((float)elapsed / (float)active_ms) : 0.0f);
-  float step_offset = 2.0f * STEP_Z * t_active;
+    // determine step progression with single overlap window at end-of-phase
+    // overlap_pct is defined as percent of TOTAL CYCLE; per transition window = r * PHASE_MS
+    uint32_t elapsed = now - phase_start_ms;
+    uint32_t overlap_ms = (uint32_t)(g_test_overlap_pct * 0.01f * (float)PHASE_MS);
+    if (overlap_ms > PHASE_MS) overlap_ms = PHASE_MS; // cap to phase length
+    uint32_t active_ms = PHASE_MS - overlap_ms; // active swing progression runs from 0..active_ms
+    float t_active = (elapsed >= active_ms) ? 1.0f : ((active_ms > 0) ? ((float)elapsed / (float)active_ms) : 0.0f);
+    float step_offset = 2.0f * STEP_Z * t_active;
 
     // Set foot targets for each leg
     // removed unused temp_out_cd and ik_ok_all
@@ -626,27 +797,13 @@ static void loopTick() {
         y = BASE_Y; // always on ground in stance
       }
 
-      // --- Apply 45° rotation for corner legs in X/Z plane ---
-      // Canonical leg order: 0:LF, 1:LM, 2:LR, 3:RF, 4:RM, 5:RR
-      // removed unused x_rot/z_rot
-      // if (L == LEG_RF || L == LEG_LR)
-      // {
-      //   // Left corners: rotate +45° in X/Z
-      //   float c = 0.70710678f, s = 0.70710678f; // cos(45°), sin(45°)
-      //   float len = BASE_X - c * BASE_X;
-      //   xprime = BASE_X - c * len;
-      //   zprime = s * len;
-      //   zprime += s * z;
-      //   xprime += -c * z;
-      // } else if (false || L == LEG_LF || L == LEG_RR) {
       switch (L)
       {
-
         case LEG_RR:
         case LEG_LR:  // good
           // Left corners: rotate -45° in X/Z
           {
-            float c = 0.70710678f, s = -0.70710678f; // cos(45°), -sin(45°)
+            float c = 0.70710678f; // cos(45°)
             xprime = -c * z + (c + 0.5f) * g_test_base_x_mm;
             zprime =  c * z + 0.5f       * g_test_base_x_mm;
           }
@@ -655,35 +812,25 @@ static void loopTick() {
         case LEG_RF:
           // Right corners: rotate +45° in X/Z
           {
-            float c = 0.70710678f, s = 0.70710678f; // cos(45°), sin(45°)
+            float c = 0.70710678f; // cos(45°)
             xprime =  c * z + (c + 0.5f) * g_test_base_x_mm;
             zprime =  c * z - 0.5f       * g_test_base_x_mm;
           }
           break;
-      default:
-        // Middle legs: no rotation
-        xprime = x;
-        zprime = z;
-        break;
-      }
-      //if (L == LEG_LF || L == LEG_RR) {
+        default:
 
-      //   // Right corners: rotate -45° in X/Z
-      //   float c = 0.70710678f, s = -0.70710678f; // cos(45°), -sin(45°)
-      //   if (L == LEG_LF)
-      //   {
-      //     Serial << _FLOAT(x,4) << F(",") << _FLOAT(y,4) << F(",") << _FLOAT(z,4) << F(",");
-      //   }
-      //   xprime = c * z + (c + 0.5) * BASE_X;
-      //   zprime = c * z - 0.5 * BASE_X;
-      //   if (L == LEG_LF)
-      //   {
-      //     Serial << _FLOAT(xprime,4) << F(",") << _FLOAT(y,4) << F(",") << _FLOAT(zprime,4) << F("\n");
-      //   }
-      // }
+          // Middle legs: no rotation
+          xprime = x;
+          zprime = z;
+          break;
+      }
 
       // Compute IK for this leg
       int16_t out_cd[3] = {0};
+
+      // Update last foot targets (for safety keep-out)
+      g_foot_target_x_mm[L] = xprime;
+      g_foot_target_z_mm[L] = zprime;
       bool ik_ok = calculateIK(L, xprime, y, zprime, out_cd);
       if (ik_ok)
       {
@@ -708,9 +855,9 @@ static void loopTick() {
       } else {
         // message about IK failure
         Serial.print(F("[TRIGAIT] IK FAIL leg=")); Serial.print((int)L);
-        Serial.print(F(" x=")); Serial.print(xprime,1);
-        Serial.print(F(" y=")); Serial.print(y,1);
-        Serial.println(F(" z=")); Serial.print(zprime,1);
+        Serial.print(F(" x=")); Serial.print(xprime, 1);
+        Serial.print(F(" y=")); Serial.print(y, 1);
+        Serial.println(F(" z=")); Serial.print(zprime, 1);
       }
       // IK and diagnostics
       // Serial.print(F("[TRIGAIT] phase=")); Serial.print((int)test_phase);
@@ -769,7 +916,6 @@ static void loopTick() {
     elapsedMicros send_us = 0;
 #endif
     if (g_enabled)
-
     {
       // TODO(perf): Optimize servo command send path. Current measurements suggest ~1.3 ms per command in some cases.
       //  - Investigate per-call overhead in lx16a bus write and serial driver.
@@ -806,7 +952,6 @@ static void loopTick() {
       // Compute per-tick delta clamp in centidegrees from deg/s and current loop rate
       int32_t max_delta_cd = 0;
       if (g_loop_hz > 0 && g_rate_limit_cdeg_per_s > 0)
-
       {
         uint32_t cd_per_tick = (uint32_t)g_rate_limit_cdeg_per_s / (uint32_t)g_loop_hz;
         if (cd_per_tick < 1u) cd_per_tick = 1u; // at least 1 cd/tick
@@ -821,26 +966,25 @@ static void loopTick() {
         if (!legEnabled(leg)) continue; // per-leg gating
 
         for (uint8_t j = 0; j < LEG_SERVOS; ++j)
-
         {
           if (!jointEnabled(leg, j)) continue; // per-joint gating
 
           if (servoIsOOS(leg, j)) continue; // skip OOS servos
 
           //if (j == 0) g_bus[leg].debug(TRNG_DEFAULT_FREQUENCY_MINIMUM);
-          // 1) Soft-limit clamp (absolute cd bounds from config)
+          // 1) Soft-limit clamp (absolute cd bounds from config) — gated by safety toggle
           int32_t target_cd = g_cmd_cd[leg][j];
-          int16_t min_cd = g_limit_min_cd[leg][j];
-          int16_t max_cd = g_limit_max_cd[leg][j];
-          if (target_cd < min_cd) target_cd = min_cd;
-
-          if (target_cd > max_cd) target_cd = max_cd;
+          if (g_safety_soft_limits_enabled) {
+            int16_t min_cd = g_limit_min_cd[leg][j];
+            int16_t max_cd = g_limit_max_cd[leg][j];
+            if (target_cd < min_cd) target_cd = min_cd;
+            if (target_cd > max_cd) target_cd = max_cd;
+          }
 
           // 2) Rate limit per tick around last sent value
           int32_t prev_cd = g_last_sent_cd[leg][j];
           int32_t delta = target_cd - prev_cd;
           if (max_delta_cd > 0)
-
           {
             if (delta > max_delta_cd) delta = max_delta_cd;
 
@@ -850,7 +994,8 @@ static void loopTick() {
           int16_t out_cd = (int16_t)(prev_cd + delta);
           g_last_sent_cd[leg][j] = out_cd;
           //Serial << "<" << leg << "," << j << "> " << out_cd << " -> " << target_cd << " (" << move_time_ms << " ms)\r\n";
-          busMoveTimeWrite(leg, j, target_cd, 0 ); //move_time_ms);
+          g_servo[leg][j]->move_time(out_cd, 0);
+          //busMoveTimeWrite(leg, j, target_cd, 0 ); //move_time_ms);
           //if (j == 0) g_bus[leg].debug(false);
         }
       }
@@ -913,28 +1058,82 @@ static void loopTick() {
           }
         }
       }
+
+      // Print FK for the leg served in this round-robin tick
+      {
+        int16_t c = g_meas_pos_cd[leg][0] ? g_meas_pos_cd[leg][0] : g_last_sent_cd[leg][0];
+        int16_t f = g_meas_pos_cd[leg][1] ? g_meas_pos_cd[leg][1] : g_last_sent_cd[leg][1];
+        int16_t t = g_meas_pos_cd[leg][2] ? g_meas_pos_cd[leg][2] : g_last_sent_cd[leg][2];
+        float bx, by, bz, lx, ly, lz;
+        if (fk_leg_both(leg, c, f, t, &bx, &by, &bz, &lx, &ly, &lz)) {
+          if (Serial && ((g_fk_stream_mask >> leg) & 1u)) {
+            const char* legNames[6]  = {"LF", "LM", "LR", "RF", "RM", "RR"};
+            Serial.print(F("RR_FK "));
+            Serial.print(legNames[leg]);
+            Serial.print(F(" x=")); Serial.print(bx, 1);
+            Serial.print(F(" y=")); Serial.print(by, 1);
+            Serial.print(F(" z=")); Serial.print(bz, 1);
+            Serial.print(F(" lx=")); Serial.print(lx, 1);
+            Serial.print(F(" ly=")); Serial.print(ly, 1);
+            Serial.print(F(" lz=")); Serial.print(lz, 1);
+            Serial.print(F(" c=")); Serial.print((int)c);
+            Serial.print(F(" f=")); Serial.print((int)f);
+            Serial.print(F(" t=")); Serial.print((int)t);
+            Serial.print(F("\r\n"));
+          }
+        }
+      }
     }
 #if MARS_TIMING_PROBES
     g_probe_fb_us = (uint16_t)(micros() - fb_start_us);
 #endif
   }
 
+  // Update BODY-frame foot position estimates before collision checks
+  updateFootBodyEstimates();
+
+  // Safety check: keep-out collision between feet in X/Z plane (applies in all modes)
+  if (!g_lockout)
+  {
+    float clr = g_safety_clearance_mm;
+    if (g_safety_collision_enabled && clr > 0.0f) {
+      float r2 = clr * clr;
+      for (uint8_t i = 0; i < NUM_LEGS && !g_lockout; ++i) {
+        for (uint8_t j = (uint8_t)(i + 1); j < NUM_LEGS; ++j) {
+          float dx = g_foot_body_x_mm[i] - g_foot_body_x_mm[j];
+          float dz = g_foot_body_z_mm[i] - g_foot_body_z_mm[j];
+          float d2 = dx * dx + dz * dz;
+          if (d2 < r2) {
+            if (Serial) {
+              const char* legNames[6]  = {"LF", "LM", "LR", "RF", "RM", "RR"};
+              Serial.print(F("COLLISION "));
+              Serial.print(legNames[i]); Serial.print(F("-")); Serial.print(legNames[j]);
+              Serial.print(F(" d_mm=")); Serial.print(sqrtf(d2), 1);
+              Serial.print(F(" < clr=")); Serial.print(clr, 1);
+              Serial.print(F("\r\n"));
+            }
+            bool coll_overridden = (g_override_mask & LOCKOUT_CAUSE_COLLISION) != 0;
+            if (!coll_overridden) {
+              safetyLockoutCollision(i, j);
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
   // Safety check: lockout on over-temperature (unless TEMP cause is overridden)
   if (!g_lockout)
-
   {
     bool temp_overridden = (g_override_mask & LOCKOUT_CAUSE_TEMP) != 0;
     if (!temp_overridden)
-
     {
       for (uint8_t L = 0; L < NUM_LEGS && !g_lockout; ++L)
-
       {
         for (uint8_t J = 0; J < LEG_SERVOS; ++J)
-
         {
-          if (g_meas_temp_C[L][J] >= (SERVO_TEMP_LOCKOUT_C10 / 10))
-
+          if (g_meas_temp_C[L][J] >= (g_safety_temp_lockout_c10 / 10))
           {
             safetyLockoutTemp(L, J, g_meas_temp_C[L][J] * 10);
             break;
@@ -948,18 +1147,15 @@ static void loopTick() {
   uint32_t period_us = (g_loop_hz > 0) ? (1000000UL / (uint32_t)g_loop_hz) : 0;
   uint32_t tick_elapsed_us = micros() - tick_start_us;
   if (period_us > 0 && tick_elapsed_us > period_us)
-
   {
     g_last_err = E_OVERRUN;
     ++g_overrun_count;
     // Count consecutive overruns; step down by 1 Hz only after 100 misses
     if (++g_overrun_since_adjust >= 100)
-
     {
       g_overrun_since_adjust = 0;
       g_ok_since_adjust = 0;
       if (g_loop_hz > 30)
-
       {
         --g_loop_hz;
         g_loopTimer.SetFrequency(g_loop_hz);
@@ -968,7 +1164,6 @@ static void loopTick() {
   } else {
     // On-time tick: count consecutive OKs; step up by 1 Hz after 100 OKs (toward configured target)
     if (++g_ok_since_adjust >= 100)
-
     {
       g_ok_since_adjust = 0;
       g_overrun_since_adjust = 0;
@@ -976,7 +1171,6 @@ static void loopTick() {
       if (ceiling > 500) ceiling = 500;
 
       if (g_loop_hz < ceiling)
-
       {
         ++g_loop_hz;
         g_loopTimer.SetFrequency(g_loop_hz);
