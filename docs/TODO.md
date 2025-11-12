@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-12 (post 0.1.107 position validity fix)
+Last updated: 2025-11-12 (post 0.1.110 STATUS trim)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -37,6 +37,8 @@ Conventions
   - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
 
 ## Completed
+ - [x] STATUS [TUCK] debug removal (2025-11-12)
+  - Removed temporary STATUS `[TUCK]` debug section (active/masks/params and tibia meas/eff). Keeps STATUS leaner and reduces print cost; TUCK controller remains unchanged. (FW 0.1.110)
  - [x] Position validity & TUCK tibia convergence (2025-11-12)
   - Added `g_meas_pos_valid` flags so a measured 0 cd is treated as valid instead of falling back to last-sent (which appeared as 24000). Restored TUCK tibia target to 0 cd; prevents sequencing stall.
  - [x] Logging rotation & size cap (2025-11-10)

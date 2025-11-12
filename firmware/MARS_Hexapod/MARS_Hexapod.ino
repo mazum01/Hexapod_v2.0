@@ -3,6 +3,7 @@
   Hexapod v2.0 Controller (Teensy 4.1)
 
   Change log (top N entries)
+  - 2025-11-12: STATUS trim: Removed temporary [TUCK] debug section from STATUS to reduce print cost and keep output focused. No behavior changes to TUCK controller. FW 0.1.110. (author: copilot)
   - 2025-11-12: TUCK mirror: Right-side legs now mirror femur/tibia targets (coxa unchanged) for symmetric tuck; added STATUS [TUCK] debug section. FW 0.1.108. (author: copilot)
   - 2025-11-12: Feedback fix: Treat 0 cd as a valid measurement using explicit validity flags; prevents fallback to last-sent (e.g., 24000) that stalled TUCK tibia convergence. Restored TUCK tibia target to 0 cd. FW 0.1.107. (author: copilot)
   - 2025-11-12: TUCK tweak: Set coxa target to 12000 cd (logical center) during TUCK; femur=19000, tibia=0 unchanged. FW 0.1.106. (author: copilot)
@@ -138,7 +139,7 @@
 // Firmware version (surfaced in splash/STATUS and logs)
 // -----------------------------------------------------------------------------
 #ifndef FW_VERSION
-#define FW_VERSION "0.1.109"
+#define FW_VERSION "0.1.110"
 #endif
 
 // -----------------------------------------------------------------------------

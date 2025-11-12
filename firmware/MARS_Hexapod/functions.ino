@@ -927,36 +927,6 @@ void printSTATUS()
     }
     Serial.print(F("\r\n"));
   }
-  // [TUCK] — debug (temporary)
-  Serial.print(F("[TUCK]\r\n"));
-  {
-    Serial.print(F("  active=")); Serial.print(g_tuck_active ? 1 : 0); Serial.print(F(" mask=0x")); Serial.print((unsigned int)g_tuck_mask, HEX);
-    Serial.print(F(" done_mask=0x")); Serial.print((unsigned int)g_tuck_done_mask, HEX); Serial.print(F("\r\n"));
-    Serial.print(F("  params tibia=")); Serial.print((int)g_tuck_tibia_cd);
-    Serial.print(F(" femur=")); Serial.print((int)g_tuck_femur_cd);
-    Serial.print(F(" coxa=")); Serial.print((int)g_tuck_coxa_cd);
-    Serial.print(F(" tol_tibia=")); Serial.print((int)g_tuck_tol_tibia_cd);
-    Serial.print(F(" tol_other=")); Serial.print((int)g_tuck_tol_other_cd);
-    Serial.print(F(" timeout_ms=")); Serial.print((int)g_tuck_timeout_ms); Serial.print(F("\r\n"));
-    Serial.print(F("  tibia_meas_cd="));
-    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
-    for (int i = 0; i < 6; ++i) {
-      if (i) Serial.print(F(","));
-      Serial.print(names[i]); Serial.print(F(":"));
-      int16_t m = g_meas_pos_cd[i][2];
-      Serial.print((int)m);
-    }
-    Serial.print(F("\r\n"));
-    Serial.print(F("  tibia_eff_cd="));
-    for (int i = 0; i < 6; ++i) {
-      if (i) Serial.print(F(","));
-      Serial.print(names[i]); Serial.print(F(":"));
-      int16_t m = g_meas_pos_cd[i][2];
-      int16_t eff = g_meas_pos_valid[i][2] ? m : g_last_sent_cd[i][2];
-      Serial.print((int)eff);
-    }
-    Serial.print(F("\r\n"));
-  }
 }
 
 // Minimal HELP — authoritative list here to avoid duplication.
