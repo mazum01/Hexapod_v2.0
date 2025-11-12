@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-08 (post 0.1.72 helper restore)
+Last updated: 2025-11-12 (post 0.1.107 position validity fix)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -15,24 +15,42 @@ Conventions
 - [ ] Stabilize loop at 166 Hz
   - Tune and verify adaptive hysteresis to maintain 166 Hz under typical load; measure with timing probes; ensure no sustained overruns.
  
-- [ ] CSV logging to SD
-  - Implement buffered CSV logging with modes (read/all/off), rate_hz; file naming logs/YYYYMMDD_hhmmss.csv; minimal schema.
-- [ ] Expand config keys
-  - Add logging.* (enabled, rate_hz, mode), additional test.trigait.* and joint_limits.* parsing.
-- [ ] Tripod test mode
-  - Implement simple tripod gait (tri-gait) with configurable step height/length, cycle time, duty factor.
-  - [x] Expose runtime tuning via serial: TEST CYCLE/HEIGHT/BASEX/STEPLEN; reflect in STATUS. (2025-11-02)
+ - [x] CSV logging to SD (2025-11-09 → 2025-11-10)
+  - Phase 1 + FULL mode implemented; size rotation; tail/clear; leg-aggregated rows; per-servo OOS; settings persistence (RATE/MODE/HEADER/ROTATE/MAXKB) excluding enabled. Remaining future (deferred): Bresenham sampling, column mask/filter, compression/binary format.
+ - [~] Expand config keys
+  - Added logging.rotate and logging.max_kb. Pending: additional test.trigait.* and joint_limits.* keys.
+ - [x] Tripod test mode (2025-11-09)
+  - Implemented deterministic tripod gait with runtime tuning (CYCLE/HEIGHT/BASEX/STEPLEN/LIFT/OVERLAP) and persistence of overlap pct; STATUS reflects parameters.
  
-- [ ] Configurable move_time
-  - Expose move_time_ms via /config.txt and echo in STATUS; default derived from loop rate.
-  - Add compact indicator of which leg/joint was read this tick (e.g., rr_meas=LF/TIBIA).
+ - [x] Configurable move_time (2025-11-09)
+  - Implemented via dynamic derivation from loop rate each tick; future persistence optional.
 - [ ] STATUS readability
-  - Reformat STATUS output for better readability (grouped sections, aligned grids, compact summary lines).
+  - [x] Reformat STATUS output for better readability (grouped sections, aligned grids, compact summary lines). (2025-11-12 — section headers like HELP; one key per line)
+
+  - [~] Complete servo home offset update
+    - [x] Wire hardware angle offset I/O via lx16a-servo helpers (remove RAM stubs; Teensy uses real device I/O; host uses fake include).
+    - [ ] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
+    - [x] SAVEHOME cd-only clear→read→compute flow; persist both home_cd.* and offset_cd.* (0.1.98).
+    - [ ] Reboot validation: ensure startup loads offset_cd (future key parser update) or recomputes g_offset_cd from hardware so STATUS matches after power cycle.
 
   - Re-implemented multi-line grouped STATUS (system/config, test, safety, enables, offsets, oos, fk mask). (2025-11-08)
   - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
 
 ## Completed
+ - [x] Position validity & TUCK tibia convergence (2025-11-12)
+  - Added `g_meas_pos_valid` flags so a measured 0 cd is treated as valid instead of falling back to last-sent (which appeared as 24000). Restored TUCK tibia target to 0 cd; prevents sequencing stall.
+ - [x] Logging rotation & size cap (2025-11-10)
+  - Implemented size-based rotation with `LOG ROTATE` and `LOG MAXKB` (KB units). 1GB hard clamp; default max 10MB; sequence-based filenames and status reporting.
+ - [x] Leg-aggregated CSV rows (2025-11-10)
+  - Changed logging schema to emit one line per leg (3 servos aggregated) reducing rows (compact: 1→1 unchanged semantics; full: 18→6). Updated headers, CHANGELOG, FW_VERSION to 0.1.88.
+ - [x] Tripod test mode (2025-11-09)
+  - Deterministic tripod gait with runtime tuning (CYCLE/HEIGHT/BASEX/STEPLEN/LIFT/OVERLAP) and persistence of overlap pct; STATUS reflects parameters.
+ - [x] Move time derived from loop period (2025-11-09)
+  - Per-tick move_time computed from current loop_hz; eliminates static constant and ensures sync with adaptive loop rate.
+ - [x] Unify SD guard macros (2025-11-09)
+   - Standardized feature guards to `#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD` across sources; avoids ambiguous truthiness and keeps guards consistent.
+ - [x] Centralize OK responses (2025-11-09)
+   - Moved OK printing to a centralized dispatcher epilogue; removed per-handler printOK() calls; handlers only print ERR on failure.
 - [x] Echo processed command lines (2025-11-08)
   - After each command is handled, the original line is reflected back as `> <line>` to aid logging/CLI.
 - [x] Keep docs in sync with commands (2025-11-04)
