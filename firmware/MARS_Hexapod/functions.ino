@@ -9,8 +9,13 @@
 #include "command_helpers.h"
 #include "command_types.h"
 #include "robot_config.h"
+// Servo library header provides hardware angle offset helpers
+#include <lx16a-servo.h>
 // For rebootNow() register access (ARM SCB AIRCR)
 #include <stdint.h>
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+#include <SD.h>
+#endif
 
 // -----------------------------------------------------------------------------
 // Forward Kinematics (FK) implementations (body + leg frame)
@@ -50,9 +55,23 @@ extern int16_t g_offset_cd[6][3];
 extern uint16_t g_meas_vin_mV[6][3]; // millivolts
 extern uint8_t  g_meas_temp_C[6][3]; // temperature in whole deg C
 extern int16_t  g_meas_pos_cd[6][3]; // 0..24000 centidegrees
+extern volatile uint8_t g_meas_pos_valid[6][3];
+extern volatile uint8_t g_tuck_active;
+extern volatile uint8_t g_tuck_mask;
+extern volatile uint8_t g_tuck_done_mask;
+extern volatile int16_t g_last_sent_cd[6][3];
+extern volatile int16_t  g_tuck_tibia_cd;
+extern volatile int16_t  g_tuck_femur_cd;
+extern volatile int16_t  g_tuck_coxa_cd;
+extern volatile int16_t  g_tuck_tol_tibia_cd;
+extern volatile int16_t  g_tuck_tol_other_cd;
+extern volatile uint16_t g_tuck_timeout_ms;
 // Globals from main sketch
 extern volatile bool g_enabled;
 extern volatile bool g_lockout;
+extern volatile uint16_t g_lockout_causes;
+extern volatile uint16_t g_override_mask;
+extern volatile uint64_t g_uptime_ms64;
 extern volatile uint8_t g_last_err;
 extern volatile uint32_t g_overrun_count;
 extern volatile uint8_t g_rr_index;
@@ -61,6 +80,16 @@ extern volatile int16_t g_limit_min_cd[6][3];
 extern volatile int16_t g_limit_max_cd[6][3];
 extern volatile uint16_t g_rate_limit_cdeg_per_s;
 extern void setServoId(uint8_t leg, uint8_t joint, uint8_t id);
+
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+// Logging globals (defined in MARS_Hexapod.ino)
+extern volatile bool     g_log_enabled;
+extern volatile uint16_t g_log_rate_hz;
+extern volatile uint8_t  g_log_sample_div;
+extern volatile uint32_t g_log_tick_counter;
+extern volatile uint8_t  g_log_mode;
+extern volatile bool     g_log_header;
+#endif
 
   // Forward declaration for loop Hz apply helper in main sketch
 void configApplyLoopHz(uint16_t hz);
@@ -232,17 +261,29 @@ extern void processCmdI(const char* line,int s,int len);
 extern void processCmdT(const char* line,int s,int len);
 extern void processCmdTEST(const char* line,int s,int len);
 extern void processCmdSTAND(const char* line,int s,int len);
+extern void processCmdTUCK(const char* line,int s,int len);
 extern void processCmdSAFETY(const char* line,int s,int len);
 extern void processCmdHOME(const char* line,int s,int len);
 extern void processCmdSAVEHOME(const char* line,int s,int len);
 extern void processCmdOFFSET(const char* line,int s,int len);
+extern void processCmdLOG(const char* line,int s,int len);
 
 extern char    lineBuf[160];
 extern uint8_t lineLen;
+// Centralized OK/ERR printing lives below with unified dispatch.
 
-// -----------------------------------------------------------------------------
+void printOK() { Serial.print(F("OK")); }
+
+void printERR(uint8_t code, const char* msg) {
+  g_last_err = code;
+  Serial.print(F("ERR "));
+  Serial.print((unsigned int)code);
+  Serial.print(F(" "));
+  if (msg) Serial.print(msg);
+}
+
 // handleLine — tokenizes first word and dispatches via CommandType enum.
-// -----------------------------------------------------------------------------
+// Centralizes OK emission (printed once per successful command) and defers reboot.
 void handleLine(const char* line) {
   if (!line) return;
   int len = (int)strlen(line);
@@ -255,11 +296,13 @@ void handleLine(const char* line) {
   memcpy(cmd, line + ts, n); cmd[n] = 0;
   for (int i = 0; cmd[i]; ++i) cmd[i] = (char)toupper(cmd[i]);
 
+  g_last_err = 0; // reset before dispatch
+  bool reboot_pending = false;
   CommandType ct = parseCommandType(cmd);
   switch (ct) {
     case CMD_HELP:      processCmdHELP(line, s, len); break;
     case CMD_STATUS:    processCmdSTATUS(line, s, len); break;
-    case CMD_REBOOT:    processCmdREBOOT(line, s, len); break;
+    case CMD_REBOOT:    reboot_pending = true; break; // defer reboot
     case CMD_ENABLE:    processCmdENABLE(line, s, len); break;
     case CMD_DISABLE:   processCmdDISABLE(line, s, len); break;
     case CMD_FK:        processCmdFK(line, s, len); break;
@@ -276,17 +319,27 @@ void handleLine(const char* line) {
     case CMD_T:         processCmdT(line, s, len); break;
     case CMD_TEST:      processCmdTEST(line, s, len); break;
     case CMD_STAND:     processCmdSTAND(line, s, len); break;
+  case CMD_TUCK:      processCmdTUCK(line, s, len); break;
     case CMD_SAFETY:    processCmdSAFETY(line, s, len); break;
     case CMD_HOME:      processCmdHOME(line, s, len); break;
     case CMD_SAVEHOME:  processCmdSAVEHOME(line, s, len); break;
     case CMD_OFFSET:    processCmdOFFSET(line, s, len); break;
+  case CMD_LOG:       processCmdLOG(line, s, len); break;
     default:            printERR(1, "UNKNOWN_CMD"); break;
   }
 
-  // Reflect the processed command back to the host
-  Serial.print(F(" > "));
+  if (g_last_err == 0) { printOK(); }
+
+  // Echo original line (after response for consistency with prior behavior)
+  Serial.print(F(" \u003e "));
   Serial.print(line);
   Serial.print(F("\r\n"));
+
+  if (reboot_pending) {
+    Serial.flush();
+    delay(10);
+    rebootNow();
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -572,6 +625,65 @@ static void configParseKV(char* key, char* val)
     ++g_config_keys_applied;
     return;
   }
+
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+  // --- Logging keys (Phase 1) ---
+  if (!strcmp(key, "logging.enabled"))
+  {
+    long v = atol(val);
+    g_log_enabled = (v != 0);
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "logging.rate_hz"))
+  {
+    long hz = atol(val);
+    if (hz < 1) hz = 1; if (hz > 500) hz = 500; // align with LOG RATE bounds
+    g_log_rate_hz = (uint16_t)hz;
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "logging.mode"))
+  {
+    long m = atol(val);
+    if (m < 0) m = 0; if (m > 1) m = 1; // 0=compact,1=full (full deferred)
+    g_log_mode = (uint8_t)m;
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "logging.header"))
+  {
+    long h = atol(val);
+    g_log_header = (h != 0);
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "logging.rotate"))
+  {
+    long v = atol(val);
+    g_log_rotate = (v != 0);
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "logging.max_kb"))
+  {
+    long kb = atol(val);
+    if (kb < 100) kb = 100; // minimum 100KB
+    long maxKBClamp = 1024L * 1024L; // 1GB in KB
+    if (kb > maxKBClamp) kb = maxKBClamp;
+    g_log_max_bytes = (uint32_t)kb * 1024UL;
+    ++g_config_keys_applied;
+    return;
+  }
+#endif
+
+  // --- TUCK parameters ---
+  if (!strcmp(key, "tuck.tibia_cd")) { long v = atol(val); if (v<0) v=0; if (v>24000) v=24000; g_tuck_tibia_cd = (int16_t)v; ++g_config_keys_applied; return; }
+  if (!strcmp(key, "tuck.femur_cd")) { long v = atol(val); if (v<0) v=0; if (v>24000) v=24000; g_tuck_femur_cd = (int16_t)v; ++g_config_keys_applied; return; }
+  if (!strcmp(key, "tuck.coxa_cd"))  { long v = atol(val); if (v!=12000) v=12000; g_tuck_coxa_cd = (int16_t)v; ++g_config_keys_applied; return; }
+  if (!strcmp(key, "tuck.tol_tibia_cd")) { long v = atol(val); if (v<10) v=10; if (v>5000) v=5000; g_tuck_tol_tibia_cd = (int16_t)v; ++g_config_keys_applied; return; }
+  if (!strcmp(key, "tuck.tol_other_cd")) { long v = atol(val); if (v<10) v=10; if (v>5000) v=5000; g_tuck_tol_other_cd = (int16_t)v; ++g_config_keys_applied; return; }
+  if (!strcmp(key, "tuck.timeout_ms")) { long v = atol(val); if (v<250) v=250; if (v>10000) v=10000; g_tuck_timeout_ms = (uint16_t)v; ++g_config_keys_applied; return; }
 }
 
 // -----------------------------------------------------------------------------
@@ -660,205 +772,191 @@ void configLoad()
 //  - Tokenizer
 //  - OK/ERR/HELP/STATUS printers
 //  - Reboot
-//  - Angle offset read/adjust/write (stubbed with in-memory table)
+//  - Angle offset helpers are provided by lx16a-servo library
 // -----------------------------------------------------------------------------
 
+// Tokenizer used by dispatcher and command handlers
 int nextToken(const char* s, int start, int len, int* tokStart, int* tokLen) {
-  if (!s || start < 0 || len < 0) { if (tokStart) *tokStart = 0; if (tokLen) *tokLen = 0; return 0; }
+  if (!s || start < 0 || len < 0) {
+    if (tokStart) *tokStart = 0;
+    if (tokLen) *tokLen = 0;
+    return 0;
+  }
   int i = start;
-  // Skip leading spaces/tabs
-  while (i < len && (s[i] == ' ' || s[i] == '\t')) ++i;
-  if (i >= len) { if (tokStart) *tokStart = 0; if (tokLen) *tokLen = 0; return len; }
+  while (i < len && (s[i] == ' ' || s[i] == '\t')) ++i; // skip spaces
+  if (i >= len) {
+    if (tokStart) *tokStart = 0;
+    if (tokLen) *tokLen = 0;
+    return len;
+  }
   int j = i;
   while (j < len && s[j] != ' ' && s[j] != '\t') ++j;
-  if (tokStart) *tokStart = i; if (tokLen) *tokLen = (j - i);
+  if (tokStart) *tokStart = i;
+  if (tokLen) *tokLen = (j - i);
   return j;
-}
-
-void printOK() {
-  Serial.print(F("OK"));
-}
-
-void printERR(uint8_t code, const char* msg) {
-  Serial.print(F("ERR "));
-  Serial.print((unsigned int)code);
-  Serial.print(F(" "));
-  if (msg) Serial.print(msg);
 }
 
 void printSTATUS()
 {
   Serial.print(F("STATUS\r\n"));
 
-  // Uptime line (days, hours, minutes, seconds, milliseconds), wrap-safe via 64-bit accumulator
+  // [SYSTEM]
+  Serial.print(F("[SYSTEM]\r\n"));
   {
-    static bool     s_up_inited = false;
-    static uint32_t s_up_prev_ms = 0;
-    static uint64_t s_up_total_ms = 0;
-    uint32_t now_ms = millis();
-    if (!s_up_inited) {
-      s_up_inited = true;
-      s_up_prev_ms = now_ms;
-    }
-    uint32_t delta = now_ms - s_up_prev_ms; // wrap-safe unsigned diff
-    s_up_prev_ms = now_ms;
-    s_up_total_ms += (uint64_t)delta;
-
-    uint64_t ms_total = s_up_total_ms;
+    uint64_t ms_total = g_uptime_ms64;
     uint64_t days  = ms_total / 86400000ULL; ms_total %= 86400000ULL;
     uint64_t hours = ms_total / 3600000ULL;  ms_total %= 3600000ULL;
     uint64_t mins  = ms_total / 60000ULL;    ms_total %= 60000ULL;
     uint64_t secs  = ms_total / 1000ULL;     ms_total %= 1000ULL;
     uint64_t ms    = ms_total;
-
-    Serial.print(F("uptime="));
-    Serial.print((unsigned long)days);  Serial.print(F("d "));
-    Serial.print((unsigned long)hours); Serial.print(F("h "));
-    Serial.print((unsigned long)mins);  Serial.print(F("m "));
-    Serial.print((unsigned long)secs);  Serial.print(F("s "));
+    Serial.print(F("  uptime="));
+    Serial.print((unsigned long)days);  Serial.print(F("d"));
+    Serial.print((unsigned long)hours); Serial.print(F("h"));
+    Serial.print((unsigned long)mins);  Serial.print(F("m"));
+    Serial.print((unsigned long)secs);  Serial.print(F("s"));
     Serial.print((unsigned long)ms);    Serial.print(F("ms\r\n"));
+    Serial.print(F("  enabled=")); Serial.print(g_enabled ? 1 : 0); Serial.print(F("\r\n"));
+    Serial.print(F("  loop_hz=")); Serial.print(g_loop_hz); Serial.print(F("\r\n"));
+    Serial.print(F("  rr_idx=")); Serial.print(g_rr_index); Serial.print(F("\r\n"));
+    Serial.print(F("  overruns=")); Serial.print((unsigned long)g_overrun_count); Serial.print(F("\r\n"));
+    Serial.print(F("  last_err=")); Serial.print((int)g_last_err); Serial.print(F("\r\n"));
+    const char* safety_state = g_lockout ? ((g_lockout_causes & ~g_override_mask) == 0 ? "OVERRIDDEN" : "LOCKOUT") : "OK";
+    Serial.print(F("  safety=")); Serial.print(safety_state);
+    Serial.print(F(" cause=0x")); Serial.print((unsigned int)g_lockout_causes, HEX);
+    Serial.print(F(" override=0x")); Serial.print((unsigned int)g_override_mask, HEX);
+    Serial.print(F("\r\n"));
   }
 
-  Serial.print(F("enabled=")); Serial.print(g_enabled ? 1 : 0); Serial.print(F("\r\n"));
-  Serial.print(F("loop_hz=")); Serial.print(g_loop_hz); Serial.print(F("\r\n"));
-  Serial.print(F("rr_idx=")); Serial.print(g_rr_index); Serial.print(F("\r\n"));
-  Serial.print(F("last_err=")); Serial.print((int)g_last_err); Serial.print(F("\r\n"));
-  Serial.print(F("overruns=")); Serial.print((unsigned long)g_overrun_count); Serial.print(F("\r\n"));
-
-  Serial.print(F("legs="));
-  for (int i = 0; i < 6; ++i)
-
+  // [ENABLES]
+  Serial.print(F("[ENABLES]\r\n"));
   {
-    Serial.print(leg_enabled_mask_get((uint8_t)i) ? 1 : 0);
-  }
-  Serial.print(F("\r\n"));
-
-  Serial.print(F("jmask="));
-  const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
-  for (int i = 0; i < 6; ++i)
-
-  {
-    if (i) Serial.print(F(","));
-
-    Serial.print(names[i]); Serial.print(F(":"));
-    for (int j = 0; j < 3; ++j)
-
-    {
-      Serial.print(joint_enabled_mask_get((uint8_t)i, (uint8_t)j) ? 1 : 0);
+    Serial.print(F("  legs="));
+    for (int i = 0; i < 6; ++i) { Serial.print(leg_enabled_mask_get((uint8_t)i) ? '1' : '0'); }
+    Serial.print(F("\r\n"));
+    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    Serial.print(F("  jmask="));
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(","));
+      Serial.print(names[i]); Serial.print(F(":"));
+      for (int j = 0; j < 3; ++j) Serial.print(joint_enabled_mask_get((uint8_t)i,(uint8_t)j)?1:0);
     }
+    Serial.print(F("\r\n"));
   }
-  Serial.print(F("\r\n"));
 
-  Serial.print(F("vin_V="));
-  for (int i = 0; i < 6; ++i)
-
+  // [TELEMETRY]
+  Serial.print(F("[TELEMETRY]\r\n"));
   {
-    if (i) Serial.print(F(","));
-
-    Serial.print(names[i]); Serial.print(F(":"));
-    for (int j = 0; j < 3; ++j)
-
-    {
-      if (j) Serial.print(F("/"));
-
-      uint16_t mV = g_meas_vin_mV[i][j];
-      Serial.print(mV / 1000);
-      Serial.print(F("."));
-      Serial.print((mV % 1000) / 100);
+    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    Serial.print(F("  vin_V="));
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(","));
+      Serial.print(names[i]); Serial.print(F(":"));
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        uint16_t mV = g_meas_vin_mV[i][j];
+        Serial.print(mV / 1000); Serial.print(F(".")); Serial.print((mV % 1000) / 100);
+      }
     }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  temp_C="));
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(","));
+      Serial.print(names[i]); Serial.print(F(":"));
+      for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print((int)g_meas_temp_C[i][j]); }
+    }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  pos_cd="));
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(","));
+      Serial.print(names[i]); Serial.print(F(":"));
+      for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print((int)g_meas_pos_cd[i][j]); }
+    }
+    Serial.print(F("\r\n"));
   }
-  Serial.print(F("\r\n"));
 
-  Serial.print(F("temp="));
-  for (int i = 0; i < 6; ++i)
-
+  // [HOME]
+  Serial.print(F("[HOME]\r\n"));
   {
-    if (i) Serial.print(F(","));
-
-    Serial.print(names[i]); Serial.print(F(":"));
-    for (int j = 0; j < 3; ++j)
-
-    {
-      if (j) Serial.print(F("/"));
-
-      Serial.print((int)g_meas_temp_C[i][j]);
+    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    Serial.print(F("  home_cd="));
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(",")); Serial.print(names[i]); Serial.print(F(":"));
+      for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print((int)g_home_cd[i][j]); }
     }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  offset_cd="));
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(",")); Serial.print(names[i]); Serial.print(F(":"));
+      for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print((int)g_offset_cd[i][j]); }
+    }
+    Serial.print(F("\r\n"));
   }
-  Serial.print(F("\r\n"));
 
-  Serial.print(F("pos_cd="));
-  for (int i = 0; i < 6; ++i)
-
+  // [TEST]
+  Serial.print(F("[TEST]\r\n"));
   {
-    if (i) Serial.print(F(","));
-
-    Serial.print(names[i]); Serial.print(F(":"));
-    for (int j = 0; j < 3; ++j)
-
-    {
-      if (j) Serial.print(F("/"));
-
-      Serial.print((int)g_meas_pos_cd[i][j]);
-    }
+    Serial.print(F("  cycle_ms=")); Serial.print((unsigned int)g_test_cycle_ms); Serial.print(F("\r\n"));
+    Serial.print(F("  base_x="));  Serial.print((int)lroundf(g_test_base_x_mm)); Serial.print(F("\r\n"));
+    Serial.print(F("  base_y="));  Serial.print((int)lroundf(g_test_base_y_mm)); Serial.print(F("\r\n"));
+    Serial.print(F("  step_z="));  Serial.print((int)lroundf(g_test_step_len_mm)); Serial.print(F("\r\n"));
+    Serial.print(F("  lift_y="));  Serial.print((int)lroundf(g_test_lift_y_mm)); Serial.print(F("\r\n"));
+    Serial.print(F("  overlap_pct=")); Serial.print((int)lroundf(g_test_overlap_pct)); Serial.print(F("\r\n"));
   }
-  Serial.print(F("\r\n"));
 
-  // Home positions (centidegrees)
-  Serial.print(F("home_cd="));
-  for (int i = 0; i < 6; ++i)
-
-  {
-    if (i) Serial.print(F(","));
-
-    Serial.print(names[i]); Serial.print(F(":"));
-    for (int j = 0; j < 3; ++j)
-
-    {
-      if (j) Serial.print(F("/"));
-
-      Serial.print((int)g_home_cd[i][j]);
-    }
-  }
-  Serial.print(F("\r\n"));
-
-  // TEST gait parameters (runtime-adjustable)
-  Serial.print(F("test="));
-  Serial.print(F("cycle_ms=")); Serial.print((unsigned int)g_test_cycle_ms);
-  Serial.print(F(" base_x="));  Serial.print((int)lroundf(g_test_base_x_mm));
-  Serial.print(F(" base_y="));  Serial.print((int)lroundf(g_test_base_y_mm));
-  Serial.print(F(" step_z="));  Serial.print((int)lroundf(g_test_step_len_mm));
-  Serial.print(F(" lift_y="));  Serial.print((int)lroundf(g_test_lift_y_mm));
-  Serial.print(F(" overlap_pct=")); Serial.print((int)lroundf(g_test_overlap_pct));
-  Serial.print(F("\r\n"));
-
-  // Optional timing probes (microseconds)
+  // [TIMING]
 #if MARS_TIMING_PROBES
-  Serial.print(F("tprobe_us="));
-  Serial.print((unsigned int)g_probe_serial_us);
-  Serial.print(F("/"));
-  Serial.print((unsigned int)g_probe_send_us);
-  Serial.print(F("/"));
-  Serial.print((unsigned int)g_probe_fb_us);
-  Serial.print(F("/"));
-  Serial.print((unsigned int)g_probe_tick_us);
-  Serial.print(F("\r\n"));
+  Serial.print(F("[TIMING]\r\n"));
+  {
+    Serial.print(F("  serial_us=")); Serial.print((unsigned int)g_probe_serial_us); Serial.print(F("\r\n"));
+    Serial.print(F("  send_us="));   Serial.print((unsigned int)g_probe_send_us);   Serial.print(F("\r\n"));
+    Serial.print(F("  fb_us="));     Serial.print((unsigned int)g_probe_fb_us);     Serial.print(F("\r\n"));
+    Serial.print(F("  log_us="));    Serial.print((unsigned int)g_probe_log_us);    Serial.print(F("\r\n"));
+    Serial.print(F("  tick_us="));   Serial.print((unsigned int)g_probe_tick_us);   Serial.print(F("\r\n"));
+  }
 #endif
 
-  Serial.print(F("oos="));
-  for (int i = 0; i < 6; ++i)
-
+  // [OOS]
+  Serial.print(F("[OOS]\r\n"));
   {
-    if (i) Serial.print(F(","));
-
-    Serial.print(names[i]); Serial.print(F(":"));
-    for (int j = 0; j < 3; ++j)
-
-    {
-      int idx = i * 3 + j;
-      Serial.print(((g_servo_oos_mask >> idx) & 1u) ? 1 : 0);
+    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    Serial.print(F("  mask="));
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(","));
+      Serial.print(names[i]); Serial.print(F(":"));
+      for (int j = 0; j < 3; ++j) { int idx = i*3+j; Serial.print(((g_servo_oos_mask>>idx)&1u)?1:0); }
     }
+    Serial.print(F("\r\n"));
   }
-  Serial.print(F("\r\n"));
+  // [TUCK] — debug (temporary)
+  Serial.print(F("[TUCK]\r\n"));
+  {
+    Serial.print(F("  active=")); Serial.print(g_tuck_active ? 1 : 0); Serial.print(F(" mask=0x")); Serial.print((unsigned int)g_tuck_mask, HEX);
+    Serial.print(F(" done_mask=0x")); Serial.print((unsigned int)g_tuck_done_mask, HEX); Serial.print(F("\r\n"));
+    Serial.print(F("  params tibia=")); Serial.print((int)g_tuck_tibia_cd);
+    Serial.print(F(" femur=")); Serial.print((int)g_tuck_femur_cd);
+    Serial.print(F(" coxa=")); Serial.print((int)g_tuck_coxa_cd);
+    Serial.print(F(" tol_tibia=")); Serial.print((int)g_tuck_tol_tibia_cd);
+    Serial.print(F(" tol_other=")); Serial.print((int)g_tuck_tol_other_cd);
+    Serial.print(F(" timeout_ms=")); Serial.print((int)g_tuck_timeout_ms); Serial.print(F("\r\n"));
+    Serial.print(F("  tibia_meas_cd="));
+    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(","));
+      Serial.print(names[i]); Serial.print(F(":"));
+      int16_t m = g_meas_pos_cd[i][2];
+      Serial.print((int)m);
+    }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  tibia_eff_cd="));
+    for (int i = 0; i < 6; ++i) {
+      if (i) Serial.print(F(","));
+      Serial.print(names[i]); Serial.print(F(":"));
+      int16_t m = g_meas_pos_cd[i][2];
+      int16_t eff = g_meas_pos_valid[i][2] ? m : g_last_sent_cd[i][2];
+      Serial.print((int)eff);
+    }
+    Serial.print(F("\r\n"));
+  }
 }
 
 // Minimal HELP — authoritative list here to avoid duplication.
@@ -890,6 +988,7 @@ void printHELP() {
   // Motion / command targets
   Serial.print(F("[MOTION]\r\n"));
   Serial.print(F("  STAND                     Move enabled legs to neutral IK stance\r\n"));
+  Serial.print(F("  TUCK [LEG|ALL]            Tuck legs (tibia first then femur+coxa): c=12000, f=19000, t=0 cd\r\n"));
   Serial.print(F("  FOOT <LEG> <x y z>        IK move single leg (mm, body frame)\r\n"));
   Serial.print(F("  FEET <x1 y1 z1 ... x6 y6 z6>  IK move all 6 legs (LF..RR)\r\n"));
   Serial.print(F("  RAW <LEG> <JOINT> <cd>    Direct joint target (centideg)\r\n"));
@@ -923,6 +1022,21 @@ void printHELP() {
   Serial.print(F("  SAFETY TEMPLOCK <C>       Set over-temp lockout threshold (Celsius)\r\n"));
   Serial.print(F("  SAFETY CLEARANCE <mm>     Set foot-to-foot clearance (X/Z plane)\r\n"));
   Serial.print(F("  SAFETY OVERRIDE <ALL|TEMP|COLLISION|NONE>  Override lockout causes\r\n"));
+  Serial.print(F("  SAFETY CLEAR              Attempt to clear safety lockout (requires no active non-overridden causes)\r\n"));
+
+  // Logging
+  Serial.print(F("[LOGGING]\r\n"));
+  Serial.print(F("  LOG ENABLE                 Enable CSV logging (compat: ENABLE ON/OFF)\r\n"));
+  Serial.print(F("  LOG DISABLE                Disable CSV logging\r\n"));
+  Serial.print(F("  LOG RATE <hz>             Set logging rate (Hz, <= loop_hz)\r\n"));
+  Serial.print(F("  LOG MODE <COMPACT|FULL>   Set logging mode\r\n"));
+  Serial.print(F("  LOG HEADER <ON|OFF>       Toggle header line on next file open\r\n"));
+  Serial.print(F("  LOG FLUSH                 Flush buffer to SD (if open)\r\n"));
+  Serial.print(F("  LOG STATUS                Report logging configuration/state\r\n"));
+  Serial.print(F("  LOG TAIL <N>              Show last N data rows (prints header as 0)\r\n"));
+  Serial.print(F("  LOG ROTATE <ON|OFF>       Toggle size-based log rotation\r\n"));
+  Serial.print(F("  LOG MAXKB <KB>            Set rotation threshold in KB (clamped <= 1048576KB)\r\n"));
+  Serial.print(F("  LOG CLEAR                 Delete current log file (next sample reopens)\r\n"));
 
   // Notes
   Serial.print(F("[NOTES]\r\n"));
@@ -937,22 +1051,59 @@ void rebootNow() {
   while (1) { /* wait for reset */ }
 }
 
-// In-memory angle offset cache per-servo ID (units; ±125)
-static int16_t s_angle_offset_units[256] = {0};
+// Hardware angle offset wrappers — convert between centidegrees and LX-16A "tick" units
+// Contract (cd = centidegrees; units = cd/24):
+//   angle_offset_read(leg,id)          -> returns current hardware offset in cd
+//   angle_offset_adjust(leg,id, cd)    -> sets absolute hardware offset (cd), converted to units internally
+//   angle_offset_write(leg,id)         -> persists current offset to servo flash
+// Notes:
+//   - The underlying library stores angle offsets in ticks (units ≈ 0.24° = 24 cd).
+//   - We expose a centidegree API here and convert using helpers in command_helpers.h.
+//   - Clamp: firmware uses ±3000 cd (≈ ±30°), which corresponds to ±125 units.
 
-int angle_offset_read(uint8_t id) {
-  return (int)s_angle_offset_units[id];
+extern LX16AServo* g_servo[6][3]; // from main sketch
+
+// Search only within the specified leg row to avoid cross-leg ID collisions
+int angle_offset_read(uint8_t leg, uint8_t id) {
+  if (leg >= 6) return 0;
+  LX16AServo* s = nullptr;
+  for (uint8_t J = 0; J < 3; ++J) {
+    LX16AServo* cur = g_servo[leg][J];
+    if (cur && cur->_id == id) { s = cur; break; }
+  }
+  if (!s) return 0;
+  // Library returns offset in units (ticks); convert to centidegrees
+  int16_t units = s->read_angle_offset();
+  int16_t cd = units_to_cd((int)units);
+  // Clamp to firmware’s safety bounds
+  if (cd < -3000) cd = -3000; if (cd > 3000) cd = 3000;
+  return (int)cd;
 }
 
-bool angle_offset_adjust(uint8_t id, int8_t delta) {
-  int v = (int)s_angle_offset_units[id] + (int)delta;
-  if (v < -125) v = -125; if (v > 125) v = 125;
-  s_angle_offset_units[id] = (int16_t)v;
+bool angle_offset_adjust(uint8_t leg, uint8_t id, int16_t offset_cd) {
+  if (leg >= 6) return false;
+  LX16AServo* s = nullptr;
+  for (uint8_t J = 0; J < 3; ++J) {
+    LX16AServo* cur = g_servo[leg][J];
+    if (cur && cur->_id == id) { s = cur; break; }
+  }
+  if (!s) return false;
+  // Convert centidegrees to units (ticks) and clamp to ±125
+  int16_t units = cd_to_units_round((int)offset_cd);
+  if (units < -125) units = -125; if (units > 125) units = 125;
+  s->angle_offset_adjust(units);
   return true;
 }
 
-bool angle_offset_write(uint8_t id) {
-  (void)id; // Persist to hardware not yet implemented
+bool angle_offset_write(uint8_t leg, uint8_t id) {
+  if (leg >= 6) return false;
+  LX16AServo* s = nullptr;
+  for (uint8_t J = 0; J < 3; ++J) {
+    LX16AServo* cur = g_servo[leg][J];
+    if (cur && cur->_id == id) { s = cur; break; }
+  }
+  if (!s) return false;
+  s->angle_offset_save();
   return true;
 }
 

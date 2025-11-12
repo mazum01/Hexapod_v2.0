@@ -1,6 +1,128 @@
+## [0.1.100] - 2025-11-12
+### Fixed
+- Calibration/SAVEHOME semantics: Now truly centidegree-based end-to-end. The routine clears existing hardware angle offsets to establish a raw baseline, re-reads the raw position, computes `offset_cd = raw_cd - 12000` (clamped ±3000 cd), applies and saves it. Removed erroneous legacy `/24` conversion that produced offsets ~24× too small. As a result, `OFFSET LIST` values now match the centidegree delta to 12000, and the logical `pos_cd` readings converge to ~12000 after calibration. Note: STATUS `pos_cd` grid updates round-robin (one servo/tick), so it may take ~18 ticks (~0.1 s at 166 Hz) to reflect new values across all joints.
+
+## [0.1.101] - 2025-11-12
+### Fixed
+- Angle offset unit conversion: The lx16a-servo library stores hardware angle offsets in tick units (1 tick ≈ 24 centideg ≈ 0.24°), not centidegrees directly. Firmware wrappers now translate between centidegrees and ticks: reads multiply by 24, writes round(cd/24) and clamp to ±125 ticks (≈ ±3000 cd). SAVEHOME and OFFSET LIST now report accurate centidegree offsets; previous behavior could misinterpret raw tick values as cd.
+
+## [0.1.102] - 2025-11-12
+### Changed
+- STATUS formatting: Reformatted STATUS output to mirror HELP style with explicit section headers (`[SYSTEM]`, `[ENABLES]`, `[TELEMETRY]`, `[HOME]`, `[TEST]`, `[TIMING]`, `[OOS]`) and one key/value per indented line. No semantic or data changes; improves human readability and simplifies host-side log parsing. Firmware version bumped to 0.1.102.
+
+## [0.1.103] - 2025-11-12
+### Added
+- Command: `TUCK` — moves all enabled, in-service joints to a compact pose: coxa=0 cd, femur=20000 cd, tibia=0 cd. Respects leg/joint enable masks and the OOS bitmask (skips OOS joints). Motion still passes through existing soft-limit and rate-limit safety in the main loop. HELP updated under [MOTION].
+
+## [0.1.104] - 2025-11-12
+### Changed
+- TUCK enhancements: `TUCK [LEG|ALL]` now accepts an optional leg to tuck a single side; default tucks all enabled legs. Sequencing is non-blocking: tibias move to 0 cd first and, once within tolerance, femur (now 19000 cd) and coxa (0 cd) are commanded together for each qualifying leg. Respects enable and OOS flags throughout. HELP updated accordingly.
+
+## [0.1.105] - 2025-11-12
+### Fixed
+- TUCK convergence: Updated loopTick sequencing to continuously override femur/coxa targets after tibia reaches tolerance, instead of issuing them only once. Previously femur/coxa could be overwritten by other motion logic (e.g., test gait), leaving only tibia tucked. Completion now requires tibia plus femur and coxa convergence (or timeout). Firmware version bumped to 0.1.105.
+
+## [0.1.106] - 2025-11-12
+### Changed
+- TUCK pose adjustment: Coxa target updated from 0 cd to 12000 cd (logical center) while femur (19000 cd) and tibia (0 cd) remain unchanged. Provides symmetric tucked stance relative to calibrated neutral. Firmware version bumped to 0.1.106.
+
+## [0.1.107] - 2025-11-12
+### Fixed
+- Position validity: A measured position of 0 cd was treated as "false" and ignored in several places, causing fallbacks to the last-sent value (e.g., appearing as 24000) and stalling TUCK tibia convergence. Added explicit `g_meas_pos_valid` flags and now choose measured vs last-sent based on validity, not truthiness. TUCK tibia target restored to 0 cd. Firmware version bumped to 0.1.107.
+
+## [0.1.108] - 2025-11-12
+### Fixed
+- TUCK left/right mirroring: Right-side legs (RF/RM/RR) now mirror femur/tibia TUCK targets around `home_cd` so their motion matches left-side direction. Coxa remains at logical center (12000 cd) for all legs. Also added STATUS [TUCK] section with active flag, masks, and per-leg tibia meas/eff snapshots to aid bring-up.
+
+## [0.1.109] - 2025-11-12
+### Added
+- TUCK parameters are now runtime-configurable and persisted to `/config.txt` via `TUCK SET <PARAM> <VALUE>`. Supported params: `TIBIA`, `FEMUR`, `COXA` (center-only=12000), `TOL_TIBIA`, `TOL_OTHER`, `TIMEOUT` (ms). TUCK controller uses these values and continues to mirror femur/tibia on right legs.
+
+## 2025-11-11
+## [0.1.99] - 2025-11-11
+### Fixed
+- Offset wrappers: `angle_offset_read/adjust/write` now restrict servo lookup to the specified leg row instead of scanning all legs. Previous behavior returned the first matching ID globally, causing identical offset values across legs for joints sharing IDs. Requires re-running `SAVEHOME` to regenerate accurate per-leg `offset_cd` values.
+- Version bumped to 0.1.99.
+
+## [0.1.98] - 2025-11-11
+### Changed
+- Calibration flow: `SAVEHOME` now operates purely in centidegrees and performs a clear→read→compute sequence. For each enabled, in-service servo it clears the hardware offset, re-reads the raw position, computes and clamps the absolute `offset_cd = pos_cd - 12000` (±3000), writes and saves it, then persists both `home_cd.<LEG>.<joint>` and `offset_cd.<LEG>.<joint>` to `/config.txt`. Runtime `g_home_cd` and `g_offset_cd` updated accordingly. Serial log line `HOMESSET` reflects the new values.
+- Commands: `OFFSET LIST` and `OFFSET CLEAR` updated to use cd semantics end-to-end (no legacy unit conversions). `CLEAR` sets absolute offset to 0 cd, saves, and updates in-memory `home_cd` from the post-clear measured position.
+- Version: Bumped FW_VERSION to 0.1.98.
+
 ## 2025-11-08
-- HELP: Restored multi-line categorized HELP output with sections (System, Enable/Disable, Motion, Geometry/Calibration, Mode/Test, Safety). Strings in PROGMEM via F(); CRLF line endings.
+## [0.1.97] - 2025-11-11
+### Changed
+- Calibration I/O: Wired hardware angle offset helpers to the servo library. Removed in-RAM stubs so `SAVEHOME` and `OFFSET` now operate on real device offsets when running on Teensy. Host builds continue to use no-op stubs from the fake include. Bumped FW_VERSION to 0.1.97.
+
+## [0.1.96] - 2025-11-10
+### Fixed
+- Logging probe: `g_probe_log_us` now resets to 0 when logging is disabled (previously retained last sampled duration).
+
+## [0.1.95] - 2025-11-10
+### Changed
+- Loop timing: Raised `LOOP_HZ_DEFAULT` to 166 (spec target) and set `g_config_loop_hz` default ceiling to 166 so adaptive logic can ramp up. Previous default of 100 Hz prevented increases when config key not present.
+
+## [0.1.94] - 2025-11-10
+### Changed
+- Control loop: adaptive rate logic now uses a 128-tick window. Increases by +1 Hz when a full window has zero overruns; decreases by -1 Hz when a window has >=8 overruns. This replaces strict consecutive-count logic that prevented upward adjustments under mild jitter.
+
+## [0.1.93] - 2025-11-10
+### Fixed
+- Logging timing probe scope: moved `g_probe_log_us` capture inside sampled block to eliminate undefined identifier compile error (log_start_us out-of-scope). Version bump.
+
+## [0.1.92] - 2025-11-10
+### Added
+- Timing: Added `g_probe_log_us` to measure logging segment duration; STATUS timing probes now output `serial/send/fb/log/tick`.
+
+## [0.1.91] - 2025-11-10
+### Changed
+- STATUS: timing probes line now prints in explicit microseconds format: `tprobe_us=serial/send/fb/tick`.
+
 - Version: Bumped FW_VERSION to 0.1.76.
+
+## 2025-11-09
+- Protocol: Completed centralization of OK responses. Removed remaining per-command printOK() calls (RAW/RAW3/FOOT/FEET/MODE/I/T/TEST/STAND/SAFETY/HOME/SAVEHOME/OFFSET/SERVO). Dispatcher now emits a single OK on success; handlers only emit ERR on failure.
+- Version: Bumped FW_VERSION to 0.1.77.
+
+## 2025-11-09
+- Build: Standardized all SD feature guards to `#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD` for consistency; removed unused `extern printOK` declaration post centralization cleanup.
+- Version: Bumped FW_VERSION to 0.1.78.
+
+## 2025-11-09
+- Logging: Implemented Phase 1 compact CSV logging. Config keys: `logging.enabled`, `logging.rate_hz` (divisor of loop_hz), `logging.mode` (0=compact), `logging.header` (write header). Lazy opens `/logs/<millis>.csv`, buffered 8KB with opportunistic flushes; rows include `time_ms,leg,joint,cmd_cd,meas_cd,vin_V,temp_C,err`. Sampling uses a tick divisor with minimal overhead; writes only when buffer has data.
+- Version: Bumped FW_VERSION to 0.1.80.
+
+## 2025-11-09
+- Commands: Added `LOG` command suite for runtime control of logging: `LOG ENABLE <ON|OFF>`, `LOG RATE <hz>`, `LOG MODE <COMPACT|FULL>`, `LOG HEADER <ON|OFF>`, `LOG FLUSH`, `LOG STATUS`. HELP updated with [LOGGING] section.
+- Logging: Implemented FULL mode (mode=1) to log all legs each sample (18 rows). Added richer file header (metadata lines and CSV header).
+- Version: Bumped FW_VERSION to 0.1.83. (Defined in MARS_Hexapod.ino). Compact mode now logs 3 rows per sample (RR leg only); FULL logs 18 rows.
+
+## 2025-11-09
+- Telemetry: Disabled automatic FK streaming at startup (g_fk_stream_mask now initialized to 0 instead of LM leg). Users must explicitly enable via `FK <LEG|ALL> ON`.
+- Version: Bumped FW_VERSION to 0.1.84.
+
+## 2025-11-10
+- Commands: Added `LOG TAIL <N>` to print the last N data rows of the current log file, prefixed with a header line numbered 0. Skips metadata comments and any in-file CSV header.
+- HELP updated to include `LOG TAIL`.
+- Version: Bumped FW_VERSION to 0.1.85.
+ - UX: `LOG ENABLE` now turns logging on without requiring ON; `LOG DISABLE` turns it off. Backward-compatible with `LOG ENABLE ON|OFF`.
+
+## 2025-11-10
+- Logging: Added size-based rotation with `LOG ROTATE <ON|OFF>` and `LOG MAXKB <KB>` (threshold in KB, min 100KB, max 1GB). Runtime status shows `rotate`, `max_kb`, current file `size_kb`, and `seq`. Filenames now use `<millis>_seq<seq>.csv`. Rotation flushes buffer, closes file, increments sequence, and opens a new file preserving header metadata. Hard clamp enforced at 1GB. Default max set to 10MB.
+- HELP: Updated logging section with ROTATE and MAXKB commands.
+- Version: Bumped FW_VERSION to 0.1.86.
+
+## 2025-11-10
+- Logging: Full mode rows now include per-servo OOS flag (`oos` column). Added `LOG CLEAR` to delete the current log file and reopen on the next sample. Updated headers to list new column. Version bumped to 0.1.87.
+
+## 2025-11-10
+- Logging: Switched CSV schema to one line per leg (aggregated 3 servos). Compact mode now emits a single row for the current round-robin leg; Full mode emits 6 rows (all legs) instead of 18. Columns: `time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err`. Reduces row count by 3× in full mode and simplifies leg-wise analytics. Version bumped to 0.1.88.
+
+## 2025-11-10
+- Logging: Added persistence of runtime LOG settings (`RATE`, `MODE`, `HEADER`, `ROTATE`, `MAXKB`) back to `/config.txt` (excluding `logging.enabled`). Introduced new config keys `logging.rotate` (0|1) and `logging.max_kb` (threshold in KB, min 100, clamp 1GB). Config parser upper bound for `logging.rate_hz` aligned with runtime (≤500). FW_VERSION bumped to 0.1.89.
+## 2025-11-10
+- Uptime: Introduced continuous wrap-safe uptime accumulator (`g_uptime_ms64`) updated each loop iteration. STATUS now reports uptime without incrementing it, eliminating dependency on STATUS call frequency. FW_VERSION bumped to 0.1.90.
 
 ## 2025-11-08
 - STATUS: Restored multi-line STATUS with grouped content: system/config, test parameters, safety toggles, leg/joint enables, offsets grid, OOS mask, and FK mask. Kept strings in PROGMEM via F().

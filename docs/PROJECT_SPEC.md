@@ -155,6 +155,8 @@ IK implementation notes (as provided)
   - oos.fail_threshold=3 [impl] — number of consecutive vin/temp failures before marking a servo out-of-service (range 1..20, default 3). At runtime, a failure is counted only when BOTH vin and temp reads are invalid; any valid vin OR temp resets the counter. A brief startup grace window (~750 ms) ignores failures to avoid false OOS during boot.
   - logging.enabled=true
   - logging.rate_hz=166
+  - logging.rotate=true            # enable size-based rotation (new)
+  - logging.max_kb=10240           # rotation threshold in KB (min 100, clamp 1048576)
   - test.trigait.enabled=false
   - test.trigait.overlap_pct=5 [impl]
   - trigait.step_height_mm=20
@@ -172,24 +174,18 @@ IK implementation notes (as provided)
   - `all` — log all servos every tick (large; use only for short traces).
   - `off` — disable logging regardless of `logging.enabled`.
 - Default rate: `logging.rate_hz=166` (downsample allowed).
-- Buffering: buffered writes with periodic flush; file rotation by size/time TBD.
+- Rotation: optional size-based rotation when `logging.rotate=true`; threshold set by `logging.max_kb` (KB units, minimum 100KB, hard clamp 1GB). Filenames include `_seq<index>` suffix to indicate sequence.
+- Buffering: 8KB staging buffer with opportunistic flush (on buffer full, LOG FLUSH, rotation event).
 
-CSV schema (read mode)
+CSV schema (leg-aggregated)
 ```
-time_ms,mode,enabled,leg,joint,cmd_deg,est_deg,meas_deg,rr_read,voltage_V,temp_C,bus,rr_index,ik_code,safety_flags,err_mask
+time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err
 ```
-- `mode`: IDLE|TEST; `enabled`: 0|1
-- `leg`: LF|LM|LR|RF|RM|RR; `joint`: COXA|FEMUR|TIBIA (or 0|1|2)
-- `cmd_deg`: commanded joint angle; `est_deg`: estimator value; `meas_deg`: measured angle if read, else empty
-- `rr_read`: 1 if this row corresponds to the servo read this tick, else 0 (in `all` mode)
-- `bus`: bus index or Serial name (e.g., Serial7); `rr_index`: 0..17 current round‑robin pointer
-- `ik_code`: OK|UNREACHABLE; `safety_flags`: bitmask (e.g., SOFT_LIMIT|COLLISION); `err_mask`: comm/runtime error bits
-
-Optional summary row (if `logging.summary=true`)
-```
-time_ms,mode,enabled,rr_index,last_err
-```
-This emits once per tick in addition to `read` rows to aid trace alignment.
+- Rows represent one entire leg (3 servos aggregated).
+- Compact mode: one row per sample for the current round‑robin leg.
+- Full mode: six rows per sample (LF,LM,LR,RF,RM,RR).
+- Persistence: Runtime changes via `LOG RATE|MODE|HEADER|ROTATE|MAXKB` are written back to `/config.txt` (except `logging.enabled`).
+- Units: cmd/meas in centidegrees; `vin*_V` rendered as X.Y; `temp*_C` in whole °C; `oos*` is 0|1.
 
 ## 9. Serial command interface (USB)
 
@@ -364,7 +360,7 @@ Workflow to center physical neutral at logical 12000 cd using LX16A hardware off
   - Compute required total offset so (raw_physical_angle − total_offset) = 12000 cd.
   - Clamp to ±30° (±3000 cd ≈ ±125 ticks) and apply via `angle_offset_adjust` + `angle_offset_save`.
   - Re-read position; store residual as `home_cd.<LEG>.<joint>`.
-3. STATUS then shows both `home_cd` and `offset_cd` grids.
+3. STATUS then shows both `home_cd` and `offset_cd` grids. As of FW 0.1.98 the calibration routine also persists `offset_cd.<LEG>.<joint>=<centideg>` alongside `home_cd.<LEG>.<joint>` in `/config.txt` for post-reboot inspection; startup may recompute `g_offset_cd` from hardware until offset_cd parsing is implemented.
 
 Clearing offsets: `OFFSET CLEAR <LEG|ALL> <JOINT|ALL>` restores offset(s) to zero while updating `home_cd` so logical pose stays stable.
 
