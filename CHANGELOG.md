@@ -38,6 +38,10 @@
 ### Added
 - TUCK parameters are now runtime-configurable and persisted to `/config.txt` via `TUCK SET <PARAM> <VALUE>`. Supported params: `TIBIA`, `FEMUR`, `COXA` (center-only=12000), `TOL_TIBIA`, `TOL_OTHER`, `TIMEOUT` (ms). TUCK controller uses these values and continues to mirror femur/tibia on right legs.
 
+## [0.1.110] - 2025-11-12
+### Changed
+- STATUS output trimmed: removed temporary `[TUCK]` debug section (active/masks/params and tibia meas/eff snapshots) now that TUCK bring-up is complete. This reduces STATUS print time and keeps the output focused. No functional changes to TUCK sequencing or parameters.
+
 ## 2025-11-11
 ## [0.1.99] - 2025-11-11
 ### Fixed
