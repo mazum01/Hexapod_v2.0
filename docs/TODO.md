@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-12 (post 0.1.112 TUCK PARAMS command)
+Last updated: 2025-11-12 (phase 1 completion branch start)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -35,6 +35,13 @@ Conventions
 
   - Re-implemented multi-line grouped STATUS (system/config, test, safety, enables, offsets, oos, fk mask). (2025-11-08)
   - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
+
+## Phase 1 completion tasks (active)
+- [ ] Phase1: optimize send path (<300us) — in progress
+- [ ] Phase1: startup offset refresh (populate g_offset_cd before first STATUS)
+- [ ] Phase1: expand config keys (joint_limits all legs; test.trigait.* persistence)
+- [ ] Phase1: loop timing validation (<10% jitter idle + test gait)
+- [ ] Phase1: UART mapping consistency (spec vs robot_config.h)
 
 ## Completed
  - [x] HELP TUCK update (2025-11-12)
