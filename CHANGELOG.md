@@ -42,6 +42,10 @@
 ### Changed
 - STATUS output trimmed: removed temporary `[TUCK]` debug section (active/masks/params and tibia meas/eff snapshots) now that TUCK bring-up is complete. This reduces STATUS print time and keeps the output focused. No functional changes to TUCK sequencing or parameters.
 
+## [0.1.111] - 2025-11-12
+### Changed
+- HELP updated: TUCK command help now reflects runtime-configurable parameters and the `TUCK SET <PARAM> <VAL>` subcommand (persisting tuck.* keys: TIBIA, FEMUR, COXA, TOL_TIBIA, TOL_OTHER, TIMEOUT). Clarifies that tuck sequencing uses tibia-first then femur+coxa with mirrored angles on right legs.
+
 ## 2025-11-11
 ## [0.1.99] - 2025-11-11
 ### Fixed
