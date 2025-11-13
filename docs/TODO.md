@@ -10,15 +10,15 @@ Conventions
 
 ## Open tasks
 
-- [ ] Optimize servo send path
-  - Reduce per-command latency (<300 µs at 115200). Investigate prebuilt frames, batching per leg, minimize copies, evaluate higher baud or DMA/queue.
+- [ ] Optimize servo send path — moved to Phase 2 backlog
+  - Reduce per-command latency (<300 µs at 115200). Investigate prebuilt frames, batching per leg, minimize copies, evaluate higher baud or DMA/queue. [Deferred]
 - [ ] Stabilize loop at 166 Hz
   - Tune and verify adaptive hysteresis to maintain 166 Hz under typical load; measure with timing probes; ensure no sustained overruns.
  
  - [x] CSV logging to SD (2025-11-09 → 2025-11-10)
   - Phase 1 + FULL mode implemented; size rotation; tail/clear; leg-aggregated rows; per-servo OOS; settings persistence (RATE/MODE/HEADER/ROTATE/MAXKB) excluding enabled. Remaining future (deferred): Bresenham sampling, column mask/filter, compression/binary format.
- - [~] Expand config keys
-  - Added logging.rotate and logging.max_kb. Pending: additional test.trigait.* and joint_limits.* keys.
+ - [x] Expand config keys (2025-11-12)
+  - Added logging.rotate, logging.max_kb, test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. Joint limits parser already supports all legs.
  - [x] Tripod test mode (2025-11-09)
   - Implemented deterministic tripod gait with runtime tuning (CYCLE/HEIGHT/BASEX/STEPLEN/LIFT/OVERLAP) and persistence of overlap pct; STATUS reflects parameters.
  
@@ -29,7 +29,7 @@ Conventions
 
   - [~] Complete servo home offset update
     - [x] Wire hardware angle offset I/O via lx16a-servo helpers (remove RAM stubs; Teensy uses real device I/O; host uses fake include).
-    - [ ] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
+    - [x] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
     - [x] SAVEHOME cd-only clear→read→compute flow; persist both home_cd.* and offset_cd.* (0.1.98).
     - [ ] Reboot validation: ensure startup loads offset_cd (future key parser update) or recomputes g_offset_cd from hardware so STATUS matches after power cycle.
 
@@ -37,13 +37,20 @@ Conventions
   - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
 
 ## Phase 1 completion tasks (active)
-- [ ] Phase1: optimize send path (<300us) — in progress
-- [ ] Phase1: startup offset refresh (populate g_offset_cd before first STATUS)
-- [ ] Phase1: expand config keys (joint_limits all legs; test.trigait.* persistence)
-- [ ] Phase1: loop timing validation (<10% jitter idle + test gait)
-- [ ] Phase1: UART mapping consistency (spec vs robot_config.h)
+ - [x] Phase1: expand config keys (joint_limits all legs; test.trigait.* persistence)
+ - [x] Phase1: loop timing validation (<10% jitter idle + test gait) (2025-11-12)
+ - [x] Phase1: UART mapping consistency (spec vs robot_config.h) (2025-11-12)
+ - [x] Phase1: TUCK stage debug instrumentation (FW 0.1.113)
+
+## Phase 2 backlog (deferred)
+- [ ] Phase2: optimize send path (<300us)
+  - Reduce per-command latency (<300 µs at 115200). Investigate prebuilt frames, batching per leg, minimize copies, evaluate higher baud or DMA/queue; consider DMA/queue only if footprint remains small.
 
 ## Completed
+ - [x] Keep STATUS slim (2025-11-12)
+  - Verified STATUS remains compact with grouped sections; no `[TUCK]` debug block or verbose fields present.
+ - [x] Startup offset refresh (2025-11-12)
+  - On boot, read hardware angle offsets and populate g_offset_cd before first STATUS. Also parse offset_cd.<LEG>.<joint> from config (seed only; hardware read overwrites).
  - [x] HELP TUCK update (2025-11-12)
   - Added TUCK help lines documenting runtime tuck.* params and TUCK SET subcommand (persist TIBIA/FEMUR/COXA/TOL_TIBIA/TOL_OTHER/TIMEOUT). (FW 0.1.111)
  - [x] TUCK PARAMS command (2025-11-12)
@@ -51,6 +58,9 @@ Conventions
  - [x] STATUS [TUCK] debug removal (2025-11-12)
   - Removed temporary STATUS `[TUCK]` debug section (active/masks/params and tibia meas/eff). Keeps STATUS leaner and reduces print cost; TUCK controller remains unchanged. (FW 0.1.110)
  - [x] Position validity & TUCK tibia convergence (2025-11-12)
+ - [x] Loop timing validation (2025-11-12)
+  - Jitter metrics added (FW 0.1.115) and observed min/avg/max within <10% of 6.024 ms budget under idle + test gait; no sustained overruns.
+ - Confirms Phase 1 timing acceptance criteria.
   - Added `g_meas_pos_valid` flags so a measured 0 cd is treated as valid instead of falling back to last-sent (which appeared as 24000). Restored TUCK tibia target to 0 cd; prevents sequencing stall.
  - [x] Logging rotation & size cap (2025-11-10)
   - Implemented size-based rotation with `LOG ROTATE` and `LOG MAXKB` (KB units). 1GB hard clamp; default max 10MB; sequence-based filenames and status reporting.
@@ -82,6 +92,9 @@ Conventions
   - Added `TEST OVERLAP <pct>` to adjust overlap at runtime (0..25). Value is persisted to `/config.txt` as `test.trigait.overlap_pct`. STATUS includes `overlap_pct`.
 - [x] STATUS safety details (2025-11-03)
   - STATUS now includes `safety=<state> cause=0x.. override=0x..`. Added `SAFETY LIST` and `SAFETY OVERRIDE` commands.
+
+  - [x] Defer commits until instructed (2025-11-12)
+    - Phase 1 policy enforced (batched edits, explicit user-driven commit points). Closed after merge/tag of Phase 1 completion.
 
 - [x] TEST gait params commands (2025-11-02)
   - Added TEST subcommands to set cycle time, ground height, base X, and step length at runtime; STATUS shows current values.
