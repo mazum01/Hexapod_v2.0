@@ -3,6 +3,7 @@
   Hexapod v2.0 Controller (Teensy 4.1)
 
   Change log (top N entries)
+  - 2025-11-12: HELP update: TUCK help lines now describe runtime-configurable tuck.* params and TUCK SET command (persist TIBIA/FEMUR/COXA/TOL_TIBIA/TOL_OTHER/TIMEOUT). FW 0.1.111. (author: copilot)
   - 2025-11-12: STATUS trim: Removed temporary [TUCK] debug section from STATUS to reduce print cost and keep output focused. No behavior changes to TUCK controller. FW 0.1.110. (author: copilot)
   - 2025-11-12: TUCK mirror: Right-side legs now mirror femur/tibia targets (coxa unchanged) for symmetric tuck; added STATUS [TUCK] debug section. FW 0.1.108. (author: copilot)
   - 2025-11-12: Feedback fix: Treat 0 cd as a valid measurement using explicit validity flags; prevents fallback to last-sent (e.g., 24000) that stalled TUCK tibia convergence. Restored TUCK tibia target to 0 cd. FW 0.1.107. (author: copilot)
@@ -139,7 +140,7 @@
 // Firmware version (surfaced in splash/STATUS and logs)
 // -----------------------------------------------------------------------------
 #ifndef FW_VERSION
-#define FW_VERSION "0.1.110"
+#define FW_VERSION "0.1.111"
 #endif
 
 // -----------------------------------------------------------------------------
@@ -217,7 +218,7 @@ volatile int16_t  g_tuck_femur_cd       = 19000;  // femur target (cd)
 volatile int16_t  g_tuck_coxa_cd        = 12000;  // coxa target (cd, absolute center)
 volatile int16_t  g_tuck_tol_tibia_cd   = 500;    // tolerance for tibia (cd)
 volatile int16_t  g_tuck_tol_other_cd   = 500;    // tolerance for femur/coxa (cd)
-volatile uint16_t g_tuck_timeout_ms     = 2500;   // timeout (ms)
+volatile uint16_t g_tuck_timeout_ms     = 5000;   // timeout (ms)
 
 // ----------------------------------------------------------------------------
 // Logging (compact CSV) globals (Phase 1 + rotation)

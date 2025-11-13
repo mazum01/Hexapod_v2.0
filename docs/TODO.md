@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-12 (post 0.1.110 STATUS trim)
+Last updated: 2025-11-12 (post 0.1.111 HELP TUCK update)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -37,6 +37,8 @@ Conventions
   - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
 
 ## Completed
+ - [x] HELP TUCK update (2025-11-12)
+  - Added TUCK help lines documenting runtime tuck.* params and TUCK SET subcommand (persist TIBIA/FEMUR/COXA/TOL_TIBIA/TOL_OTHER/TIMEOUT). (FW 0.1.111)
  - [x] STATUS [TUCK] debug removal (2025-11-12)
   - Removed temporary STATUS `[TUCK]` debug section (active/masks/params and tibia meas/eff). Keeps STATUS leaner and reduces print cost; TUCK controller remains unchanged. (FW 0.1.110)
  - [x] Position validity & TUCK tibia convergence (2025-11-12)
