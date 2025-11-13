@@ -443,6 +443,7 @@ void processCmdTUCK(const char* line,int s,int len)
   //   TUCK                -> all enabled legs (use current parameters)
   //   TUCK <LEG>          -> single leg
   //   TUCK SET <param> <value>  -> update a parameter and persist to /config.txt
+  //   TUCK PARAMS         -> print current tuck parameter values
   // Parameters: TIBIA, FEMUR, COXA, TOL_TIBIA, TOL_OTHER, TIMEOUT
   // Values are integers (centideg except TIMEOUT in ms). COXA must remain 12000 (center) for safety.
 
@@ -450,6 +451,18 @@ void processCmdTUCK(const char* line,int s,int len)
   int peekStart = s; int ts_set, tl_set; int afterFirst = nextToken(line, peekStart, len, &ts_set, &tl_set);
   if (tl_set > 0) {
     char firstTok[12]={0}; int n1=min(tl_set,11); memcpy(firstTok,line+ts_set,n1); firstTok[n1]=0; for(int i=0;i<n1;++i) firstTok[i]=(char)toupper(firstTok[i]);
+    if (!strcmp(firstTok,"PARAMS")) {
+      // Print current parameters
+      Serial.print(F("TUCK "));
+      Serial.print(F("tibia=")); Serial.print((int)g_tuck_tibia_cd); Serial.print(F(" "));
+      Serial.print(F("femur=")); Serial.print((int)g_tuck_femur_cd); Serial.print(F(" "));
+      Serial.print(F("coxa="));  Serial.print((int)g_tuck_coxa_cd);  Serial.print(F(" "));
+      Serial.print(F("tol_tibia=")); Serial.print((int)g_tuck_tol_tibia_cd); Serial.print(F(" "));
+      Serial.print(F("tol_other=")); Serial.print((int)g_tuck_tol_other_cd); Serial.print(F(" "));
+      Serial.print(F("timeout_ms=")); Serial.print((int)g_tuck_timeout_ms);
+      Serial.print(F("\r\n"));
+      return;
+    }
     if (!strcmp(firstTok,"SET")) {
       // Parse param
       int ts_p, tl_p; afterFirst = nextToken(line, afterFirst, len, &ts_p, &tl_p); if (tl_p <= 0) { printERR(1,"BAD_ARG"); return; }

@@ -46,6 +46,10 @@
 ### Changed
 - HELP updated: TUCK command help now reflects runtime-configurable parameters and the `TUCK SET <PARAM> <VAL>` subcommand (persisting tuck.* keys: TIBIA, FEMUR, COXA, TOL_TIBIA, TOL_OTHER, TIMEOUT). Clarifies that tuck sequencing uses tibia-first then femur+coxa with mirrored angles on right legs.
 
+## [0.1.112] - 2025-11-12
+### Added
+- Command: `TUCK PARAMS` prints current tuck parameters (tibia/femur/coxa, tolerances, timeout) sourced from tuck.* config/runtime values. HELP now lists `TUCK PARAMS`.
+
 ## 2025-11-11
 ## [0.1.99] - 2025-11-11
 ### Fixed
