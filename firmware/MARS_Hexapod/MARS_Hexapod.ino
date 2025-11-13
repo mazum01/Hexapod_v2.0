@@ -125,6 +125,10 @@
 #ifndef MARS_TIMING_PROBES
 #define MARS_TIMING_PROBES 1
 #endif
+// Enable fine-grained send-path profiling (per-call and per-tick totals)
+#ifndef MARS_PROFILE_SEND
+#define MARS_PROFILE_SEND 1
+#endif
 
 // -----------------------------------------------------------------------------
 // Top-level includes (order matters for SD feature guard)
@@ -292,6 +296,20 @@ static volatile uint16_t g_jitter_min_us   = 0xFFFF;  // min abs error in curren
 static volatile uint16_t g_jitter_max_us   = 0;       // max abs error in current window
 static volatile uint32_t g_jitter_sum_us   = 0;       // sum for avg in current window
 static volatile uint16_t g_jitter_count    = 0;       // samples in current window
+#endif
+
+// Optional send-path profiling (aggregated stats; gated at compile-time)
+#if MARS_PROFILE_SEND
+// Per-call (single servo command) duration stats
+static volatile uint32_t g_prof_send_call_us_sum = 0;  // sum of per-call durations (us)
+static volatile uint16_t g_prof_send_call_us_min = 0xFFFF; // min duration observed (us)
+static volatile uint16_t g_prof_send_call_us_max = 0;      // max duration observed (us)
+static volatile uint32_t g_prof_send_call_count  = 0;      // number of calls measured
+// Per-tick total send duration stats
+static volatile uint32_t g_prof_send_tick_us_sum = 0;   // sum of per-tick total send durations (us)
+static volatile uint16_t g_prof_send_tick_us_min = 0xFFFF; // min total per-tick send time (us)
+static volatile uint16_t g_prof_send_tick_us_max = 0;      // max total per-tick send time (us)
+static volatile uint32_t g_prof_send_tick_count  = 0;      // number of ticks with sends measured
 #endif
 // Startup time (for OOS grace window)
 static uint32_t g_boot_ms = 0;
@@ -1154,7 +1172,17 @@ static void loopTick() {
           int16_t out_cd = (int16_t)(prev_cd + delta);
           g_last_sent_cd[leg][j] = out_cd;
           //Serial << "<" << leg << "," << j << "> " << out_cd << " -> " << target_cd << " (" << move_time_ms << " ms)\r\n";
+#if MARS_PROFILE_SEND
+          uint32_t __call_start_us = micros();
+#endif
           g_servo[leg][j]->move_time(out_cd, 0);
+#if MARS_PROFILE_SEND
+          uint16_t __call_dur = (uint16_t)(micros() - __call_start_us);
+          g_prof_send_call_us_sum += (uint32_t)__call_dur;
+          if (__call_dur < g_prof_send_call_us_min) g_prof_send_call_us_min = __call_dur;
+          if (__call_dur > g_prof_send_call_us_max) g_prof_send_call_us_max = __call_dur;
+          ++g_prof_send_call_count;
+#endif
           //busMoveTimeWrite(leg, j, target_cd, 0 ); //move_time_ms);
           //if (j == 0) g_bus[leg].debug(false);
         }
@@ -1162,6 +1190,14 @@ static void loopTick() {
     }
 #if MARS_TIMING_PROBES
     g_probe_send_us = (uint16_t)send_us;
+#endif
+#if MARS_PROFILE_SEND
+    // Update per-tick aggregation when any sends potentially occurred
+    uint16_t __tick_send = (uint16_t)send_us;
+    g_prof_send_tick_us_sum += (uint32_t)__tick_send;
+    if (__tick_send < g_prof_send_tick_us_min) g_prof_send_tick_us_min = __tick_send;
+    if (__tick_send > g_prof_send_tick_us_max) g_prof_send_tick_us_max = __tick_send;
+    ++g_prof_send_tick_count;
 #endif
   }
 

@@ -1113,6 +1113,23 @@ void printSTATUS()
     Serial.print(F("  jitter_us=min/avg/max="));
     Serial.print(jmin); Serial.print(F("/")); Serial.print(javg); Serial.print(F("/")); Serial.print(jmax);
     Serial.print(F("\r\n"));
+#if MARS_PROFILE_SEND
+    // Send-path profiling summary (since boot)
+    unsigned long pcnt = (unsigned long)g_prof_send_call_count;
+    unsigned long tcnt = (unsigned long)g_prof_send_tick_count;
+    unsigned int pmin = (g_prof_send_call_us_min==0xFFFFu)?0u:(unsigned int)g_prof_send_call_us_min;
+    unsigned int pmax = (unsigned int)g_prof_send_call_us_max;
+    unsigned int pavg = (pcnt>0)?(unsigned int)(g_prof_send_call_us_sum / pcnt):0u;
+    unsigned int tmin = (g_prof_send_tick_us_min==0xFFFFu)?0u:(unsigned int)g_prof_send_tick_us_min;
+    unsigned int tmax = (unsigned int)g_prof_send_tick_us_max;
+    unsigned int tavg = (tcnt>0)?(unsigned int)(g_prof_send_tick_us_sum / tcnt):0u;
+    Serial.print(F("  send_profile.per_call_us=min/avg/max="));
+    Serial.print(pmin); Serial.print(F("/")); Serial.print(pavg); Serial.print(F("/")); Serial.print(pmax);
+    Serial.print(F(" calls=")); Serial.print(pcnt); Serial.print(F("\r\n"));
+    Serial.print(F("  send_profile.total_us=min/avg/max="));
+    Serial.print(tmin); Serial.print(F("/")); Serial.print(tavg); Serial.print(F("/")); Serial.print(tmax);
+    Serial.print(F(" ticks=")); Serial.print(tcnt); Serial.print(F("\r\n"));
+#endif
   }
 #endif
 
