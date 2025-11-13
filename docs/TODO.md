@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-12 (post 0.1.111 HELP TUCK update)
+Last updated: 2025-11-12 (post 0.1.112 TUCK PARAMS command)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -39,6 +39,8 @@ Conventions
 ## Completed
  - [x] HELP TUCK update (2025-11-12)
   - Added TUCK help lines documenting runtime tuck.* params and TUCK SET subcommand (persist TIBIA/FEMUR/COXA/TOL_TIBIA/TOL_OTHER/TIMEOUT). (FW 0.1.111)
+ - [x] TUCK PARAMS command (2025-11-12)
+  - Added TUCK PARAMS subcommand to print current tuck parameter values (tibia/femur/coxa, tolerances, timeout) and corresponding HELP line. (FW 0.1.112)
  - [x] STATUS [TUCK] debug removal (2025-11-12)
   - Removed temporary STATUS `[TUCK]` debug section (active/masks/params and tibia meas/eff). Keeps STATUS leaner and reduces print cost; TUCK controller remains unchanged. (FW 0.1.110)
  - [x] Position validity & TUCK tibia convergence (2025-11-12)

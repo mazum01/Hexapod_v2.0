@@ -960,6 +960,7 @@ void printHELP() {
   Serial.print(F("  STAND                     Move enabled legs to neutral IK stance\r\n"));
   Serial.print(F("  TUCK [LEG|ALL]            Start tuck sequence (tibia-first then femur+coxa) using tuck.* params\r\n"));
   Serial.print(F("  TUCK SET <PARAM> <VAL>    Update+persist param TIBIA|FEMUR|COXA|TOL_TIBIA|TOL_OTHER|TIMEOUT (angles/tols=cd, timeout=ms)\r\n"));
+  Serial.print(F("  TUCK PARAMS               Show current tuck parameter values (tuck.* config)\r\n"));
   Serial.print(F("  FOOT <LEG> <x y z>        IK move single leg (mm, body frame)\r\n"));
   Serial.print(F("  FEET <x1 y1 z1 ... x6 y6 z6>  IK move all 6 legs (LF..RR)\r\n"));
   Serial.print(F("  RAW <LEG> <JOINT> <cd>    Direct joint target (centideg)\r\n"));
