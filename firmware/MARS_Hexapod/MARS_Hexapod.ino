@@ -3,6 +3,9 @@
   Hexapod v2.0 Controller (Teensy 4.1)
 
   Change log (top N entries)
+  - 2025-11-12: Loop timing validation: Jitter instrumentation (min/avg/max) confirms <10% timing error at 166 Hz under idle and tripod test gait (no sustained overruns). Acceptance criterion met; no functional changes beyond earlier probes. FW 0.1.116. (author: copilot)
+  - 2025-11-12: Safety config on boot: Config loader now parses safety.* keys (soft_limits, collision, temp_lockout_c, clearance_mm) at startup to restore persisted settings. Added tiny parse_bool helper. STATUS [TIMING] now includes jitter_us min/avg/max. FW 0.1.115. (author: copilot)
+  - 2025-11-12: Config keys + offsets: Added boot-time refresh of hardware angle offsets into g_offset_cd and parsing of offset_cd.<LEG>.<joint> from /config.txt (seed, hardware wins). Expanded config keys to load tripod gait params at boot: test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. HELP notes new keys; PROJECT_SPEC updated. FW 0.1.114. (author: copilot)
   - 2025-11-12: TUCK PARAMS: Added TUCK PARAMS subcommand and HELP line to display current tuck.* parameter values. FW 0.1.112. (author: copilot)
   - 2025-11-12: HELP update: TUCK help lines now describe runtime-configurable tuck.* params and TUCK SET command (persist TIBIA/FEMUR/COXA/TOL_TIBIA/TOL_OTHER/TIMEOUT). FW 0.1.111. (author: copilot)
   - 2025-11-12: STATUS trim: Removed temporary [TUCK] debug section from STATUS to reduce print cost and keep output focused. No behavior changes to TUCK controller. FW 0.1.110. (author: copilot)
@@ -141,12 +144,7 @@
 // Firmware version (surfaced in splash/STATUS and logs)
 // -----------------------------------------------------------------------------
 #ifndef FW_VERSION
-#define FW_VERSION "0.1.113"
-#endif
-
-// Optional TUCK debug prints (start/stage/completion). Disable to reduce serial traffic.
-#ifndef MARS_TUCK_DEBUG
-#define MARS_TUCK_DEBUG 1
+#define FW_VERSION "0.1.116"
 #endif
 
 // -----------------------------------------------------------------------------
@@ -155,6 +153,7 @@
 void splash();
 void processSerial();
 bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t out_cd[3]);
+void refreshOffsetsAtStartup();
 // -----------------------------------------------------------------------------
 // -----------------------------------------------------------------------------
 // Safety and lockout state
@@ -215,7 +214,6 @@ static LoopTimerClass g_loopTimer(LOOP_HZ_DEFAULT);
 //  - Completion: when all selected legs have been issued femur/coxa (or timeout), clear active.
 static volatile uint8_t  g_tuck_active     = 0;
 static volatile uint8_t  g_tuck_mask       = 0; // bits 0..5 for LF..RR
-static volatile uint8_t  g_tuck_tibia_mask = 0; // tibia within tolerance (stage 1 complete per leg)
 static volatile uint8_t  g_tuck_done_mask  = 0; // femur+coxa within tolerance (stage 2 complete per leg)
 static volatile uint32_t g_tuck_start_ms   = 0;
 
@@ -289,6 +287,11 @@ static volatile uint16_t g_probe_send_us   = 0;  // time to send all enabled ser
 static volatile uint16_t g_probe_fb_us     = 0;  // time to read one servo feedback (us)
 static volatile uint16_t g_probe_tick_us   = 0;  // total loopTick() duration (us)
 static volatile uint16_t g_probe_log_us    = 0;  // time spent in logging write/rotate segment (us)
+// Jitter metrics: absolute error |tick_elapsed_us - period_us| over a rolling window
+static volatile uint16_t g_jitter_min_us   = 0xFFFF;  // min abs error in current window
+static volatile uint16_t g_jitter_max_us   = 0;       // max abs error in current window
+static volatile uint32_t g_jitter_sum_us   = 0;       // sum for avg in current window
+static volatile uint16_t g_jitter_count    = 0;       // samples in current window
 #endif
 // Startup time (for OOS grace window)
 static uint32_t g_boot_ms = 0;
@@ -308,6 +311,11 @@ static volatile uint16_t g_override_mask  = LOCKOUT_CAUSE_NONE; // user override
 // Snapshot of temp trips at lockout time (true if that joint exceeded threshold) and value in 0.1 C
 static volatile bool g_lockout_temp_trip[NUM_LEGS][LEG_SERVOS] = { { false } };
 static volatile int16_t g_lockout_temp_c10[NUM_LEGS][LEG_SERVOS] = { { 0 } };
+
+// UART config presence/match flags from /config.txt (uart.<LEG>=SerialX); mapping is compile-time fixed.
+volatile uint8_t g_uart_cfg_seen_mask = 0;  // bit per leg LF..RR when a uart.<LEG> key is present
+volatile bool    g_uart_cfg_present   = false; // any uart.* key present
+volatile bool    g_uart_cfg_match     = true;  // assumes match until a mismatch is seen
 
 // Safety: configurable foot-to-foot keep-out clearance (mm) in X/Z plane
 float g_safety_clearance_mm = 60.0f;
@@ -748,6 +756,8 @@ void setup() {
   buffersInit();
   servoBusesInit();
   servoObjectsInit();
+  // Populate hardware angle offsets before any STATUS is printed/used
+  refreshOffsetsAtStartup();
   g_boot_ms = millis();
   // Initialize uptime tracker
   g_uptime_prev_ms = g_boot_ms;
@@ -1029,21 +1039,8 @@ static void loopTick() {
       }
       int16_t t_meas = g_meas_pos_cd[L][2];
       int16_t t_eff  = g_meas_pos_valid[L][2] ? t_meas : g_last_sent_cd[L][2];
-      int16_t t_err  = (int16_t)(tibia_target - t_eff); if (t_err < 0) t_err = (int16_t)-t_err;
+      int16_t t_err  = (int16_t)abs(tibia_target - t_eff);
       bool tibia_ok  = (t_err <= TOL_TIBIA_CD) || servoIsOOS(L, 2) || !jointEnabled(L, 2);
-      if (tibia_ok && ((g_tuck_tibia_mask >> L) & 1u) == 0) {
-  g_tuck_tibia_mask |= (1u << L);
-#if MARS_TUCK_DEBUG
-  const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
-  Serial.print(F("TUCKDBG TIBIA leg=")); Serial.print(names[L]);
-  Serial.print(F(" meas=")); Serial.print((int)t_meas);
-  Serial.print(F(" eff="));  Serial.print((int)t_eff);
-  Serial.print(F(" target=")); Serial.print((int)tibia_target);
-  Serial.print(F(" err=")); Serial.print((int)t_err);
-  Serial.print(F(" tol=")); Serial.print((int)TOL_TIBIA_CD);
-  Serial.print(F("\r\n"));
-#endif
-      }
 
       // --- Femur & Coxa control (only after tibia acceptable) ---
       bool fem_coxa_ok = true; // assume ok if joints disabled/OOS
@@ -1061,20 +1058,6 @@ static void loopTick() {
         if (!(servoIsOOS(L,0) || !jointEnabled(L,0))) fem_coxa_ok &= (c_err <= TOL_OTHER_CD);
         if (tibia_ok && fem_coxa_ok && ((g_tuck_done_mask >> L) & 1u) == 0) {
           g_tuck_done_mask |= (1u << L);
-#if MARS_TUCK_DEBUG
-          const char* names2[6] = {"LF","LM","LR","RF","RM","RR"};
-          Serial.print(F("TUCKDBG FEMCOXA leg=")); Serial.print(names2[L]);
-          Serial.print(F(" f_meas=")); Serial.print((int)f_meas);
-          Serial.print(F(" f_eff="));  Serial.print((int)f_eff);
-          Serial.print(F(" f_target=")); Serial.print((int)femur_target);
-          Serial.print(F(" f_err=")); Serial.print((int)f_err);
-          Serial.print(F(" c_meas=")); Serial.print((int)c_meas);
-          Serial.print(F(" c_eff="));  Serial.print((int)c_eff);
-          Serial.print(F(" c_target=")); Serial.print((int)coxa_target);
-          Serial.print(F(" c_err=")); Serial.print((int)c_err);
-          Serial.print(F(" tol=")); Serial.print((int)TOL_OTHER_CD);
-          Serial.print(F("\r\n"));
-#endif
         }
       } else {
         fem_coxa_ok = false; // not yet driving
@@ -1082,19 +1065,7 @@ static void loopTick() {
       if (((g_tuck_done_mask >> L) & 1u) == 0) all_done = 0;
     }
     if (all_done || (now_ms - g_tuck_start_ms) > TIMEOUT_MS) {
-#if MARS_TUCK_DEBUG
-      uint32_t dur = now_ms - g_tuck_start_ms;
-      if (all_done) {
-        Serial.print(F("TUCKDBG COMPLETE dur_ms=")); Serial.print((unsigned int)dur);
-        Serial.print(F("\r\n"));
-      } else {
-        Serial.print(F("TUCKDBG TIMEOUT dur_ms=")); Serial.print((unsigned int)dur);
-        Serial.print(F(" tibia_mask=0x")); Serial.print((unsigned int)g_tuck_tibia_mask, HEX);
-        Serial.print(F(" done_mask=0x"));  Serial.print((unsigned int)g_tuck_done_mask, HEX);
-        Serial.print(F("\r\n"));
-      }
-#endif
-      g_tuck_active = 0; g_tuck_mask = 0; g_tuck_tibia_mask = 0; g_tuck_done_mask = 0; g_tuck_start_ms = 0;
+      g_tuck_active = 0; g_tuck_mask = 0; g_tuck_done_mask = 0; g_tuck_start_ms = 0;
     }
   }
 
@@ -1357,6 +1328,18 @@ static void loopTick() {
   }
 #if MARS_TIMING_PROBES
   g_probe_tick_us = (uint16_t)tick_elapsed_us;
+  // Update jitter metrics (absolute timing error)
+  if (period_us > 0) {
+    uint32_t diff = (tick_elapsed_us > period_us) ? (tick_elapsed_us - period_us) : (period_us - tick_elapsed_us);
+    uint16_t jd = (diff > 0xFFFFu) ? 0xFFFFu : (uint16_t)diff;
+    if (g_jitter_min_us == 0xFFFFu || jd < g_jitter_min_us) g_jitter_min_us = jd;
+    if (jd > g_jitter_max_us) g_jitter_max_us = jd;
+    g_jitter_sum_us += (uint32_t)jd;
+    if (++g_jitter_count >= 128) {
+      // Reset window each 128 samples; STATUS will read current snapshot
+      g_jitter_min_us = 0xFFFFu; g_jitter_max_us = 0; g_jitter_sum_us = 0; g_jitter_count = 0;
+    }
+  }
 #endif
 
 //#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD

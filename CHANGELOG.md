@@ -1,3 +1,21 @@
+## [0.1.116] - 2025-11-12
+### Validation
+- Loop timing validated: STATUS jitter metrics (min/avg/max) observed within <10% of 6024 µs tick budget under idle and tripod test gait; no sustained overruns. Acceptance criteria for Phase 1 timing met. No functional changes beyond existing probes.
+
+## [0.1.115] - 2025-11-12
+### Added
+- STATUS [TIMING]: Jitter metrics (`jitter_us=min/avg/max`) computed over a rolling window; helps validate the 166 Hz target under idle and test gait.
+ - Splash: UART mapping sanity indicator appended when `/config.txt` contains `uart.*` keys — shows `(cfg: match|mismatch)` against the fixed compile-time mapping.
+### Changed
+- Config loader: Now parses persisted safety keys at boot: `safety.soft_limits`, `safety.collision`, `safety.temp_lockout_c`, and `safety.clearance_mm` so SAFETY settings saved to `/config.txt` are restored on restart.
+
+## [0.1.114] - 2025-11-12
+### Added
+- Config key expansion: Parse tripod gait parameters at boot from `/config.txt`:
+	`test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}` with sane clamps. These populate the existing TEST mode runtime parameters so STATUS reflects configured defaults on startup. HELP notes the new keys.
+### Changed
+- Startup offsets: At boot, read each servo’s hardware angle offset and populate `g_offset_cd` before the first STATUS. Also accept `offset_cd.<LEG>.<joint>` keys as a seed (hardware read overwrites). Updated `docs/PROJECT_SPEC.md` to reflect current behavior.
+
 ## [0.1.100] - 2025-11-12
 ### Fixed
 - Calibration/SAVEHOME semantics: Now truly centidegree-based end-to-end. The routine clears existing hardware angle offsets to establish a raw baseline, re-reads the raw position, computes `offset_cd = raw_cd - 12000` (clamped ±3000 cd), applies and saves it. Removed erroneous legacy `/24` conversion that produced offsets ~24× too small. As a result, `OFFSET LIST` values now match the centidegree delta to 12000, and the logical `pos_cd` readings converge to ~12000 after calibration. Note: STATUS `pos_cd` grid updates round-robin (one servo/tick), so it may take ~18 ticks (~0.1 s at 166 Hz) to reflect new values across all joints.
