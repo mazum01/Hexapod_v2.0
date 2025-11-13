@@ -533,18 +533,7 @@ void processCmdTUCK(const char* line,int s,int len)
   g_tuck_active = 1;
   g_tuck_mask = mask;
   g_tuck_done_mask = 0;
-  g_tuck_tibia_mask = 0;
   g_tuck_start_ms = millis();
-#if MARS_TUCK_DEBUG
-  Serial.print(F("TUCKDBG START mask=0x")); Serial.print((unsigned int)g_tuck_mask, HEX);
-  Serial.print(F(" tibia_cd=")); Serial.print((int)g_tuck_tibia_cd);
-  Serial.print(F(" femur_cd=")); Serial.print((int)g_tuck_femur_cd);
-  Serial.print(F(" coxa_cd="));  Serial.print((int)g_tuck_coxa_cd);
-  Serial.print(F(" tol_tibia=")); Serial.print((int)g_tuck_tol_tibia_cd);
-  Serial.print(F(" tol_other=")); Serial.print((int)g_tuck_tol_other_cd);
-  Serial.print(F(" timeout_ms=")); Serial.print((int)g_tuck_timeout_ms);
-  Serial.print(F("\r\n"));
-#endif
   // Initial tibia commands (kick off sequence); femur/coxa set later on convergence
   for (uint8_t L=0; L<6; ++L) {
     if ((mask>>L)&1u) {
