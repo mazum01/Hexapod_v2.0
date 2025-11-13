@@ -93,6 +93,9 @@ Conventions
 - [x] STATUS safety details (2025-11-03)
   - STATUS now includes `safety=<state> cause=0x.. override=0x..`. Added `SAFETY LIST` and `SAFETY OVERRIDE` commands.
 
+  - [x] Defer commits until instructed (2025-11-12)
+    - Phase 1 policy enforced (batched edits, explicit user-driven commit points). Closed after merge/tag of Phase 1 completion.
+
 - [x] TEST gait params commands (2025-11-02)
   - Added TEST subcommands to set cycle time, ground height, base X, and step length at runtime; STATUS shows current values.
 
