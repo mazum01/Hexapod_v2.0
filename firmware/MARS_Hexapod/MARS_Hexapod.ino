@@ -141,7 +141,12 @@
 // Firmware version (surfaced in splash/STATUS and logs)
 // -----------------------------------------------------------------------------
 #ifndef FW_VERSION
-#define FW_VERSION "0.1.112"
+#define FW_VERSION "0.1.113"
+#endif
+
+// Optional TUCK debug prints (start/stage/completion). Disable to reduce serial traffic.
+#ifndef MARS_TUCK_DEBUG
+#define MARS_TUCK_DEBUG 1
 #endif
 
 // -----------------------------------------------------------------------------
@@ -210,7 +215,8 @@ static LoopTimerClass g_loopTimer(LOOP_HZ_DEFAULT);
 //  - Completion: when all selected legs have been issued femur/coxa (or timeout), clear active.
 static volatile uint8_t  g_tuck_active     = 0;
 static volatile uint8_t  g_tuck_mask       = 0; // bits 0..5 for LF..RR
-static volatile uint8_t  g_tuck_done_mask  = 0; // femur+coxa commanded
+static volatile uint8_t  g_tuck_tibia_mask = 0; // tibia within tolerance (stage 1 complete per leg)
+static volatile uint8_t  g_tuck_done_mask  = 0; // femur+coxa within tolerance (stage 2 complete per leg)
 static volatile uint32_t g_tuck_start_ms   = 0;
 
 // TUCK parameters (runtime-configurable; persisted to /config.txt)
@@ -1025,6 +1031,19 @@ static void loopTick() {
       int16_t t_eff  = g_meas_pos_valid[L][2] ? t_meas : g_last_sent_cd[L][2];
       int16_t t_err  = (int16_t)(tibia_target - t_eff); if (t_err < 0) t_err = (int16_t)-t_err;
       bool tibia_ok  = (t_err <= TOL_TIBIA_CD) || servoIsOOS(L, 2) || !jointEnabled(L, 2);
+      if (tibia_ok && ((g_tuck_tibia_mask >> L) & 1u) == 0) {
+  g_tuck_tibia_mask |= (1u << L);
+#if MARS_TUCK_DEBUG
+  const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+  Serial.print(F("TUCKDBG TIBIA leg=")); Serial.print(names[L]);
+  Serial.print(F(" meas=")); Serial.print((int)t_meas);
+  Serial.print(F(" eff="));  Serial.print((int)t_eff);
+  Serial.print(F(" target=")); Serial.print((int)tibia_target);
+  Serial.print(F(" err=")); Serial.print((int)t_err);
+  Serial.print(F(" tol=")); Serial.print((int)TOL_TIBIA_CD);
+  Serial.print(F("\r\n"));
+#endif
+      }
 
       // --- Femur & Coxa control (only after tibia acceptable) ---
       bool fem_coxa_ok = true; // assume ok if joints disabled/OOS
@@ -1040,14 +1059,42 @@ static void loopTick() {
         int16_t c_eff  = g_meas_pos_valid[L][0] ? c_meas : g_last_sent_cd[L][0];
         int16_t c_err  = (int16_t)(coxa_target - c_eff); if (c_err < 0) c_err = (int16_t)-c_err;
         if (!(servoIsOOS(L,0) || !jointEnabled(L,0))) fem_coxa_ok &= (c_err <= TOL_OTHER_CD);
-        if (tibia_ok && fem_coxa_ok) g_tuck_done_mask |= (1u << L);
+        if (tibia_ok && fem_coxa_ok && ((g_tuck_done_mask >> L) & 1u) == 0) {
+          g_tuck_done_mask |= (1u << L);
+#if MARS_TUCK_DEBUG
+          const char* names2[6] = {"LF","LM","LR","RF","RM","RR"};
+          Serial.print(F("TUCKDBG FEMCOXA leg=")); Serial.print(names2[L]);
+          Serial.print(F(" f_meas=")); Serial.print((int)f_meas);
+          Serial.print(F(" f_eff="));  Serial.print((int)f_eff);
+          Serial.print(F(" f_target=")); Serial.print((int)femur_target);
+          Serial.print(F(" f_err=")); Serial.print((int)f_err);
+          Serial.print(F(" c_meas=")); Serial.print((int)c_meas);
+          Serial.print(F(" c_eff="));  Serial.print((int)c_eff);
+          Serial.print(F(" c_target=")); Serial.print((int)coxa_target);
+          Serial.print(F(" c_err=")); Serial.print((int)c_err);
+          Serial.print(F(" tol=")); Serial.print((int)TOL_OTHER_CD);
+          Serial.print(F("\r\n"));
+#endif
+        }
       } else {
         fem_coxa_ok = false; // not yet driving
       }
       if (((g_tuck_done_mask >> L) & 1u) == 0) all_done = 0;
     }
     if (all_done || (now_ms - g_tuck_start_ms) > TIMEOUT_MS) {
-      g_tuck_active = 0; g_tuck_mask = 0; g_tuck_done_mask = 0; g_tuck_start_ms = 0;
+#if MARS_TUCK_DEBUG
+      uint32_t dur = now_ms - g_tuck_start_ms;
+      if (all_done) {
+        Serial.print(F("TUCKDBG COMPLETE dur_ms=")); Serial.print((unsigned int)dur);
+        Serial.print(F("\r\n"));
+      } else {
+        Serial.print(F("TUCKDBG TIMEOUT dur_ms=")); Serial.print((unsigned int)dur);
+        Serial.print(F(" tibia_mask=0x")); Serial.print((unsigned int)g_tuck_tibia_mask, HEX);
+        Serial.print(F(" done_mask=0x"));  Serial.print((unsigned int)g_tuck_done_mask, HEX);
+        Serial.print(F("\r\n"));
+      }
+#endif
+      g_tuck_active = 0; g_tuck_mask = 0; g_tuck_tibia_mask = 0; g_tuck_done_mask = 0; g_tuck_start_ms = 0;
     }
   }
 

@@ -42,6 +42,7 @@ Conventions
 - [ ] Phase1: expand config keys (joint_limits all legs; test.trigait.* persistence)
 - [ ] Phase1: loop timing validation (<10% jitter idle + test gait)
 - [ ] Phase1: UART mapping consistency (spec vs robot_config.h)
+ - [x] Phase1: TUCK stage debug instrumentation (FW 0.1.113)
 
 ## Completed
  - [x] HELP TUCK update (2025-11-12)
