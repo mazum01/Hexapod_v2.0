@@ -80,6 +80,14 @@ extern uint16_t          g_log_buf_used;
 extern File              g_log_file;
 #endif
 extern volatile uint16_t g_loop_hz;
+// PID/EST globals
+extern volatile bool     g_pid_enabled;
+extern volatile uint16_t g_pid_kp_milli[3];
+extern volatile uint16_t g_pid_ki_milli[3];
+extern volatile uint16_t g_pid_kd_milli[3];
+extern volatile uint16_t g_pid_kd_alpha_milli[3];
+extern volatile uint8_t  g_pid_mode; // 0=active,1=shadow
+extern volatile uint16_t g_pid_shadow_report_hz;
 
 
 // Hardware angle offset helpers (provided by lx16a-servo library or stubs)
@@ -125,6 +133,7 @@ CommandType parseCommandType(const char* cmd) {
   if (!strcmp(cmd,"OFFSET")) return CMD_OFFSET;
   if (!strcmp(cmd,"LOG")) return CMD_LOG;
   if (!strcmp(cmd,"TUCK")) return CMD_TUCK;
+  if (!strcmp(cmd,"PID")) return CMD_PID;
   return CMD_UNKNOWN;
 }
 
@@ -419,6 +428,127 @@ void processCmdTEST(const char* line, int s, int len)
 }
 
 void processCmdSTAND(const char* line,int s,int len){ (void)line;(void)s;(void)len; const float BASE_Y=g_test_base_y_mm; const float BASE_X=g_test_base_x_mm; for(int L=0;L<6;++L){ int16_t out[3]; bool ok=calculateIK((uint8_t)L,BASE_X,BASE_Y,0.0f,out); if(!ok){ printERR(1,"IK_FAIL"); return;} bool isRight=(L>=3); if(isRight){ g_cmd_cd[L][0]=out[0]; g_cmd_cd[L][1]=out[1]; g_cmd_cd[L][2]=out[2]; } else { g_cmd_cd[L][0]=(int16_t)(2*g_home_cd[L][0]-out[0]); g_cmd_cd[L][1]=(int16_t)(2*g_home_cd[L][1]-out[1]); g_cmd_cd[L][2]=(int16_t)(2*g_home_cd[L][2]-out[2]); } g_foot_target_x_mm[L]=BASE_X; g_foot_target_z_mm[L]=0.0f; } }
+
+// PID command — runtime configuration and persistence
+// Syntax:
+//   PID LIST
+//   PID ENABLE | PID DISABLE
+//   PID MODE <ACTIVE|SHADOW>
+//   PID KP|KI|KD <COXA|FEMUR|TIBIA|ALL> <milli>
+//   PID KDALPHA <COXA|FEMUR|TIBIA|ALL> <milli 0..1000>
+//   PID SHADOW_RATE <hz 1..50>
+static void pid_print_list() {
+  Serial.print(F("PID "));
+  Serial.print(F("enabled=")); Serial.print(g_pid_enabled?1:0);
+  Serial.print(F(" mode=")); Serial.print(g_pid_mode==0?F("active"):F("shadow"));
+  Serial.print(F(" kp=")); Serial.print((unsigned)g_pid_kp_milli[0]); Serial.print('/'); Serial.print((unsigned)g_pid_kp_milli[1]); Serial.print('/'); Serial.print((unsigned)g_pid_kp_milli[2]);
+  Serial.print(F(" ki=")); Serial.print((unsigned)g_pid_ki_milli[0]); Serial.print('/'); Serial.print((unsigned)g_pid_ki_milli[1]); Serial.print('/'); Serial.print((unsigned)g_pid_ki_milli[2]);
+  Serial.print(F(" kd=")); Serial.print((unsigned)g_pid_kd_milli[0]); Serial.print('/'); Serial.print((unsigned)g_pid_kd_milli[1]); Serial.print('/'); Serial.print((unsigned)g_pid_kd_milli[2]);
+  Serial.print(F(" kdalph=")); Serial.print((unsigned)g_pid_kd_alpha_milli[0]); Serial.print('/'); Serial.print((unsigned)g_pid_kd_alpha_milli[1]); Serial.print('/'); Serial.print((unsigned)g_pid_kd_alpha_milli[2]);
+  Serial.print(F(" shadow_hz=")); Serial.print((unsigned)g_pid_shadow_report_hz);
+  Serial.print(F("\r\n"));
+}
+
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+static bool config_update_single_key(const char* key, const String& value) {
+  if (!SD.begin(BUILTIN_SDCARD)) return false;
+  File fin = SD.open("/config.txt", FILE_READ);
+  File fout = SD.open("/config.tmp", FILE_WRITE);
+  if (!fout) { if (fin) fin.close(); return false; }
+  bool replaced = false;
+  if (fin) {
+    static char linebuf[256]; int llen = 0;
+    while (fin.available()) {
+      int ch2 = fin.read(); if (ch2 < 0) break; if (ch2 == '\r') continue;
+      if (ch2 == '\n') {
+        linebuf[llen] = 0; const char* p = linebuf; while (*p==' '||*p=='\t') ++p;
+        size_t klen = strlen(key);
+        if (strncmp(p, key, klen) == 0) {
+          fout.print(key); fout.print(value); fout.print('\n');
+          replaced = true;
+        } else { fout.print(linebuf); fout.print('\n'); }
+        llen = 0;
+      } else if (llen + 1 < (int)sizeof(linebuf)) { linebuf[llen++] = (char)ch2; }
+      else { linebuf[llen] = 0; fout.print(linebuf); fout.print('\n'); llen = 0; }
+    }
+    fin.close();
+  }
+  if (!replaced) { fout.print(key); fout.print(value); fout.print('\n'); }
+  fout.close(); SD.remove("/config.txt"); SD.rename("/config.tmp", "/config.txt");
+  return true;
+}
+#endif
+
+void processCmdPID(const char* line, int s, int len)
+{
+  int ts, tl;
+  s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+  char sub[16] = {0}; int ns = min(tl, 15); memcpy(sub, line + ts, ns); for (int i=0;i<ns;++i) sub[i] = toupper(sub[i]);
+
+  if (!strcmp(sub, "LIST")) { pid_print_list(); return; }
+  if (!strcmp(sub, "ENABLE")) { g_pid_enabled = true;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("pid.enabled=", String(F("true")));
+#endif
+    return; }
+  if (!strcmp(sub, "DISABLE")) { g_pid_enabled = false;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("pid.enabled=", String(F("false")));
+#endif
+    return; }
+
+  if (!strcmp(sub, "MODE")) {
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char mt[12] = {0}; int nm = min(tl, 11); memcpy(mt, line + ts, nm); for (int i=0;i<nm;++i) mt[i] = toupper(mt[i]);
+    if (!strcmp(mt, "ACTIVE")) g_pid_mode = 0; else if (!strcmp(mt, "SHADOW")) g_pid_mode = 1; else { printERR(1, "BAD_ARG"); return; }
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("pid.mode=", (g_pid_mode==0)?String(F("active")):String(F("shadow")));
+#endif
+    return;
+  }
+
+  auto jointFromTok = [&](const char* jt)->int { char b[8]={0}; int n=strlen(jt); n=n>7?7:n; memcpy(b,jt,n); for(int i=0;i<n;++i) b[i]=toupper(b[i]); return jointIndexFromToken(b); };
+
+  if (!strcmp(sub, "KP") || !strcmp(sub, "KI") || !strcmp(sub, "KD") || !strcmp(sub, "KDALPHA")) {
+    bool isAlpha = !strcmp(sub, "KDALPHA"); bool isKP=!strcmp(sub,"KP"), isKI=!strcmp(sub,"KI"), isKD=!strcmp(sub,"KD");
+    // joint token
+    s = nextToken(line, s, len, &ts, &tl); if (tl<=0) { printERR(1, "BAD_ARG"); return; }
+    char jtok[8]={0}; int nj=min(tl,7); memcpy(jtok,line+ts,nj); for(int i=0;i<nj;++i) jtok[i]=toupper(jtok[i]);
+    // value token
+    s = nextToken(line, s, len, &ts, &tl); if (tl<=0) { printERR(1, "BAD_ARG"); return; }
+    char vb[16]={0}; int nv=min(tl,15); memcpy(vb,line+ts,nv); vb[nv]=0; long v = atol(vb);
+    if (v < 0) v = 0; if (isAlpha && v > 1000) v = 1000; if (!isAlpha && v > 65535) v = 65535;
+
+    auto apply_one = [&](int J){ if (J<0||J>2) return; if (isKP) g_pid_kp_milli[J]=(uint16_t)v; else if (isKI) g_pid_ki_milli[J]=(uint16_t)v; else if (isKD) g_pid_kd_milli[J]=(uint16_t)v; else g_pid_kd_alpha_milli[J]=(uint16_t)v; };
+    auto persist_one = [&](int J){
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+      const char* names[3] = {"coxa","femur","tibia"};
+      String key;
+      if (isKP) key = String(F("pid.kp_milli.")) + names[J] + "=";
+      else if (isKI) key = String(F("pid.ki_milli.")) + names[J] + "=";
+      else if (isKD) key = String(F("pid.kd_milli.")) + names[J] + "=";
+      else key = String(F("pid.kd_alpha_milli.")) + names[J] + "=";
+      (void)config_update_single_key(key.c_str(), String((unsigned long)v));
+#endif
+    };
+
+    if (!strcmp(jtok, "ALL")) { for (int J=0; J<3; ++J) { apply_one(J); persist_one(J);} }
+    else { int J = jointIndexFromToken(jtok); if (J<0) { printERR(1, "BAD_JOINT"); return; } apply_one(J); persist_one(J); }
+    return;
+  }
+
+  if (!strcmp(sub, "SHADOW_RATE")) {
+    s = nextToken(line, s, len, &ts, &tl); if (tl<=0) { printERR(1, "BAD_ARG"); return; }
+    char vb[12]={0}; int nv=min(tl,11); memcpy(vb,line+ts,nv); vb[nv]=0; long hz = atol(vb);
+    if (hz < 1) hz = 1; if (hz > 50) hz = 50; g_pid_shadow_report_hz = (uint16_t)hz;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("pid.shadow_report_hz=", String((unsigned long)g_pid_shadow_report_hz));
+#endif
+    return;
+  }
+
+  printERR(1, "BAD_ARG");
+}
 
 // TUCK command — optional leg argument
 // Syntax:

@@ -80,6 +80,18 @@ extern volatile int16_t g_limit_min_cd[6][3];
 extern volatile int16_t g_limit_max_cd[6][3];
 extern volatile uint16_t g_rate_limit_cdeg_per_s;
 extern void setServoId(uint8_t leg, uint8_t joint, uint8_t id);
+extern uint8_t servoId(uint8_t leg, uint8_t joint);
+// PID globals from main sketch
+extern volatile bool     g_pid_enabled;
+extern volatile uint16_t g_pid_kp_milli[3];
+extern volatile uint16_t g_pid_ki_milli[3];
+extern volatile uint16_t g_pid_kd_milli[3];
+extern volatile uint16_t g_pid_kd_alpha_milli[3];
+extern volatile uint8_t  g_pid_mode; // 0=active,1=shadow
+extern volatile uint16_t g_pid_shadow_report_hz;
+// Estimator globals
+extern volatile uint16_t g_est_cmd_alpha_milli;
+extern volatile uint16_t g_est_meas_alpha_milli;
 
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
 // Logging globals (defined in MARS_Hexapod.ino)
@@ -129,6 +141,28 @@ static inline char* ltrim(char* s)
   }
 
   return s;
+}
+
+// Parse common boolean forms: true/false, on/off, 1/0 (case-insensitive)
+static inline bool parse_bool(const char* v) {
+  if (!v) return false;
+  // Skip leading spaces
+  while (*v==' '||*v=='\t') ++v;
+  char c0 = (char)tolower(*v);
+  if (c0=='1') return true;
+  if (c0=='0') return false;
+  // Case-insensitive literal checks without strncasecmp (Arduino-safe)
+  // true
+  if ((tolower(v[0])=='t') && (tolower(v[1])=='r') && (tolower(v[2])=='u') && (tolower(v[3])=='e')) return true;
+  // on
+  if ((tolower(v[0])=='o') && (tolower(v[1])=='n') && (v[2]==0 || v[2]=='\n' || v[2]=='\r')) return true;
+  // false
+  if ((tolower(v[0])=='f') && (tolower(v[1])=='a') && (tolower(v[2])=='l') && (tolower(v[3])=='s') && (tolower(v[4])=='e')) return false;
+  // off
+  if ((tolower(v[0])=='o') && (tolower(v[1])=='f') && (tolower(v[2])=='f')) return false;
+  // Fallback: non-zero numeric
+  long n = atol(v);
+  return n != 0;
 }
 
 // Centidegrees → radians helper
@@ -267,6 +301,7 @@ extern void processCmdHOME(const char* line,int s,int len);
 extern void processCmdSAVEHOME(const char* line,int s,int len);
 extern void processCmdOFFSET(const char* line,int s,int len);
 extern void processCmdLOG(const char* line,int s,int len);
+extern void processCmdPID(const char* line,int s,int len);
 
 extern char    lineBuf[160];
 extern uint8_t lineLen;
@@ -325,6 +360,7 @@ void handleLine(const char* line) {
     case CMD_SAVEHOME:  processCmdSAVEHOME(line, s, len); break;
     case CMD_OFFSET:    processCmdOFFSET(line, s, len); break;
   case CMD_LOG:       processCmdLOG(line, s, len); break;
+  case CMD_PID:       processCmdPID(line, s, len); break;
     default:            printERR(1, "UNKNOWN_CMD"); break;
   }
 
@@ -367,9 +403,19 @@ void splash() {
 #else
   Serial.print(F("unknown"));
 #endif
+#ifdef FW_BUILD
+  Serial.print(F(" b=")); Serial.print((unsigned long)FW_BUILD);
+#endif
   Serial.print(F(" build=")); Serial.print(__DATE__); Serial.print(F(" ")); Serial.print(__TIME__);
   Serial.print(F(" loop_hz=")); Serial.print((int)g_loop_hz);
   Serial.print(F(" UARTs: ")); Serial.print(Robot::UART_MAP_SUMMARY);
+  // If uart.* keys were present in /config.txt, show a brief sanity note (mapping is compile-time fixed)
+  extern volatile bool g_uart_cfg_present; extern volatile bool g_uart_cfg_match;
+  if (g_uart_cfg_present) {
+    Serial.print(F(" (cfg: "));
+    Serial.print(g_uart_cfg_match ? F("match") : F("mismatch"));
+    Serial.print(F(")"));
+  }
   Serial.print(F(" cfg=")); Serial.print(g_config_loaded ? 1 : 0);
   Serial.print(F(" keys=")); Serial.print((int)g_config_keys_applied);
   Serial.print(F(" cfg_loop_hz=")); Serial.print((int)g_config_loop_hz);
@@ -407,6 +453,35 @@ static void configParseKV(char* key, char* val)
 {
   if (!key || !val) return;
 
+  // Capture but do not apply: uart.<LEG>=SerialX (compile-time mapping is fixed). Used for splash sanity.
+  if (!strncmp(key, "uart.", 5))
+  {
+    char* p = key + 5;
+    char legtok[4] = {0}; int li = 0;
+    while (*p && *p != '.' && li < 3) legtok[li++] = *p++;
+    legtok[li] = 0;
+    int leg = legIndexFromToken(legtok);
+    if (leg >= 0 && leg < 6) {
+      extern volatile uint8_t g_uart_cfg_seen_mask; // declared in main TU
+      extern volatile bool g_uart_cfg_present;
+      extern volatile bool g_uart_cfg_match;
+      g_uart_cfg_present = true;
+      g_uart_cfg_seen_mask |= (uint8_t)(1u << leg);
+      // Expected compile-time mapping names
+      const char* expected[6] = {"Serial8","Serial3","Serial5","Serial7","Serial6","Serial2"};
+      if (val && *val) {
+        if (strcmp(val, expected[leg]) != 0) {
+          g_uart_cfg_match = false;
+        }
+      } else {
+        // Empty value counts as mismatch
+        g_uart_cfg_match = false;
+      }
+    }
+    // Do not count toward applied keys; mapping is not changed at runtime in Phase 1
+    return;
+  }
+
   if (!strcmp(key, "loop_hz"))
 
   {
@@ -424,6 +499,45 @@ static void configParseKV(char* key, char* val)
     if (n < 1) n = 1; if (n > 20) n = 20;
 
     g_servo_fb_fail_threshold = (uint8_t)n;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  // --- Safety keys ---
+  if (!strcmp(key, "safety.soft_limits"))
+
+  {
+    bool on = parse_bool(val);
+    g_safety_soft_limits_enabled = on;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "safety.collision"))
+
+  {
+    bool on = parse_bool(val);
+    g_safety_collision_enabled = on;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "safety.temp_lockout_c"))
+
+  {
+    long c = atol(val);
+    if (c < 30) c = 30; if (c > 120) c = 120;
+    g_safety_temp_lockout_c10 = (int16_t)(c * 10);
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "safety.clearance_mm"))
+
+  {
+    long mm = atol(val);
+    if (mm < 0) mm = 0; if (mm > 500) mm = 500;
+    g_safety_clearance_mm = (float)mm;
     ++g_config_keys_applied;
     return;
   }
@@ -538,6 +652,34 @@ static void configParseKV(char* key, char* val)
     return;
   }
 
+  if (!strncmp(key, "offset_cd.", 10))
+
+  {
+    // offset_cd.<LEG>.<coxa|femur|tibia> (centideg, typically within ±3000)
+    char* p = key + 10;
+    char legtok[4] = {0}; int li = 0;
+    while (*p && *p != '.' && li < 3) legtok[li++] = *p++;
+
+    legtok[li] = 0;
+    if (*p != '.') return; ++p;
+
+    char jtok[8] = {0}; int ji = 0;
+    while (*p && *p != '.' && ji < 7) jtok[ji++] = *p++;
+
+    jtok[ji] = 0;
+
+    int leg = legIndexFromToken(legtok);
+    int j = jointIndexFromToken(jtok);
+    if (leg < 0 || j < 0) return;
+
+    long cd = atol(val);
+    if (cd < -3000) cd = -3000; if (cd > 3000) cd = 3000;
+
+    g_offset_cd[leg][j] = (int16_t)cd; // seed from config; hardware refresh will overwrite
+    ++g_config_keys_applied;
+    return;
+  }
+
   if (!strncmp(key, "joint_limits.", 14))
 
   {
@@ -594,6 +736,86 @@ static void configParseKV(char* key, char* val)
     return;
   }
 
+  // --- PID keys (Phase 2) ---
+  // pid.enabled=true|false
+  if (!strcmp(key, "pid.enabled"))
+  {
+    bool on = parse_bool(val);
+    g_pid_enabled = on;
+    ++g_config_keys_applied;
+    return;
+  }
+  // pid.kp_milli.<coxa|femur|tibia>
+  if (!strncmp(key, "pid.kp_milli.", 13))
+  {
+    const char* jtok = key + 13;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_pid_kp_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  // pid.ki_milli.<coxa|femur|tibia>
+  if (!strncmp(key, "pid.ki_milli.", 13))
+  {
+    const char* jtok = key + 13;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_pid_ki_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  // pid.kd_milli.<coxa|femur|tibia>
+  if (!strncmp(key, "pid.kd_milli.", 13))
+  {
+    const char* jtok = key + 13;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_pid_kd_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+
+  // pid.kd_alpha_milli.<coxa|femur|tibia> (0..1000)
+  if (!strncmp(key, "pid.kd_alpha_milli.", 19))
+  {
+    const char* jtok = key + 19;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 1000) v = 1000;
+      g_pid_kd_alpha_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+
+  // pid.mode=active|shadow
+  if (!strcmp(key, "pid.mode"))
+  {
+    // normalize first char
+    char c0 = tolower(val[0]);
+    if (c0 == 's') g_pid_mode = 1; else g_pid_mode = 0; // anything not starting with 's' treated as active
+    ++g_config_keys_applied; return;
+  }
+  // pid.shadow_report_hz=<1..50>
+  if (!strcmp(key, "pid.shadow_report_hz"))
+  {
+    long hz = atol(val);
+    if (hz < 1) hz = 1; if (hz > 50) hz = 50; // cap to avoid serial spam
+    g_pid_shadow_report_hz = (uint16_t)hz;
+    ++g_config_keys_applied; return;
+  }
+
   if (!strcmp(key, "rate_limit.deg_per_s"))
 
   {
@@ -616,12 +838,76 @@ static void configParseKV(char* key, char* val)
     return;
   }
 
+  // Estimator configuration
+  if (!strcmp(key, "est.cmd_alpha_milli"))
+  {
+    long v = atol(val); if (v < 0) v = 0; if (v > 1000) v = 1000;
+    g_est_cmd_alpha_milli = (uint16_t)v;
+    ++g_config_keys_applied; return;
+  }
+  if (!strcmp(key, "est.meas_alpha_milli"))
+  {
+    long v = atol(val); if (v < 0) v = 0; if (v > 1000) v = 1000;
+    g_est_meas_alpha_milli = (uint16_t)v;
+    ++g_config_keys_applied; return;
+  }
+
   if (!strcmp(key, "test.trigait.overlap_pct"))
 
   {
     float v = atof(val);
     if (v < 0.0f) v = 0.0f; if (v > 25.0f) v = 25.0f; // clamp to sane range
     g_test_overlap_pct = v;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.cycle_ms"))
+
+  {
+    long ms = atol(val);
+    if (ms < 750) ms = 750; if (ms > 10000) ms = 10000;
+    g_test_cycle_ms = (uint32_t)ms;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.height_mm"))
+
+  {
+    float v = atof(val);
+    if (v > 0.0f) v = 0.0f; if (v < -300.0f) v = -300.0f; // Y: negative is down
+    g_test_base_y_mm = v;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.basex_mm"))
+
+  {
+    float v = atof(val);
+    if (v < -300.0f) v = -300.0f; if (v > 300.0f) v = 300.0f;
+    g_test_base_x_mm = v;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.steplen_mm"))
+
+  {
+    float v = atof(val);
+    if (v < 0.0f) v = 0.0f; if (v > 200.0f) v = 200.0f;
+    g_test_step_len_mm = v;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.lift_mm"))
+
+  {
+    float v = atof(val);
+    if (v < 0.0f) v = 0.0f; if (v > 200.0f) v = 200.0f;
+    g_test_lift_y_mm = v;
     ++g_config_keys_applied;
     return;
   }
@@ -768,6 +1054,24 @@ void configLoad()
 }
 
 // -----------------------------------------------------------------------------
+// Refresh hardware angle offsets into g_offset_cd at startup
+// Reads each in-service servo's stored angle offset (cd) and populates g_offset_cd.
+// Safe on host: fake lx16a-servo stubs return 0.
+// -----------------------------------------------------------------------------
+void refreshOffsetsAtStartup() {
+  for (uint8_t L = 0; L < 6; ++L) {
+    for (uint8_t J = 0; J < 3; ++J) {
+      int16_t cd = 0;
+      uint8_t id = servoId(L, J);
+      if (id >= 1 && id <= 253) {
+        cd = (int16_t)angle_offset_read(L, id);
+      }
+      g_offset_cd[L][J] = cd;
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Missing helpers required by commandprocessor.ino
 //  - Tokenizer
 //  - OK/ERR/HELP/STATUS printers
@@ -816,6 +1120,17 @@ void printSTATUS()
     Serial.print((unsigned long)secs);  Serial.print(F("s"));
     Serial.print((unsigned long)ms);    Serial.print(F("ms\r\n"));
     Serial.print(F("  enabled=")); Serial.print(g_enabled ? 1 : 0); Serial.print(F("\r\n"));
+  // Firmware version and build (monotonic)
+  Serial.print(F("  fw="));
+#ifdef FW_VERSION
+  Serial.print(FW_VERSION);
+#else
+  Serial.print(F("unknown"));
+#endif
+#ifdef FW_BUILD
+  Serial.print(F(" b=")); Serial.print((unsigned long)FW_BUILD);
+#endif
+  Serial.print(F("\r\n"));
     Serial.print(F("  loop_hz=")); Serial.print(g_loop_hz); Serial.print(F("\r\n"));
     Serial.print(F("  rr_idx=")); Serial.print(g_rr_index); Serial.print(F("\r\n"));
     Serial.print(F("  overruns=")); Serial.print((unsigned long)g_overrun_count); Serial.print(F("\r\n"));
@@ -912,6 +1227,58 @@ void printSTATUS()
     Serial.print(F("  fb_us="));     Serial.print((unsigned int)g_probe_fb_us);     Serial.print(F("\r\n"));
     Serial.print(F("  log_us="));    Serial.print((unsigned int)g_probe_log_us);    Serial.print(F("\r\n"));
     Serial.print(F("  tick_us="));   Serial.print((unsigned int)g_probe_tick_us);   Serial.print(F("\r\n"));
+    // Jitter summary (rolling window)
+    unsigned int jmin = (unsigned int)g_jitter_min_us;
+    unsigned int jmax = (unsigned int)g_jitter_max_us;
+    unsigned int javg = (g_jitter_count > 0) ? (unsigned int)(g_jitter_sum_us / g_jitter_count) : 0u;
+    Serial.print(F("  jitter_us=min/avg/max="));
+    Serial.print(jmin); Serial.print(F("/")); Serial.print(javg); Serial.print(F("/")); Serial.print(jmax);
+    Serial.print(F("\r\n"));
+#if MARS_PROFILE_SEND
+    // Send-path profiling summary (since boot)
+    unsigned long pcnt = (unsigned long)g_prof_send_call_count;
+    unsigned long tcnt = (unsigned long)g_prof_send_tick_count;
+    unsigned int pmin = (g_prof_send_call_us_min==0xFFFFu)?0u:(unsigned int)g_prof_send_call_us_min;
+    unsigned int pmax = (unsigned int)g_prof_send_call_us_max;
+    unsigned int pavg = (pcnt>0)?(unsigned int)(g_prof_send_call_us_sum / pcnt):0u;
+    unsigned int tmin = (g_prof_send_tick_us_min==0xFFFFu)?0u:(unsigned int)g_prof_send_tick_us_min;
+    unsigned int tmax = (unsigned int)g_prof_send_tick_us_max;
+    unsigned int tavg = (tcnt>0)?(unsigned int)(g_prof_send_tick_us_sum / tcnt):0u;
+    Serial.print(F("  send_profile.per_call_us=min/avg/max="));
+    Serial.print(pmin); Serial.print(F("/")); Serial.print(pavg); Serial.print(F("/")); Serial.print(pmax);
+    Serial.print(F(" calls=")); Serial.print(pcnt); Serial.print(F("\r\n"));
+    Serial.print(F("  send_profile.total_us=min/avg/max="));
+    Serial.print(tmin); Serial.print(F("/")); Serial.print(tavg); Serial.print(F("/")); Serial.print(tmax);
+    Serial.print(F(" ticks=")); Serial.print(tcnt); Serial.print(F("\r\n"));
+#endif
+
+  // [PID]
+  Serial.print(F("[PID]\r\n"));
+  {
+    Serial.print(F("  enabled=")); Serial.print(g_pid_enabled ? 1 : 0); Serial.print(F("\r\n"));
+    Serial.print(F("  mode=")); Serial.print(g_pid_mode==0?F("active"):F("shadow")); Serial.print(F("\r\n"));
+    const char* jn[3] = {"coxa","femur","tibia"};
+    Serial.print(F("  kp_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kp_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  ki_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_ki_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  kd_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kd_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  kd_alpha_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kd_alpha_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  shadow_report_hz=")); Serial.print((unsigned int)g_pid_shadow_report_hz); Serial.print(F("\r\n"));
+  }
+
+  // [EST]
+  Serial.print(F("[EST]\r\n"));
+  {
+    Serial.print(F("  cmd_alpha_milli=")); Serial.print((unsigned int)g_est_cmd_alpha_milli); Serial.print(F("\r\n"));
+    Serial.print(F("  meas_alpha_milli=")); Serial.print((unsigned int)g_est_meas_alpha_milli); Serial.print(F("\r\n"));
+  }
   }
 #endif
 
@@ -1013,6 +1380,16 @@ void printHELP() {
   // Notes
   Serial.print(F("[NOTES]\r\n"));
   Serial.print(F("  Units: angles=centideg (0..24000); positions=mm (body frame). Left legs mirror IK angles.\r\n"));
+  Serial.print(F("  Config: test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}\r\n"));
+  Serial.print(F("  PID config keys (Phase 2): pid.enabled, pid.kp_milli.<coxa|femur|tibia>, pid.ki_milli.<...>, pid.kd_milli.<...>\r\n"));
+  Serial.print(F("  PID shadow mode keys: pid.mode=active|shadow, pid.shadow_report_hz=<1..50>\r\n"));
+  Serial.print(F("[PID COMMANDS]\r\n"));
+  Serial.print(F("  PID LIST\r\n"));
+  Serial.print(F("  PID ENABLE | DISABLE\r\n"));
+  Serial.print(F("  PID MODE <ACTIVE|SHADOW>\r\n"));
+  Serial.print(F("  PID KP|KI|KD <COXA|FEMUR|TIBIA|ALL> <milli>\r\n"));
+  Serial.print(F("  PID KDALPHA <COXA|FEMUR|TIBIA|ALL> <milli 0..1000>\r\n"));
+  Serial.print(F("  PID SHADOW_RATE <hz 1..50>\r\n"));
 }
 
 void rebootNow() {

@@ -8,7 +8,7 @@ All code must be clearly commented:
 # Hexapod v2.0 Controller — Project Specification (Phase 1)
 Project codename: MARS — Modular Autonomous Robotic System
 
-Last updated: 2025-11-07
+Last updated: 2025-11-13 (PID dt-aware + shadow telemetry)
 Target MCU: Teensy 4.1
 Servo type: Hiwonder HTS-35S (serial bus)
 Servo library: lx16a-servo
@@ -32,9 +32,9 @@ Out of scope (Phase 1): ROS integration, advanced terrain adaptation, high‑lev
 - Actuators: 18x HTS‑35S serial bus servos (3 per leg)
 - Bus topology: one independent serial bus per leg (6 buses total), each shared by its 3 servos.
   - UART mapping (leg → SerialX):
-  - LF → Serial8
+    - LF → Serial8
     - LM → Serial3
-  - LR → Serial5
+    - LR → Serial5
     - RF → Serial7
     - RM → Serial6
     - RR → Serial2
@@ -75,6 +75,7 @@ Implementation notes
  - Design criteria:
    - All robot characteristics (geometry, offsets, UART mapping summary, TX pins, buffer OE pins, default baud) live in `firmware/MARS_Hexapod/robot_config.h`.
    - All helper functions (printing, serial parsing, reboot, config parsing, hardware init helpers like buffers/buses) live in `firmware/MARS_Hexapod/functions.ino`.
+ - PID time base: D-term computes de/dt using measured loop dt; I-term integrates e*dt (cd·ms) with scaling so behavior is consistent under loop jitter.
 
 ## 5. Kinematics
 
@@ -133,12 +134,12 @@ IK implementation notes (as provided)
   - Values parsed as int/float/bool/strings; invalid lines logged and ignored.
 - Example keys (Phase 1 implemented subset marked [impl]):
   - loop_hz=166 [impl]
-  - uart.LF=Serial5
-  - uart.LM=Serial3
-  - uart.LR=Serial8
-  - uart.RF=Serial7
-  - uart.RM=Serial6
-  - uart.RR=Serial2
+  - uart.LF=Serial8 [not-impl]
+  - uart.LM=Serial3 [not-impl]
+  - uart.LR=Serial5 [not-impl]
+  - uart.RF=Serial7 [not-impl]
+  - uart.RM=Serial6 [not-impl]
+  - uart.RR=Serial2 [not-impl]
   - servo_id.LF.coxa=1 [impl]
   - servo_id.LF.femur=2 [impl]
   - servo_id.LF.tibia=3 [impl]
@@ -157,10 +158,21 @@ IK implementation notes (as provided)
   - logging.rate_hz=166
   - logging.rotate=true            # enable size-based rotation (new)
   - logging.max_kb=10240           # rotation threshold in KB (min 100, clamp 1048576)
-  - test.trigait.enabled=false
+  - test.trigait.cycle_ms=3000 [impl]
+  - test.trigait.height_mm=-110 [impl]
+  - test.trigait.basex_mm=130 [impl]
+  - test.trigait.steplen_mm=40 [impl]
+  - test.trigait.lift_mm=40 [impl]
   - test.trigait.overlap_pct=5 [impl]
-  - trigait.step_height_mm=20
-  - trigait.step_length_mm=40
+  - pid.enabled=false [impl]
+  - pid.kp_milli.<coxa|femur|tibia>=0 [impl]
+  - pid.ki_milli.<coxa|femur|tibia>=0 [impl]
+  - pid.kd_milli.<coxa|femur|tibia>=0 [impl]
+  - pid.kd_alpha_milli.<coxa|femur|tibia>=200 [impl]  # derivative smoothing factor (0..1000)
+  - est.cmd_alpha_milli=200 [impl]                    # per-tick blend toward last command (0..1000)
+  - est.meas_alpha_milli=800 [impl]                   # blend toward measurement on RR updates (0..1000)
+  - pid.mode=active [impl]                            # PID application mode: 'active' applies corrections; 'shadow' computes but does not drive (comparison stream)
+  - pid.shadow_report_hz=2 [impl]                     # In shadow mode, frequency (Hz) to stream PID_SHADOW diff lines (1..50)
 - Reload: Phase 1 loads once at boot; live reload TBD. If SD is disabled at build time (`MARS_ENABLE_SD=0`) or missing, compiled-in defaults are used.
 - Defaults: compiled‑in defaults used when keys are missing.
 
@@ -207,6 +219,21 @@ RR_FK <LEG> x=<bx> y=<by> z=<bz> lx=<lx> ly=<ly> lz=<lz> c=<c_cd> f=<f_cd> t=<t_
 - Units: positions in mm with one decimal; joint angles are raw centidegrees (0..24000).
 - Frames:
   - `x/y/z` are BODY-frame coordinates at the foot.
+
+### Telemetry: PID shadow stream
+
+- Enabled when `pid.mode=shadow`; rate set by `pid.shadow_report_hz` (1..50 Hz).
+- Each frame prints a single line summarizing per-leg, per-joint values:
+
+```
+PID_SHADOW t_ms=<millis> <LEG>:diff_cd=c/f/t err_cd=c/f/t est_cd=c/f/t tgt_cd=c/f/t ... (for all 6 legs)
+```
+
+- Fields:
+  - `diff_cd`: PID-corrected target minus base target after safety/rate limiting (centidegrees).
+  - `err_cd`: PID error used this tick = base target (pre-PID) − estimate/read.
+  - `est_cd`: estimated joint angle (meas-corrected on RR leg; otherwise exponential estimate).
+  - `tgt_cd`: base target before PID correction (from IK/command, pre safety+rate limiting).
   - `lx/ly/lz` are coordinates relative to the leg’s hip origin (LEG-frame), expressed in BODY axes (no COXA_OFFSET translation).
  - Torque policy: `DISABLE` torques off all servos at the next control tick; `ENABLE` does not torque-on any servo automatically. `SERVO ... ENABLE` torques on only when global is enabled; otherwise, it updates masks without sending torque-on.
 
@@ -285,7 +312,7 @@ SAFETY CLEAR           -> ERR E91 NOT_LOCKED
   - TEST STEPLEN <mm>   — forward/back amplitude (|Z|)
   - TEST LIFT <mm>      — step height (lift amount on swing)
   - TEST OVERLAP <pct>  — overlap window percent of total cycle reserved for both-tripods stance (0..25); persisted to `/config.txt` as `test.trigait.overlap_pct`
-  - Config: `test.trigait.overlap_pct=<0..25>` — percent of total cycle reserved for overlap; applied as a single window at each phase transition (both tripods in stance). Default 5%.
+  - Config: `test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}` — tripod gait parameters loaded at boot. `overlap_pct` also updated at runtime when changed via TEST command. Defaults: cycle_ms=3000, height_mm=-110, basex_mm=130, steplen_mm=40, lift_mm=40, overlap_pct=5.
   - STATUS prints a compact summary: `uptime=<D>d <H>h <M>m <S>s <ms>ms` (monotonic across millis() rollover) and `test=cycle_ms=... base_x=... base_y=... step_z=... lift_y=... overlap_pct=...`
 - Foot trajectory: simple trapezoidal or cycloidal swing; linear stance.
 - Body stabilization: none in Phase 1 (keep level); optional later.
@@ -310,15 +337,15 @@ SAFETY CLEAR           -> ERR E91 NOT_LOCKED
 - Transport: USB Serial; print once during setup before entering the control loop.
 - Content (example; single or few short lines):
   - `MARS — Modular Autonomous Robotic System | Hexapod v2.0 Controller`
-  - `Build: __DATE__ __TIME__ | loop_hz=166 | uart: LF=Serial5 LM=Serial3 LR=Serial8 RF=Serial7 RM=Serial6 RR=Serial2`
+  - `Build: __DATE__ __TIME__ | loop_hz=166 | uart: LF=Serial8 LM=Serial3 LR=Serial5 RF=Serial7 RM=Serial6 RR=Serial2`
   - `config: OK | logging: mode=read rate=166`
 - Constraints: keep output brief and non-blocking; do not delay the first control tick beyond budget.
 - Optional: re-print a one-line summary on `SAFETY CLEAR` or `ENABLE` if helpful for logs.
 
-## 13. Phase 2 preview (non‑blocking to Phase 1)
+## 13. Phase 2 (selected features)
 
-- Joint PID: outer‑loop PID around measured/estimated joint angles; map to adjusted position targets.
-- Virtual spring‑damper: Cartesian/joint impedance per leg for compliant behavior.
+- Joint PID: outer‑loop PID around measured/estimated joint angles; maps to adjusted position targets. Implemented with per‑joint milli‑gains, default disabled; configured via `pid.enabled` and `pid.{kp,ki,kd}_milli.<joint>` in `/config.txt`.
+- Virtual spring‑damper: Cartesian/joint impedance per leg for compliant behavior. [planned]
 
 ## 14. Acceptance criteria (Phase 1)
 
@@ -360,8 +387,21 @@ Workflow to center physical neutral at logical 12000 cd using LX16A hardware off
   - Compute required total offset so (raw_physical_angle − total_offset) = 12000 cd.
   - Clamp to ±30° (±3000 cd ≈ ±125 ticks) and apply via `angle_offset_adjust` + `angle_offset_save`.
   - Re-read position; store residual as `home_cd.<LEG>.<joint>`.
-3. STATUS then shows both `home_cd` and `offset_cd` grids. As of FW 0.1.98 the calibration routine also persists `offset_cd.<LEG>.<joint>=<centideg>` alongside `home_cd.<LEG>.<joint>` in `/config.txt` for post-reboot inspection; startup may recompute `g_offset_cd` from hardware until offset_cd parsing is implemented.
+3. STATUS then shows both `home_cd` and `offset_cd` grids. As of FW 0.1.98 the calibration routine also persists `offset_cd.<LEG>.<joint>=<centideg>` alongside `home_cd.<LEG>.<joint>` in `/config.txt` for post-reboot inspection. Startup reads hardware offsets and also accepts `offset_cd.<LEG>.<joint>` keys; parsed values are seeded then overwritten by hardware reads.
 
 Clearing offsets: `OFFSET CLEAR <LEG|ALL> <JOINT|ALL>` restores offset(s) to zero while updating `home_cd` so logical pose stays stable.
 
 Rationale: hardware offsets reduce need for per-servo home tuning and keep IK/FK consistent around a standard center (12000 cd) while residual homes capture sub-degree differences.
+
+## 17. Versioning policy (SemVer + build metadata)
+
+- Version string: Semantic Versioning MAJOR.MINOR.PATCH (e.g., 0.2.1)
+  - Major (X.y.z → X+1.0.0): breaking changes to public interfaces or persisted formats (serial protocol, /config.txt keys/semantics, CSV schema) or operational changes requiring operator action.
+  - Minor (x.Y.z → x.Y+1.0): backward‑compatible features and improvements (new commands, config keys, modes); existing interfaces keep working.
+  - Patch (x.y.Z → x.y.Z+1): backward‑compatible bug fixes, small refactors, measurement/instrumentation, doc/spec updates.
+- Pre‑1.0 note: While 0.y.z is “initial development,” we aim to treat minor bumps as non‑breaking and reserve breaking changes for a documented minor bump at minimum; prefer deferring true breaks until ≥1.0.0.
+- Build number: FW_BUILD is a separate monotonic integer that never resets across minor/major bumps; printed in splash/STATUS. It increments on every code edit/build for traceability.
+- Process requirements (Phase 2):
+  - Major/minor bumps require explicit confirmation (operator approval) before incrementing.
+  - Patch and FW_BUILD may auto‑increment with assistant edits; CHANGELOG entries only when a TODO completes or behavior changes (to reduce noise).
+  - Tags on main use the SemVer (e.g., v0.2.0); build metadata (e.g., +YYYYMMDD.N) may be used for CI artifacts as needed but not in release tags.
