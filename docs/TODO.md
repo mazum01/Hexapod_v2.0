@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-12 (phase 1 completion branch start)
+Last updated: 2025-11-14 (dt-aware PID FW 0.2.11)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -43,8 +43,41 @@ Conventions
  - [x] Phase1: TUCK stage debug instrumentation (FW 0.1.113)
 
 ## Phase 2 backlog (deferred)
-- [ ] Phase2: optimize send path (<300us)
-  - Reduce per-command latency (<300 µs at 115200). Investigate prebuilt frames, batching per leg, minimize copies, evaluate higher baud or DMA/queue; consider DMA/queue only if footprint remains small.
+- [x] Phase2: optimize send path (<300us)
+  - Implemented Option A: fast per-leg batched send (MARS_FAST_SEND, default OFF). Batches 3 frames per leg with single OE window and waits only on the RR feedback leg. STATUS shows send_us ≈ 1.7 ms in TEST mode; objective met. Further work: feedback path dominates (fb_us ≈ 4.9 ms) — consider staggering vin/temp reads.
+ - [x] Phase2: stagger feedback reads
+  - Added MARS_FB_STAGGER (default ON). Always read position; alternate vin and temp across RR visits; maintain OOS semantics using stored values. Expect fb_us reduction by ~2–3×.
+ - [x] Phase2: joint PID controller (FW 0.2.11)
+  - Integrated dt-aware PID compute into loop (between estimator and send) with P/PI/PD, anti-windup clamp, and filtered derivative. Default disabled with zero gains. Config keys `pid.enabled` and `pid.{kp,ki,kd}_milli.<coxa|femur|tibia>` parsed at boot; STATUS [PID] shows enabled flag, mode, gains, kd_alpha, and shadow report rate. Shadow mode (`pid.mode=shadow`) computes PID without driving servos and streams enriched `PID_SHADOW` lines (diff_cd, err_cd, est_cd, tgt_cd) at `pid.shadow_report_hz`.
+ - [ ] Phase2: virtual impedance (spring-damper)
+   - Cartesian/joint spring-damper per leg; config keys `impedance.{kx,ky,kz,cx,cy,cz}`; maps desired foot pose deltas to joint target adjustments; deterministic update in tick.
+ - [~] Phase2: estimator upgrade
+   - Implemented simple exponential smoothing toward last command with measurement correction on RR updates; PID now uses estimate between sparse reads. Next: validate timing impact and tune alphas.
+ - [ ] Phase2: collision model refinement
+   - Extend from foot clearance to include body footprint, vertical constraints, and joint self-interference checks; add config toggles for refined modes.
+ - [ ] Phase2: FK/IK test harness
+   - Add `IKTEST` / `FKTEST` serial commands for quick validation; emit diff vs expected; optional stats accumulation.
+ - [ ] Phase2: config live reload
+   - Implement `CONFIG RELOAD` (safe mid-run parse) with timing guard; only apply non-critical keys (limits, gait, safety, logging); reject loop_hz if would cause instability.
+ - [ ] Phase2: pin wiring documentation
+   - Document SerialX TX/RX/enable pins & power wiring; mirror in `robot_config.h`; splash sanity print of pin set completeness.
+ - [ ] Phase2: logging enhancements
+   - Add `logging.mode=profile` (per-tick timing, rr index, overruns); jitter histogram snapshot command; optional servo read distribution metrics.
+ - [ ] Phase2: homeAngles calibration workflow
+   - Add `CALIBRATE <LEG|ALL>` automation; unify offset/home persistence strategy; clearly separate hardware offset vs logical home.
+ - [ ] Phase2: loop_hz strategy review
+   - Re-assess adaptive up/down hysteresis; consider fixed 166 Hz with overrun counter & downgrade warning only.
+ - [ ] Phase2: memory/footprint audit
+   - Generate RAM/flash map; identify large symbols (float printf, lx16a unused); plan trims before adding PID/impedance.
+
+## Workflow policies (Phase 2)
+
+- [~] Defer commits until instructed
+  - Keep changes in the working tree; do not commit or push without an explicit request. Provide git status/diff on demand.
+- [~] Auto-bump FW_VERSION per edit
+  - Increment FW_VERSION patch with every assistant-made code change. Update main .ino header and CHANGELOG entries when a TODO is completed or behavior changes; skip verbose changelog spam for pure profiling/formatting edits.
+ - [~] Confirm major/minor version bumps
+   - Major/minor version increments require explicit user confirmation. Patch and FW_BUILD monotonic can auto-increment with edits.
 
 ## Completed
  - [x] Keep STATUS slim (2025-11-12)

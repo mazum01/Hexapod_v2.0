@@ -81,6 +81,17 @@ extern volatile int16_t g_limit_max_cd[6][3];
 extern volatile uint16_t g_rate_limit_cdeg_per_s;
 extern void setServoId(uint8_t leg, uint8_t joint, uint8_t id);
 extern uint8_t servoId(uint8_t leg, uint8_t joint);
+// PID globals from main sketch
+extern volatile bool     g_pid_enabled;
+extern volatile uint16_t g_pid_kp_milli[3];
+extern volatile uint16_t g_pid_ki_milli[3];
+extern volatile uint16_t g_pid_kd_milli[3];
+extern volatile uint16_t g_pid_kd_alpha_milli[3];
+extern volatile uint8_t  g_pid_mode; // 0=active,1=shadow
+extern volatile uint16_t g_pid_shadow_report_hz;
+// Estimator globals
+extern volatile uint16_t g_est_cmd_alpha_milli;
+extern volatile uint16_t g_est_meas_alpha_milli;
 
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
 // Logging globals (defined in MARS_Hexapod.ino)
@@ -290,6 +301,7 @@ extern void processCmdHOME(const char* line,int s,int len);
 extern void processCmdSAVEHOME(const char* line,int s,int len);
 extern void processCmdOFFSET(const char* line,int s,int len);
 extern void processCmdLOG(const char* line,int s,int len);
+extern void processCmdPID(const char* line,int s,int len);
 
 extern char    lineBuf[160];
 extern uint8_t lineLen;
@@ -348,6 +360,7 @@ void handleLine(const char* line) {
     case CMD_SAVEHOME:  processCmdSAVEHOME(line, s, len); break;
     case CMD_OFFSET:    processCmdOFFSET(line, s, len); break;
   case CMD_LOG:       processCmdLOG(line, s, len); break;
+  case CMD_PID:       processCmdPID(line, s, len); break;
     default:            printERR(1, "UNKNOWN_CMD"); break;
   }
 
@@ -389,6 +402,9 @@ void splash() {
   Serial.print(FW_VERSION);
 #else
   Serial.print(F("unknown"));
+#endif
+#ifdef FW_BUILD
+  Serial.print(F(" b=")); Serial.print((unsigned long)FW_BUILD);
 #endif
   Serial.print(F(" build=")); Serial.print(__DATE__); Serial.print(F(" ")); Serial.print(__TIME__);
   Serial.print(F(" loop_hz=")); Serial.print((int)g_loop_hz);
@@ -720,6 +736,86 @@ static void configParseKV(char* key, char* val)
     return;
   }
 
+  // --- PID keys (Phase 2) ---
+  // pid.enabled=true|false
+  if (!strcmp(key, "pid.enabled"))
+  {
+    bool on = parse_bool(val);
+    g_pid_enabled = on;
+    ++g_config_keys_applied;
+    return;
+  }
+  // pid.kp_milli.<coxa|femur|tibia>
+  if (!strncmp(key, "pid.kp_milli.", 13))
+  {
+    const char* jtok = key + 13;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_pid_kp_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  // pid.ki_milli.<coxa|femur|tibia>
+  if (!strncmp(key, "pid.ki_milli.", 13))
+  {
+    const char* jtok = key + 13;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_pid_ki_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  // pid.kd_milli.<coxa|femur|tibia>
+  if (!strncmp(key, "pid.kd_milli.", 13))
+  {
+    const char* jtok = key + 13;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_pid_kd_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+
+  // pid.kd_alpha_milli.<coxa|femur|tibia> (0..1000)
+  if (!strncmp(key, "pid.kd_alpha_milli.", 19))
+  {
+    const char* jtok = key + 19;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 1000) v = 1000;
+      g_pid_kd_alpha_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+
+  // pid.mode=active|shadow
+  if (!strcmp(key, "pid.mode"))
+  {
+    // normalize first char
+    char c0 = tolower(val[0]);
+    if (c0 == 's') g_pid_mode = 1; else g_pid_mode = 0; // anything not starting with 's' treated as active
+    ++g_config_keys_applied; return;
+  }
+  // pid.shadow_report_hz=<1..50>
+  if (!strcmp(key, "pid.shadow_report_hz"))
+  {
+    long hz = atol(val);
+    if (hz < 1) hz = 1; if (hz > 50) hz = 50; // cap to avoid serial spam
+    g_pid_shadow_report_hz = (uint16_t)hz;
+    ++g_config_keys_applied; return;
+  }
+
   if (!strcmp(key, "rate_limit.deg_per_s"))
 
   {
@@ -740,6 +836,20 @@ static void configParseKV(char* key, char* val)
 
     ++g_config_keys_applied;
     return;
+  }
+
+  // Estimator configuration
+  if (!strcmp(key, "est.cmd_alpha_milli"))
+  {
+    long v = atol(val); if (v < 0) v = 0; if (v > 1000) v = 1000;
+    g_est_cmd_alpha_milli = (uint16_t)v;
+    ++g_config_keys_applied; return;
+  }
+  if (!strcmp(key, "est.meas_alpha_milli"))
+  {
+    long v = atol(val); if (v < 0) v = 0; if (v > 1000) v = 1000;
+    g_est_meas_alpha_milli = (uint16_t)v;
+    ++g_config_keys_applied; return;
   }
 
   if (!strcmp(key, "test.trigait.overlap_pct"))
@@ -1010,6 +1120,17 @@ void printSTATUS()
     Serial.print((unsigned long)secs);  Serial.print(F("s"));
     Serial.print((unsigned long)ms);    Serial.print(F("ms\r\n"));
     Serial.print(F("  enabled=")); Serial.print(g_enabled ? 1 : 0); Serial.print(F("\r\n"));
+  // Firmware version and build (monotonic)
+  Serial.print(F("  fw="));
+#ifdef FW_VERSION
+  Serial.print(FW_VERSION);
+#else
+  Serial.print(F("unknown"));
+#endif
+#ifdef FW_BUILD
+  Serial.print(F(" b=")); Serial.print((unsigned long)FW_BUILD);
+#endif
+  Serial.print(F("\r\n"));
     Serial.print(F("  loop_hz=")); Serial.print(g_loop_hz); Serial.print(F("\r\n"));
     Serial.print(F("  rr_idx=")); Serial.print(g_rr_index); Serial.print(F("\r\n"));
     Serial.print(F("  overruns=")); Serial.print((unsigned long)g_overrun_count); Serial.print(F("\r\n"));
@@ -1130,6 +1251,34 @@ void printSTATUS()
     Serial.print(tmin); Serial.print(F("/")); Serial.print(tavg); Serial.print(F("/")); Serial.print(tmax);
     Serial.print(F(" ticks=")); Serial.print(tcnt); Serial.print(F("\r\n"));
 #endif
+
+  // [PID]
+  Serial.print(F("[PID]\r\n"));
+  {
+    Serial.print(F("  enabled=")); Serial.print(g_pid_enabled ? 1 : 0); Serial.print(F("\r\n"));
+    Serial.print(F("  mode=")); Serial.print(g_pid_mode==0?F("active"):F("shadow")); Serial.print(F("\r\n"));
+    const char* jn[3] = {"coxa","femur","tibia"};
+    Serial.print(F("  kp_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kp_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  ki_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_ki_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  kd_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kd_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  kd_alpha_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kd_alpha_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  shadow_report_hz=")); Serial.print((unsigned int)g_pid_shadow_report_hz); Serial.print(F("\r\n"));
+  }
+
+  // [EST]
+  Serial.print(F("[EST]\r\n"));
+  {
+    Serial.print(F("  cmd_alpha_milli=")); Serial.print((unsigned int)g_est_cmd_alpha_milli); Serial.print(F("\r\n"));
+    Serial.print(F("  meas_alpha_milli=")); Serial.print((unsigned int)g_est_meas_alpha_milli); Serial.print(F("\r\n"));
+  }
   }
 #endif
 
@@ -1232,6 +1381,15 @@ void printHELP() {
   Serial.print(F("[NOTES]\r\n"));
   Serial.print(F("  Units: angles=centideg (0..24000); positions=mm (body frame). Left legs mirror IK angles.\r\n"));
   Serial.print(F("  Config: test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}\r\n"));
+  Serial.print(F("  PID config keys (Phase 2): pid.enabled, pid.kp_milli.<coxa|femur|tibia>, pid.ki_milli.<...>, pid.kd_milli.<...>\r\n"));
+  Serial.print(F("  PID shadow mode keys: pid.mode=active|shadow, pid.shadow_report_hz=<1..50>\r\n"));
+  Serial.print(F("[PID COMMANDS]\r\n"));
+  Serial.print(F("  PID LIST\r\n"));
+  Serial.print(F("  PID ENABLE | DISABLE\r\n"));
+  Serial.print(F("  PID MODE <ACTIVE|SHADOW>\r\n"));
+  Serial.print(F("  PID KP|KI|KD <COXA|FEMUR|TIBIA|ALL> <milli>\r\n"));
+  Serial.print(F("  PID KDALPHA <COXA|FEMUR|TIBIA|ALL> <milli 0..1000>\r\n"));
+  Serial.print(F("  PID SHADOW_RATE <hz 1..50>\r\n"));
 }
 
 void rebootNow() {

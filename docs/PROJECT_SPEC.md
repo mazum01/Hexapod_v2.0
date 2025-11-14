@@ -8,7 +8,7 @@ All code must be clearly commented:
 # Hexapod v2.0 Controller — Project Specification (Phase 1)
 Project codename: MARS — Modular Autonomous Robotic System
 
-Last updated: 2025-11-12
+Last updated: 2025-11-13 (PID dt-aware + shadow telemetry)
 Target MCU: Teensy 4.1
 Servo type: Hiwonder HTS-35S (serial bus)
 Servo library: lx16a-servo
@@ -75,6 +75,7 @@ Implementation notes
  - Design criteria:
    - All robot characteristics (geometry, offsets, UART mapping summary, TX pins, buffer OE pins, default baud) live in `firmware/MARS_Hexapod/robot_config.h`.
    - All helper functions (printing, serial parsing, reboot, config parsing, hardware init helpers like buffers/buses) live in `firmware/MARS_Hexapod/functions.ino`.
+ - PID time base: D-term computes de/dt using measured loop dt; I-term integrates e*dt (cd·ms) with scaling so behavior is consistent under loop jitter.
 
 ## 5. Kinematics
 
@@ -163,6 +164,15 @@ IK implementation notes (as provided)
   - test.trigait.steplen_mm=40 [impl]
   - test.trigait.lift_mm=40 [impl]
   - test.trigait.overlap_pct=5 [impl]
+  - pid.enabled=false [impl]
+  - pid.kp_milli.<coxa|femur|tibia>=0 [impl]
+  - pid.ki_milli.<coxa|femur|tibia>=0 [impl]
+  - pid.kd_milli.<coxa|femur|tibia>=0 [impl]
+  - pid.kd_alpha_milli.<coxa|femur|tibia>=200 [impl]  # derivative smoothing factor (0..1000)
+  - est.cmd_alpha_milli=200 [impl]                    # per-tick blend toward last command (0..1000)
+  - est.meas_alpha_milli=800 [impl]                   # blend toward measurement on RR updates (0..1000)
+  - pid.mode=active [impl]                            # PID application mode: 'active' applies corrections; 'shadow' computes but does not drive (comparison stream)
+  - pid.shadow_report_hz=2 [impl]                     # In shadow mode, frequency (Hz) to stream PID_SHADOW diff lines (1..50)
 - Reload: Phase 1 loads once at boot; live reload TBD. If SD is disabled at build time (`MARS_ENABLE_SD=0`) or missing, compiled-in defaults are used.
 - Defaults: compiled‑in defaults used when keys are missing.
 
@@ -209,6 +219,21 @@ RR_FK <LEG> x=<bx> y=<by> z=<bz> lx=<lx> ly=<ly> lz=<lz> c=<c_cd> f=<f_cd> t=<t_
 - Units: positions in mm with one decimal; joint angles are raw centidegrees (0..24000).
 - Frames:
   - `x/y/z` are BODY-frame coordinates at the foot.
+
+### Telemetry: PID shadow stream
+
+- Enabled when `pid.mode=shadow`; rate set by `pid.shadow_report_hz` (1..50 Hz).
+- Each frame prints a single line summarizing per-leg, per-joint values:
+
+```
+PID_SHADOW t_ms=<millis> <LEG>:diff_cd=c/f/t err_cd=c/f/t est_cd=c/f/t tgt_cd=c/f/t ... (for all 6 legs)
+```
+
+- Fields:
+  - `diff_cd`: PID-corrected target minus base target after safety/rate limiting (centidegrees).
+  - `err_cd`: PID error used this tick = base target (pre-PID) − estimate/read.
+  - `est_cd`: estimated joint angle (meas-corrected on RR leg; otherwise exponential estimate).
+  - `tgt_cd`: base target before PID correction (from IK/command, pre safety+rate limiting).
   - `lx/ly/lz` are coordinates relative to the leg’s hip origin (LEG-frame), expressed in BODY axes (no COXA_OFFSET translation).
  - Torque policy: `DISABLE` torques off all servos at the next control tick; `ENABLE` does not torque-on any servo automatically. `SERVO ... ENABLE` torques on only when global is enabled; otherwise, it updates masks without sending torque-on.
 
@@ -317,10 +342,10 @@ SAFETY CLEAR           -> ERR E91 NOT_LOCKED
 - Constraints: keep output brief and non-blocking; do not delay the first control tick beyond budget.
 - Optional: re-print a one-line summary on `SAFETY CLEAR` or `ENABLE` if helpful for logs.
 
-## 13. Phase 2 preview (non‑blocking to Phase 1)
+## 13. Phase 2 (selected features)
 
-- Joint PID: outer‑loop PID around measured/estimated joint angles; map to adjusted position targets.
-- Virtual spring‑damper: Cartesian/joint impedance per leg for compliant behavior.
+- Joint PID: outer‑loop PID around measured/estimated joint angles; maps to adjusted position targets. Implemented with per‑joint milli‑gains, default disabled; configured via `pid.enabled` and `pid.{kp,ki,kd}_milli.<joint>` in `/config.txt`.
+- Virtual spring‑damper: Cartesian/joint impedance per leg for compliant behavior. [planned]
 
 ## 14. Acceptance criteria (Phase 1)
 
@@ -367,3 +392,16 @@ Workflow to center physical neutral at logical 12000 cd using LX16A hardware off
 Clearing offsets: `OFFSET CLEAR <LEG|ALL> <JOINT|ALL>` restores offset(s) to zero while updating `home_cd` so logical pose stays stable.
 
 Rationale: hardware offsets reduce need for per-servo home tuning and keep IK/FK consistent around a standard center (12000 cd) while residual homes capture sub-degree differences.
+
+## 17. Versioning policy (SemVer + build metadata)
+
+- Version string: Semantic Versioning MAJOR.MINOR.PATCH (e.g., 0.2.1)
+  - Major (X.y.z → X+1.0.0): breaking changes to public interfaces or persisted formats (serial protocol, /config.txt keys/semantics, CSV schema) or operational changes requiring operator action.
+  - Minor (x.Y.z → x.Y+1.0): backward‑compatible features and improvements (new commands, config keys, modes); existing interfaces keep working.
+  - Patch (x.y.Z → x.y.Z+1): backward‑compatible bug fixes, small refactors, measurement/instrumentation, doc/spec updates.
+- Pre‑1.0 note: While 0.y.z is “initial development,” we aim to treat minor bumps as non‑breaking and reserve breaking changes for a documented minor bump at minimum; prefer deferring true breaks until ≥1.0.0.
+- Build number: FW_BUILD is a separate monotonic integer that never resets across minor/major bumps; printed in splash/STATUS. It increments on every code edit/build for traceability.
+- Process requirements (Phase 2):
+  - Major/minor bumps require explicit confirmation (operator approval) before incrementing.
+  - Patch and FW_BUILD may auto‑increment with assistant edits; CHANGELOG entries only when a TODO completes or behavior changes (to reduce noise).
+  - Tags on main use the SemVer (e.g., v0.2.0); build metadata (e.g., +YYYYMMDD.N) may be used for CI artifacts as needed but not in release tags.

@@ -1,3 +1,58 @@
+## [0.2.11] - 2025-11-13
+### Changed
+- PID now accounts for variable loop timing: derivative uses de/dt with dt from the loop timer; integral accumulates e*dt (cd·ms) with proper scaling. Keeps low-pass derivative smoothing and correction clamp. Behavior is more consistent under jitter.
+
+## [0.2.10] - 2025-11-13
+### Changed
+- PID shadow telemetry (`PID_SHADOW`) now includes, per leg and joint, the PID vs base delta (`diff_cd`), the PID error used (`err_cd = target - est`), the read/estimate angle (`est_cd`), and the base target angle (`tgt_cd`). This enriches shadow-mode analysis without changing control behavior.
+
+## [0.2.7] - 2025-11-13
+### Added
+- Joint PID integration (sparse-feedback): per-joint P/PI/PD correction computed each tick between estimator and send. Default disabled and safe with zero gains; bounded correction clamp prevents large nudges.
+- Config keys: `pid.enabled` and `pid.{kp,ki,kd}_milli.<coxa|femur|tibia>` parsed at boot from `/config.txt`.
+- STATUS now includes a `[PID]` section showing enabled flag and kp/ki/kd milli-gains per joint group.
+
+## [0.2.9] - 2025-11-13
+### Added
+- PID shadow mode: new config keys `pid.mode=active|shadow` and `pid.shadow_report_hz` (default 2 Hz). In shadow mode, PID corrections are computed but not applied; diffs vs base (non-PID) rate-limited outputs streamed periodically as `PID_SHADOW` lines (per-leg c/f/t centidegree deltas). Active mode preserves prior behavior.
+
+### Changed
+- Firmware version bumped to 0.2.9; build number incremented.
+
+## [0.2.8] - 2025-11-13
+### Added
+- Estimator: exponential smoothing toward last command each tick with measurement correction on RR updates; PID uses the estimate for error computation between sparse reads.
+- Derivative smoothing: low-pass filtered D term to reduce spikes from measurement noise.
+- Config keys: `est.cmd_alpha_milli`, `est.meas_alpha_milli`, and `pid.kd_alpha_milli.<coxa|femur|tibia>`.
+
+## [0.2.5] - 2025-11-13
+### Changed
+- Permanently enabled fast per-leg batched send and staggered feedback reads; removed compile-time flags. Loop rate stays elastic (adaptive window logic retained). This codifies the proven optimizations and simplifies configuration.
+
+## [0.2.4] - 2025-11-13
+### Changed
+- Feedback reads staggered behind `MARS_FB_STAGGER` (default ON): position is read every RR visit; vin and temp alternate across visits for the same servo. OOS logic unchanged semantically (any valid vin OR temp resets; only both invalid increments). This reduces `fb_us` per tick and frees timing budget for 166 Hz.
+
+## [0.2.3] - 2025-11-13
+### Added
+- Fast send path (Option A) behind `MARS_FAST_SEND` feature flag. Batches three MOVE_TIME frames per leg, asserts OE once per leg, writes back-to-back, and flushes/deasserts only on the round-robin feedback leg each tick. Preserves soft-limit and rate-limit. Intended for Teensy 4.1 + 6 UARTs.
+### Performance
+- Measured STATUS [TIMING] (user data) shows `send_us` reduced from ~19 ms to ~1.7 ms in TEST mode; tick now dominated by feedback (`fb_us` ≈ 4.9 ms). Idle `send_us=0` as expected when disabled. Per-call send profiling counters are 0 under fast path (bypasses `move_time()`); total per-tick send profiling remains valid.
+
+## [0.2.2] - 2025-11-13
+### Docs
+- Added "Versioning policy" to `docs/PROJECT_SPEC.md`: SemVer MAJOR.MINOR.PATCH with explicit confirmation required for major/minor bumps; FW_BUILD monotonic counter printed in splash/STATUS; patch/build may auto-increment on assistant edits.
+
+## [0.2.1] - 2025-11-13
+### Added
+- Build metadata: Added FW_BUILD (monotonic build number) and included in splash/STATUS output for traceability across SemVer bumps.
+
+## [0.2.0] - 2025-11-13
+### Added
+- Phase 2 kickoff: Introduced send-path profiling instrumentation gated by `MARS_PROFILE_SEND`. STATUS now reports `send_profile.per_call_us` and `send_profile.total_us` min/avg/max with counts when enabled. No behavior change.
+### Policy
+- Phase 2 workflow: defer commits until explicitly instructed; auto-bump FW patch per assistant edit. Changelog entries reserved for completed TODOs or behavior changes to reduce noise.
+
 ## [0.1.116] - 2025-11-12
 ### Validation
 - Loop timing validated: STATUS jitter metrics (min/avg/max) observed within <10% of 6024 µs tick budget under idle and tripod test gait; no sustained overruns. Acceptance criteria for Phase 1 timing met. No functional changes beyond existing probes.

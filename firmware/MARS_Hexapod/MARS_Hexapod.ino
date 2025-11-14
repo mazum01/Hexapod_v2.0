@@ -3,6 +3,17 @@
   Hexapod v2.0 Controller (Teensy 4.1)
 
   Change log (top N entries)
+  - 2025-11-13: PID dt-aware: PID now accounts for variable loop timing. D-term uses (de/dt) with dt from LoopTimer; I-term integrates e*dt (cd·ms) with appropriate scaling. Keeps derivative smoothing. FW 0.2.11. (author: copilot)
+  - 2025-11-13: PID shadow telemetry: Enriched PID_SHADOW lines to include per-leg joint error (err_cd=des-est), read/estimate (est_cd), and base target (tgt_cd) alongside diffs (pid-base). FW 0.2.10. (author: copilot)
+  - 2025-11-13: PID shadow mode: Added parallel (non-driving) PID computation mode `pid.mode=shadow` that computes hypothetical PID-corrected targets without applying them, streams per-leg diffs at `pid.shadow_report_hz` (default 2 Hz) via `PID_SHADOW` lines. Active mode remains `pid.mode=active` (default). FW 0.2.9. (author: copilot)
+  - 2025-11-13: Estimator + filtered D: Added simple position estimator (exp. smoothing toward last command with measurement correction on RR updates) and low-pass filtered derivative to reduce noise spikes. New config keys: est.cmd_alpha_milli, est.meas_alpha_milli, pid.kd_alpha_milli.<joint>. FW 0.2.8. (author: copilot)
+  - 2025-11-13: Joint PID integration (sparse-feedback): compute P/PI/PD correction per joint (default disabled). Added /config.txt keys pid.enabled and pid.{kp,ki,kd}_milli.<joint>. STATUS shows [PID] section. FW 0.2.7. (author: copilot)
+  - 2025-11-13: Wire-in optimizations: Fast send and staggered feedback are now always enabled (flags removed). Loop rate remains elastic via adaptive logic. FW 0.2.5. (author: copilot)
+  - 2025-11-13: Feedback IO: Added MARS_FB_STAGGER (default ON). Always read position; alternate vin and temp per RR visit to the same servo. Preserves OOS rule (any valid vin OR temp resets). Reduces fb_us per tick. FW 0.2.4. (author: copilot)
+  - 2025-11-13: Fast send path (Option A): Added MARS_FAST_SEND (default OFF). Batched per-leg MOVE_TIME frames with single OE window; flush/deassert on RR leg before feedback. Observed send_us≈1.7 ms in TEST; fb_us now dominant. FW 0.2.3. (author: copilot)
+  - 2025-11-13: Versioning policy: Added SemVer + FW_BUILD policy to docs/PROJECT_SPEC.md (major/minor require explicit confirmation; patch/build may auto-increment). FW 0.2.2. (author: copilot)
+  - 2025-11-13: Build metadata: Introduced FW_BUILD (monotonic build number) and print in splash/STATUS. Minor bump to 0.2.1 to surface this UI change. FW 0.2.1. (author: copilot)
+  - 2025-11-13: Phase 2 kickoff: Minor version bump to 0.2.0. Added send-path profiling (MARS_PROFILE_SEND) capturing per-call and per-tick send durations for lx16a writes; no behavior changes. Adopt Phase 2 workflow policies: defer commits until instructed; auto-bump FW patch on assistant edits (CHANGELOG only on TODO completion/behavior change). FW 0.2.0. (author: copilot)
   - 2025-11-12: Loop timing validation: Jitter instrumentation (min/avg/max) confirms <10% timing error at 166 Hz under idle and tripod test gait (no sustained overruns). Acceptance criterion met; no functional changes beyond earlier probes. FW 0.1.116. (author: copilot)
   - 2025-11-12: Safety config on boot: Config loader now parses safety.* keys (soft_limits, collision, temp_lockout_c, clearance_mm) at startup to restore persisted settings. Added tiny parse_bool helper. STATUS [TIMING] now includes jitter_us min/avg/max. FW 0.1.115. (author: copilot)
   - 2025-11-12: Config keys + offsets: Added boot-time refresh of hardware angle offsets into g_offset_cd and parsing of offset_cd.<LEG>.<joint> from /config.txt (seed, hardware wins). Expanded config keys to load tripod gait params at boot: test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. HELP notes new keys; PROJECT_SPEC updated. FW 0.1.114. (author: copilot)
@@ -129,6 +140,7 @@
 #ifndef MARS_PROFILE_SEND
 #define MARS_PROFILE_SEND 1
 #endif
+// Optimizations (fast send + staggered feedback) are now permanently enabled; no flags.
 
 // -----------------------------------------------------------------------------
 // Top-level includes (order matters for SD feature guard)
@@ -148,7 +160,11 @@
 // Firmware version (surfaced in splash/STATUS and logs)
 // -----------------------------------------------------------------------------
 #ifndef FW_VERSION
-#define FW_VERSION "0.1.116"
+#define FW_VERSION "0.2.11"
+#endif
+// Monotonic build number (never resets across minor/major). Increment every code edit.
+#ifndef FW_BUILD
+#define FW_BUILD 127
 #endif
 
 // -----------------------------------------------------------------------------
@@ -412,6 +428,40 @@ uint8_t  g_meas_temp_C[NUM_LEGS][LEG_SERVOS] = { {0} }; // temperature in whole 
 int16_t  g_meas_pos_cd[NUM_LEGS][LEG_SERVOS] = { {0} }; // 0..24000 centidegrees
 // Position validity flags: true when the last RR read for that joint succeeded
 volatile uint8_t g_meas_pos_valid[NUM_LEGS][LEG_SERVOS] = { {0} };
+// Feedback staggering toggle per servo: 0 -> read vin this visit; 1 -> read temp this visit
+static uint8_t g_fb_rr_toggle[NUM_LEGS][LEG_SERVOS] = { {0} };
+
+// -----------------------------------------------------------------------------
+// Position estimator: exponential smoothing toward last command each tick,
+// corrected toward measurement on RR updates. Used by PID between sparse reads.
+// -----------------------------------------------------------------------------
+static int16_t g_est_pos_cd[NUM_LEGS][LEG_SERVOS] = { {0} };
+// Alphas in milli (0..1000). cmd_alpha applies each tick toward last_sent; meas_alpha when a measurement arrives.
+volatile uint16_t g_est_cmd_alpha_milli = 200; // 0.2 per tick toward command
+volatile uint16_t g_est_meas_alpha_milli = 800; // 0.8 toward measurement on RR update
+
+// -----------------------------------------------------------------------------
+// Joint PID (sparse-feedback) — P/PI/PD scaffolding (defaults to disabled)
+// Gains are in milli-units; correction in centidegrees: corr_cd = (Kp_milli * err_cd)/1000 + ...
+// Defaults: pid.enabled=false; only P-term applied when enabled and Kp>0.
+// -----------------------------------------------------------------------------
+volatile bool     g_pid_enabled = true;
+volatile uint16_t g_pid_kp_milli[LEG_SERVOS] = {0,0,0}; // per joint group (coxa/femur/tibia)
+volatile uint16_t g_pid_ki_milli[LEG_SERVOS] = {0,0,0};
+volatile uint16_t g_pid_kd_milli[LEG_SERVOS] = {0,0,0};
+// State per joint
+static int32_t    g_pid_i_accum[NUM_LEGS][LEG_SERVOS] = { {0} }; // integral accumulator in cd·ms (centideg-milliseconds)
+static int16_t    g_pid_prev_err[NUM_LEGS][LEG_SERVOS] = { {0} };
+// Filtered derivative state per joint
+static int16_t    g_pid_d_filt[NUM_LEGS][LEG_SERVOS] = { {0} };
+// Derivative smoothing factor (0..1000 milli) per joint group
+volatile uint16_t g_pid_kd_alpha_milli[LEG_SERVOS] = {200,200,200};
+// Clamp for correction contribution to avoid extreme nudges
+static const int16_t PID_CORR_CLAMP_CD = 2000; // ±20.00°
+// PID mode: 0=active (corrections applied), 1=shadow (compute only, do not drive; stream diffs)
+volatile uint8_t  g_pid_mode = 1; // default shadow
+volatile uint16_t g_pid_shadow_report_hz = 2; // streaming frequency for PID_SHADOW lines (Hz)
+static uint32_t   g_pid_shadow_last_report_ms = 0;
 // Forward kinematics: derive BODY-frame foot position from absolute joint centidegrees
 // ----------------------------------------------------------------------------
 // Forward kinematics (FK): Compute BODY-frame foot position (x,y,z) from joint angles
@@ -702,6 +752,59 @@ static inline void busMoveTimeWrite(uint8_t leg, uint8_t joint, int16_t cd, uint
   (void)g_bus[leg].write(LX16A_SERVO_MOVE_TIME_WRITE, params, 4, id);
 }
 
+// --- FAST SEND SUPPORT (Option A) ---
+static inline void oeSetTX(uint8_t leg, bool tx) {
+  if (leg >= NUM_LEGS) return;
+  int pin = Robot::BUFFER_ENABLE_PINS[leg];
+  digitalWrite(pin, tx ? HIGH : LOW); // HIGH -> TX drive, LOW -> RX/high-Z
+}
+
+// Build a LewanSoul LX-16A MOVE_TIME frame into out[]; returns frame length (always 10)
+static inline uint8_t build_move_time_frame(uint8_t id, uint16_t pos_units, uint16_t time_ms, uint8_t out[10]) {
+  // Protocol: 0x55 0x55 ID LEN CMD P_L P_H T_L T_H CHECKSUM
+  // LEN = number of bytes after LEN (CMD+PARAMS+CHECKSUM) => 7 for MOVE_TIME (4 params)
+  // CHECKSUM = ~(ID + LEN + CMD + P_L + P_H + T_L + T_H) & 0xFF
+  uint8_t idx = 0;
+  out[idx++] = 0x55; out[idx++] = 0x55;
+  out[idx++] = id;
+  out[idx++] = 7;
+  out[idx++] = LX16A_SERVO_MOVE_TIME_WRITE;
+  out[idx++] = (uint8_t)(pos_units & 0xFF);
+  out[idx++] = (uint8_t)(pos_units >> 8);
+  out[idx++] = (uint8_t)(time_ms & 0xFF);
+  out[idx++] = (uint8_t)(time_ms >> 8);
+  uint16_t sum = (uint16_t)id + 7 + LX16A_SERVO_MOVE_TIME_WRITE + (pos_units & 0xFF) + (pos_units >> 8) + (time_ms & 0xFF) + (time_ms >> 8);
+  out[idx++] = (uint8_t)(~(sum & 0xFF));
+  return idx;
+}
+
+// Send up to 3 frames for a leg in a single OE window; optionally wait/return to RX for rr_leg
+static inline void fastSendLeg(uint8_t leg, const int16_t out_cd[3], const bool joint_ok[3], uint16_t move_time_ms, bool is_rr_leg) {
+  if (leg >= NUM_LEGS || !SERVO_BUS[leg]) return;
+  // Assert TX enable once
+  oeSetTX(leg, true);
+
+  // Build and write frames back-to-back; skip disabled/OOS joints
+  uint8_t frame[10];
+  for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+    if (!joint_ok[j]) continue;
+    uint8_t id = servoId(leg, j);
+    if (id == 0 || id == 0xFF) continue;
+    uint16_t units = cd_to_lx_units(out_cd[j]);
+    uint8_t n = build_move_time_frame(id, units, move_time_ms, frame);
+    // Teensy HardwareSerial::write supports buffer writes
+    SERVO_BUS[leg]->write(frame, n);
+  }
+
+  // Only on the RR leg we wait for TX complete and drop to RX, so reads are safe
+  if (is_rr_leg) {
+    SERVO_BUS[leg]->flush(); // wait for transmit complete
+    oeSetTX(leg, false);     // return to RX
+  }
+  // For non-RR legs, we leave OE asserted; we'll drop to RX when that leg becomes RR
+}
+// end fast send helpers
+
 // Forward decls (only those local to this TU)
 static void loopTick();
 // Config (implemented in functions.ino)
@@ -762,6 +865,7 @@ void setup() {
     {
       g_cmd_cd[L][J] = g_home_cd[L][J];
       g_last_sent_cd[L][J] = g_home_cd[L][J];
+      g_est_pos_cd[L][J] = g_home_cd[L][J];
     }
   }
   // Initialize foot estimates from home positions to avoid false startup collisions
@@ -1093,7 +1197,7 @@ static void loopTick() {
 #if MARS_TIMING_PROBES
     elapsedMicros send_us = 0;
 #endif
-    if (g_enabled)
+  if (g_enabled)
     {
       // TODO(perf): Optimize servo command send path. Current measurements suggest ~1.3 ms per command in some cases.
       //  - Investigate per-call overhead in lx16a bus write and serial driver.
@@ -1138,55 +1242,181 @@ static void loopTick() {
 
         max_delta_cd = (int32_t)cd_per_tick;
       }
-      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg)
-
+      // Update estimator prediction for all servos toward last command (before PID)
       {
-        if (!legEnabled(leg)) continue; // per-leg gating
-
-        for (uint8_t j = 0; j < LEG_SERVOS; ++j)
-        {
-          if (!jointEnabled(leg, j)) continue; // per-joint gating
-
-          if (servoIsOOS(leg, j)) continue; // skip OOS servos
-
-          //if (j == 0) g_bus[leg].debug(TRNG_DEFAULT_FREQUENCY_MINIMUM);
-          // 1) Soft-limit clamp (absolute cd bounds from config) — gated by safety toggle
-          int32_t target_cd = g_cmd_cd[leg][j];
-          if (g_safety_soft_limits_enabled) {
-            int16_t min_cd = g_limit_min_cd[leg][j];
-            int16_t max_cd = g_limit_max_cd[leg][j];
-            if (target_cd < min_cd) target_cd = min_cd;
-            if (target_cd > max_cd) target_cd = max_cd;
+        uint16_t a = g_est_cmd_alpha_milli; if (a > 1000) a = 1000;
+        for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+          for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+            int32_t est = g_est_pos_cd[leg][j];
+            int32_t cmd = g_last_sent_cd[leg][j];
+            int32_t diff = cmd - est;
+            est += (a * diff) / 1000;
+            if (est < 0) est = 0; else if (est > 24000) est = 24000;
+            g_est_pos_cd[leg][j] = (int16_t)est;
           }
-
-          // 2) Rate limit per tick around last sent value
-          int32_t prev_cd = g_last_sent_cd[leg][j];
-          int32_t delta = target_cd - prev_cd;
-          if (max_delta_cd > 0)
-          {
-            if (delta > max_delta_cd) delta = max_delta_cd;
-
-            else if (delta < -max_delta_cd) delta = -max_delta_cd;
-
-          }
-          int16_t out_cd = (int16_t)(prev_cd + delta);
-          g_last_sent_cd[leg][j] = out_cd;
-          //Serial << "<" << leg << "," << j << "> " << out_cd << " -> " << target_cd << " (" << move_time_ms << " ms)\r\n";
-#if MARS_PROFILE_SEND
-          uint32_t __call_start_us = micros();
-#endif
-          g_servo[leg][j]->move_time(out_cd, 0);
-#if MARS_PROFILE_SEND
-          uint16_t __call_dur = (uint16_t)(micros() - __call_start_us);
-          g_prof_send_call_us_sum += (uint32_t)__call_dur;
-          if (__call_dur < g_prof_send_call_us_min) g_prof_send_call_us_min = __call_dur;
-          if (__call_dur > g_prof_send_call_us_max) g_prof_send_call_us_max = __call_dur;
-          ++g_prof_send_call_count;
-#endif
-          //busMoveTimeWrite(leg, j, target_cd, 0 ); //move_time_ms);
-          //if (j == 0) g_bus[leg].debug(false);
         }
       }
+
+      // Build both base (no PID) and PID-corrected desired targets; apply only PID in active mode.
+      int16_t base_target_cd[NUM_LEGS][LEG_SERVOS];
+      int16_t pid_target_cd[NUM_LEGS][LEG_SERVOS];
+      // dt-aware PID: derive elapsed time since last tick
+      float dt_s = g_loopTimer.DeltaTseconds();
+      if (!(dt_s > 0.0f) || dt_s > 0.100f) {
+        // Fallback to nominal period if dt is invalid or absurdly large (>100 ms)
+        dt_s = (g_loop_hz > 0) ? (1.0f / (float)g_loop_hz) : 0.006f;
+      }
+      // Convert to milliseconds for fixed-point arithmetic in I/D terms
+      uint16_t dt_ms = (uint16_t)(dt_s * 1000.0f + 0.5f);
+      if (dt_ms < 1) dt_ms = 1;
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+          int16_t des = g_cmd_cd[leg][j];
+          base_target_cd[leg][j] = des; // raw desired before PID
+          // Compute PID corrected target if enabled
+          if (g_pid_enabled) {
+            int16_t meas = g_est_pos_cd[leg][j];
+            int16_t err = (int16_t)(des - meas);
+            int32_t p = ((int32_t)g_pid_kp_milli[j] * (int32_t)err) / 1000;
+            int32_t i = 0;
+            if (g_pid_ki_milli[j] != 0) {
+              // integrate error in cd·ms to be robust to variable dt
+              int32_t acc = g_pid_i_accum[leg][j] + (int32_t)((int32_t)err * (int32_t)dt_ms);
+              // clamp integral accumulator (cd·ms)
+              if (acc > 2000000L) acc = 2000000L; else if (acc < -2000000L) acc = -2000000L;
+              g_pid_i_accum[leg][j] = acc;
+              // Ki[milli] * (cd·ms) / (1000[milli]*1000[ms/s]) -> cd
+              int64_t i64 = ((int64_t)g_pid_ki_milli[j] * (int64_t)acc);
+              i = (int32_t)(i64 / 1000000LL);
+            }
+            int32_t d = 0;
+            if (g_pid_kd_milli[j] != 0) {
+              int16_t prev = g_pid_prev_err[leg][j];
+              int16_t derr = (int16_t)(err - prev);
+              g_pid_prev_err[leg][j] = err;
+              // Convert per-tick error delta to per-second using dt (fixed-point: *1000/dt_ms)
+              int32_t der_per_s = (int32_t)((int32_t)derr * 1000) / (int32_t)dt_ms; // cd/s
+              int32_t df = g_pid_d_filt[leg][j];
+              uint16_t a = g_pid_kd_alpha_milli[j]; if (a > 1000) a = 1000;
+              // Low-pass filter the derivative signal toward der_per_s
+              df = df + (int32_t)((a * (der_per_s - df)) / 1000);
+              if (df > 32767) 
+                df = 32767; 
+              else if (df < -32768) 
+                df = -32768;
+              g_pid_d_filt[leg][j] = (int16_t)df;
+              d = ((int32_t)g_pid_kd_milli[j] * (int32_t)g_pid_d_filt[leg][j]) / 1000;
+            }
+            int32_t corr = p + i + d;
+            if (corr > PID_CORR_CLAMP_CD) 
+              corr = PID_CORR_CLAMP_CD; 
+            else if (corr < -PID_CORR_CLAMP_CD) 
+              corr = -PID_CORR_CLAMP_CD;
+            int32_t des_corr = (int32_t)des + corr;
+            if (des_corr < 0) 
+              des_corr = 0; 
+            else if (des_corr > 24000) 
+              des_corr = 24000;
+            pid_target_cd[leg][j] = (int16_t)des_corr;
+          } else {
+            pid_target_cd[leg][j] = des; // same as base when PID disabled
+          }
+        }
+      }
+
+      // Apply safety + rate limit separately for base and pid targets (shadow comparison uses both)
+      int16_t out_base_cd[NUM_LEGS][LEG_SERVOS];
+      int16_t out_pid_cd[NUM_LEGS][LEG_SERVOS];
+      bool    ok_grid[NUM_LEGS][LEG_SERVOS];
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        bool leg_on = legEnabled(leg);
+        for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+          bool ok = leg_on && jointEnabled(leg, j) && !servoIsOOS(leg, j);
+          ok_grid[leg][j] = ok;
+          int16_t prev_cd = g_last_sent_cd[leg][j];
+          int32_t base_t = base_target_cd[leg][j];
+          int32_t pid_t  = pid_target_cd[leg][j];
+          if (ok) {
+            if (g_safety_soft_limits_enabled) {
+              int16_t min_cd = g_limit_min_cd[leg][j];
+              int16_t max_cd = g_limit_max_cd[leg][j];
+              if (base_t < min_cd) base_t = min_cd; if (base_t > max_cd) base_t = max_cd;
+              if (pid_t  < min_cd) pid_t  = min_cd;  if (pid_t  > max_cd) pid_t  = max_cd;
+            }
+            int32_t base_delta = base_t - prev_cd;
+            int32_t pid_delta  = pid_t  - prev_cd;
+            if (max_delta_cd > 0) {
+              if (base_delta > max_delta_cd) base_delta = max_delta_cd; else if (base_delta < -max_delta_cd) base_delta = -max_delta_cd;
+              if (pid_delta  > max_delta_cd) pid_delta  = max_delta_cd;  else if (pid_delta  < -max_delta_cd)  pid_delta  = -max_delta_cd;
+            }
+            out_base_cd[leg][j] = (int16_t)(prev_cd + base_delta);
+            out_pid_cd[leg][j]  = (int16_t)(prev_cd + pid_delta);
+          } else {
+            out_base_cd[leg][j] = prev_cd;
+            out_pid_cd[leg][j]  = prev_cd;
+          }
+        }
+      }
+
+      // Select which outputs to actually send based on PID mode
+      int16_t out_drive_cd[NUM_LEGS][LEG_SERVOS];
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+          out_drive_cd[leg][j] = (g_pid_enabled && g_pid_mode == 0) ? out_pid_cd[leg][j] : out_base_cd[leg][j];
+          // Update last_sent to what we drove (estimator & rate-limit reference)
+          g_last_sent_cd[leg][j] = out_drive_cd[leg][j];
+        }
+      }
+
+  // Parallelize across UARTs by batching per leg and avoiding per-frame waits
+      uint8_t rr_leg = g_rr_index / LEG_SERVOS;
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        bool has_any = ok_grid[leg][0] || ok_grid[leg][1] || ok_grid[leg][2];
+        if (!has_any) continue;
+        bool is_rr = (leg == rr_leg);
+        fastSendLeg(leg, out_drive_cd[leg], ok_grid[leg], /*time_ms=*/0, is_rr);
+      }
+      // Shadow mode streaming: periodically print per-leg summary without driving PID corrections
+      if (g_pid_enabled && g_pid_mode == 1 && g_pid_shadow_report_hz > 0) {
+        uint32_t now_ms = millis();
+        uint32_t interval_ms = (uint32_t)(1000UL / (uint32_t)g_pid_shadow_report_hz);
+        if (interval_ms == 0) interval_ms = 1;
+        if (now_ms - g_pid_shadow_last_report_ms >= interval_ms) {
+          g_pid_shadow_last_report_ms = now_ms;
+          if (Serial) {
+            const char* legNames[6]  = {"LF","LM","LR","RF","RM","RR"};
+            Serial.print(F("PID_SHADOW t_ms=")); Serial.print((unsigned long)now_ms);
+            for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+              Serial.print(F(" ")); Serial.print(legNames[leg]); Serial.print(F(":"));
+              // diffs (pid - base) in centidegrees per joint
+              int16_t d_c = (int16_t)(out_pid_cd[leg][0] - out_base_cd[leg][0]);
+              int16_t d_f = (int16_t)(out_pid_cd[leg][1] - out_base_cd[leg][1]);
+              int16_t d_t = (int16_t)(out_pid_cd[leg][2] - out_base_cd[leg][2]);
+              // error used by PID (des - est), using estimate (meas-corrected on RR)
+              int16_t e_c = (int16_t)(base_target_cd[leg][0] - g_est_pos_cd[leg][0]);
+              int16_t e_f = (int16_t)(base_target_cd[leg][1] - g_est_pos_cd[leg][1]);
+              int16_t e_t = (int16_t)(base_target_cd[leg][2] - g_est_pos_cd[leg][2]);
+              // estimate/read (centidegrees)
+              int16_t m_c = g_est_pos_cd[leg][0];
+              int16_t m_f = g_est_pos_cd[leg][1];
+              int16_t m_t = g_est_pos_cd[leg][2];
+              // base target (pre-PID) in centidegrees
+              int16_t t_c = base_target_cd[leg][0];
+              int16_t t_f = base_target_cd[leg][1];
+              int16_t t_t = base_target_cd[leg][2];
+              Serial.print(F(" diff_cd=")); Serial.print((int)d_c); Serial.print(F("/")); Serial.print((int)d_f); Serial.print(F("/")); Serial.print((int)d_t);
+              Serial.print(F(" err_cd="));  Serial.print((int)e_c); Serial.print(F("/")); Serial.print((int)e_f); Serial.print(F("/")); Serial.print((int)e_t);
+              Serial.print(F(" est_cd="));  Serial.print((int)m_c); Serial.print(F("/")); Serial.print((int)m_f); Serial.print(F("/")); Serial.print((int)m_t);
+              Serial.print(F(" tgt_cd="));  Serial.print((int)t_c); Serial.print(F("/")); Serial.print((int)t_f); Serial.print(F("/")); Serial.print((int)t_t);
+            }
+            Serial.print(F("\r\n"));
+          }
+        }
+      }
+  // Ensure RR leg is in RX before feedback even if it had nothing to send this tick
+  SERVO_BUS[rr_leg]->flush();
+  oeSetTX(rr_leg, false);
+  // end fast send path
     }
 #if MARS_TIMING_PROBES
     g_probe_send_us = (uint16_t)send_us;
@@ -1219,19 +1449,33 @@ static void loopTick() {
             if (pos_cd > 24000) pos_cd = 24000;
             g_meas_pos_cd[leg][joint] = (int16_t)pos_cd;
             g_meas_pos_valid[leg][joint] = 1;
+            // Measurement correction for estimator: blend toward measurement
+            {
+              int32_t est = g_est_pos_cd[leg][joint];
+              int32_t meas = g_meas_pos_cd[leg][joint];
+              uint16_t a = g_est_meas_alpha_milli; if (a > 1000) a = 1000;
+              est = est + (int32_t)((a * (meas - est)) / 1000);
+              if (est < 0) est = 0; else if (est > 24000) est = 24000;
+              g_est_pos_cd[leg][joint] = (int16_t)est;
+            }
           } else {
             g_meas_pos_valid[leg][joint] = 0;
           }
 
           // vin/temp read drive OOS detection
-          uint16_t vin_mV = s->vin();
-          uint8_t  temp_C = s->temp();
-          g_meas_vin_mV[leg][joint] = vin_mV;
-          g_meas_temp_C[leg][joint] = temp_C;
+          // Alternate vin and temp across visits; always retain last known values
+          uint8_t tog = (g_fb_rr_toggle[leg][joint] ^= 1); // flip 0<->1
+          if (tog == 0) {
+            uint16_t vin_mV = s->vin();
+            g_meas_vin_mV[leg][joint] = vin_mV;
+          } else {
+            uint8_t temp_C = s->temp();
+            g_meas_temp_C[leg][joint] = temp_C;
+          }
 
-          // Validity: accept either reading being sane as a 'success'
-          bool validVin  = (vin_mV > 0); // lenient: any non-zero
-          bool validTemp = (temp_C > 0 && temp_C < 400); // 1..119 C
+          // Validity: accept either stored reading being sane as a 'success'
+          bool validVin  = (g_meas_vin_mV[leg][joint] > 0); // lenient: any non-zero
+          bool validTemp = (g_meas_temp_C[leg][joint] > 0 && g_meas_temp_C[leg][joint] < 400); // 1..119 C
 
           // Startup grace window: don't count failures too early after boot
           const uint16_t OOS_GRACE_MS = 750; // ignore failures for first 0.75s after setup
