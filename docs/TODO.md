@@ -15,6 +15,8 @@ Conventions
   - Phase 1 + FULL mode implemented; size rotation; tail/clear; leg-aggregated rows; per-servo OOS; settings persistence (RATE/MODE/HEADER/ROTATE/MAXKB) excluding enabled. Remaining future (deferred): Bresenham sampling, column mask/filter, compression/binary format.
  - [x] Expand config keys (2025-11-12)
   - Added logging.rotate, logging.max_kb, test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. Joint limits parser already supports all legs.
+ - [x] Expand config keys (2025-11-12)
+  - Added logging.rotate, logging.max_kb, test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. Joint limits parser already supports all legs.
  - [x] Tripod test mode (2025-11-09)
   - Implemented deterministic tripod gait with runtime tuning (CYCLE/HEIGHT/BASEX/STEPLEN/LIFT/OVERLAP) and persistence of overlap pct; STATUS reflects parameters.
  
@@ -25,6 +27,7 @@ Conventions
 
   - [x] Complete servo home offset update
     - [x] Wire hardware angle offset I/O via lx16a-servo helpers (remove RAM stubs; Teensy uses real device I/O; host uses fake include).
+    - [x] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
     - [x] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
     - [x] SAVEHOME cd-only clear→read→compute flow; persist both home_cd.* and offset_cd.* (0.1.98).
 
@@ -81,6 +84,10 @@ Conventions
   - Verified STATUS remains compact with grouped sections; no `[TUCK]` debug block or verbose fields present.
  - [x] Startup offset refresh (2025-11-12)
   - On boot, read hardware angle offsets and populate g_offset_cd before first STATUS. Also parse offset_cd.<LEG>.<joint> from config (seed only; hardware read overwrites).
+ - [x] Keep STATUS slim (2025-11-12)
+  - Verified STATUS remains compact with grouped sections; no `[TUCK]` debug block or verbose fields present.
+ - [x] Startup offset refresh (2025-11-12)
+  - On boot, read hardware angle offsets and populate g_offset_cd before first STATUS. Also parse offset_cd.<LEG>.<joint> from config (seed only; hardware read overwrites).
  - [x] HELP TUCK update (2025-11-12)
   - Added TUCK help lines documenting runtime tuck.* params and TUCK SET subcommand (persist TIBIA/FEMUR/COXA/TOL_TIBIA/TOL_OTHER/TIMEOUT). (FW 0.1.111)
  - [x] TUCK PARAMS command (2025-11-12)
@@ -88,6 +95,9 @@ Conventions
  - [x] STATUS [TUCK] debug removal (2025-11-12)
   - Removed temporary STATUS `[TUCK]` debug section (active/masks/params and tibia meas/eff). Keeps STATUS leaner and reduces print cost; TUCK controller remains unchanged. (FW 0.1.110)
  - [x] Position validity & TUCK tibia convergence (2025-11-12)
+ - [x] Loop timing validation (2025-11-12)
+  - Jitter metrics added (FW 0.1.115) and observed min/avg/max within <10% of 6.024 ms budget under idle + test gait; no sustained overruns.
+ - Confirms Phase 1 timing acceptance criteria.
  - [x] Loop timing validation (2025-11-12)
   - Jitter metrics added (FW 0.1.115) and observed min/avg/max within <10% of 6.024 ms budget under idle + test gait; no sustained overruns.
  - Confirms Phase 1 timing acceptance criteria.
@@ -122,6 +132,9 @@ Conventions
   - Added `TEST OVERLAP <pct>` to adjust overlap at runtime (0..25). Value is persisted to `/config.txt` as `test.trigait.overlap_pct`. STATUS includes `overlap_pct`.
 - [x] STATUS safety details (2025-11-03)
   - STATUS now includes `safety=<state> cause=0x.. override=0x..`. Added `SAFETY LIST` and `SAFETY OVERRIDE` commands.
+
+  - [x] Defer commits until instructed (2025-11-12)
+    - Phase 1 policy enforced (batched edits, explicit user-driven commit points). Closed after merge/tag of Phase 1 completion.
 
   - [x] Defer commits until instructed (2025-11-12)
     - Phase 1 policy enforced (batched edits, explicit user-driven commit points). Closed after merge/tag of Phase 1 completion.

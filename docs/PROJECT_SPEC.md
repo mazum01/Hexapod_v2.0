@@ -33,7 +33,9 @@ Out of scope (Phase 1): ROS integration, advanced terrain adaptation, high‑lev
 - Bus topology: one independent serial bus per leg (6 buses total), each shared by its 3 servos.
   - UART mapping (leg → SerialX):
     - LF → Serial8
+    - LF → Serial8
     - LM → Serial3
+    - LR → Serial5
     - LR → Serial5
     - RF → Serial7
     - RM → Serial6
@@ -168,6 +170,11 @@ IK implementation notes (as provided)
   - logging.rate_hz=166
   - logging.rotate=true            # enable size-based rotation (new)
   - logging.max_kb=10240           # rotation threshold in KB (min 100, clamp 1048576)
+  - test.trigait.cycle_ms=3000 [impl]
+  - test.trigait.height_mm=-110 [impl]
+  - test.trigait.basex_mm=130 [impl]
+  - test.trigait.steplen_mm=40 [impl]
+  - test.trigait.lift_mm=40 [impl]
   - test.trigait.cycle_ms=3000 [impl]
   - test.trigait.height_mm=-110 [impl]
   - test.trigait.basex_mm=130 [impl]
@@ -358,6 +365,7 @@ SAFETY CLEAR           -> ERR E91 NOT_LOCKED
   - TEST LIFT <mm>      — step height (lift amount on swing)
   - TEST OVERLAP <pct>  — overlap window percent of total cycle reserved for both-tripods stance (0..25); persisted to `/config.txt` as `test.trigait.overlap_pct`
   - Config: `test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}` — tripod gait parameters loaded at boot. `overlap_pct` also updated at runtime when changed via TEST command. Defaults: cycle_ms=3000, height_mm=-110, basex_mm=130, steplen_mm=40, lift_mm=40, overlap_pct=5.
+  - Config: `test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}` — tripod gait parameters loaded at boot. `overlap_pct` also updated at runtime when changed via TEST command. Defaults: cycle_ms=3000, height_mm=-110, basex_mm=130, steplen_mm=40, lift_mm=40, overlap_pct=5.
   - STATUS prints a compact summary: `uptime=<D>d <H>h <M>m <S>s <ms>ms` (monotonic across millis() rollover) and `test=cycle_ms=... base_x=... base_y=... step_z=... lift_y=... overlap_pct=...`
 - Foot trajectory: simple trapezoidal or cycloidal swing; linear stance.
 - Body stabilization: none in Phase 1 (keep level); optional later.
@@ -382,6 +390,7 @@ SAFETY CLEAR           -> ERR E91 NOT_LOCKED
 - Transport: USB Serial; print once during setup before entering the control loop.
 - Content (example; single or few short lines):
   - `MARS — Modular Autonomous Robotic System | Hexapod v2.0 Controller`
+  - `Build: __DATE__ __TIME__ | loop_hz=166 | uart: LF=Serial8 LM=Serial3 LR=Serial5 RF=Serial7 RM=Serial6 RR=Serial2`
   - `Build: __DATE__ __TIME__ | loop_hz=166 | uart: LF=Serial8 LM=Serial3 LR=Serial5 RF=Serial7 RM=Serial6 RR=Serial2`
   - `config: OK | logging: mode=read rate=166`
 - Constraints: keep output brief and non-blocking; do not delay the first control tick beyond budget.
@@ -432,6 +441,7 @@ Workflow to center physical neutral at logical 12000 cd using LX16A hardware off
   - Compute required total offset so (raw_physical_angle − total_offset) = 12000 cd.
   - Clamp to ±30° (±3000 cd ≈ ±125 ticks) and apply via `angle_offset_adjust` + `angle_offset_save`.
   - Re-read position; store residual as `home_cd.<LEG>.<joint>`.
+3. STATUS then shows both `home_cd` and `offset_cd` grids. As of FW 0.1.98 the calibration routine also persists `offset_cd.<LEG>.<joint>=<centideg>` alongside `home_cd.<LEG>.<joint>` in `/config.txt` for post-reboot inspection. Startup reads hardware offsets and also accepts `offset_cd.<LEG>.<joint>` keys; parsed values are seeded then overwritten by hardware reads.
 3. STATUS then shows both `home_cd` and `offset_cd` grids. As of FW 0.1.98 the calibration routine also persists `offset_cd.<LEG>.<joint>=<centideg>` alongside `home_cd.<LEG>.<joint>` in `/config.txt` for post-reboot inspection. Startup reads hardware offsets and also accepts `offset_cd.<LEG>.<joint>` keys; parsed values are seeded then overwritten by hardware reads.
 
 Clearing offsets: `OFFSET CLEAR <LEG|ALL> <JOINT|ALL>` restores offset(s) to zero while updating `home_cd` so logical pose stays stable.

@@ -177,6 +177,10 @@
 ### Added
 - TUCK debug instrumentation (feature flag `MARS_TUCK_DEBUG`): prints start of sequence, per-leg tibia convergence (`TUCKDBG TIBIA`), femur+coxa convergence (`TUCKDBG FEMCOXA`), and completion or timeout summary. Adds `g_tuck_tibia_mask` to track stage 1 per leg. STATUS remains trimmed; debug output is lightweight and can be disabled by setting `MARS_TUCK_DEBUG` to 0.
 
+## [0.1.113] - 2025-11-12
+### Added
+- TUCK debug instrumentation (feature flag `MARS_TUCK_DEBUG`): prints start of sequence, per-leg tibia convergence (`TUCKDBG TIBIA`), femur+coxa convergence (`TUCKDBG FEMCOXA`), and completion or timeout summary. Adds `g_tuck_tibia_mask` to track stage 1 per leg. STATUS remains trimmed; debug output is lightweight and can be disabled by setting `MARS_TUCK_DEBUG` to 0.
+
 ## 2025-11-11
 ## [0.1.99] - 2025-11-11
 ### Fixed

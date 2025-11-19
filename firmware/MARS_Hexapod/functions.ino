@@ -178,6 +178,28 @@ static inline bool parse_bool(const char* v) {
   return n != 0;
 }
 
+// Parse common boolean forms: true/false, on/off, 1/0 (case-insensitive)
+static inline bool parse_bool(const char* v) {
+  if (!v) return false;
+  // Skip leading spaces
+  while (*v==' '||*v=='\t') ++v;
+  char c0 = (char)tolower(*v);
+  if (c0=='1') return true;
+  if (c0=='0') return false;
+  // Case-insensitive literal checks without strncasecmp (Arduino-safe)
+  // true
+  if ((tolower(v[0])=='t') && (tolower(v[1])=='r') && (tolower(v[2])=='u') && (tolower(v[3])=='e')) return true;
+  // on
+  if ((tolower(v[0])=='o') && (tolower(v[1])=='n') && (v[2]==0 || v[2]=='\n' || v[2]=='\r')) return true;
+  // false
+  if ((tolower(v[0])=='f') && (tolower(v[1])=='a') && (tolower(v[2])=='l') && (tolower(v[3])=='s') && (tolower(v[4])=='e')) return false;
+  // off
+  if ((tolower(v[0])=='o') && (tolower(v[1])=='f') && (tolower(v[2])=='f')) return false;
+  // Fallback: non-zero numeric
+  long n = atol(v);
+  return n != 0;
+}
+
 // Centidegrees → radians helper
 static inline float cd_to_rad(int16_t cd_rel) {
   const float PI_F = 3.14159265358979323846f;
@@ -519,6 +541,35 @@ static void configParseKV(char* key, char* val)
     return;
   }
 
+  // Capture but do not apply: uart.<LEG>=SerialX (compile-time mapping is fixed). Used for splash sanity.
+  if (!strncmp(key, "uart.", 5))
+  {
+    char* p = key + 5;
+    char legtok[4] = {0}; int li = 0;
+    while (*p && *p != '.' && li < 3) legtok[li++] = *p++;
+    legtok[li] = 0;
+    int leg = legIndexFromToken(legtok);
+    if (leg >= 0 && leg < 6) {
+      extern volatile uint8_t g_uart_cfg_seen_mask; // declared in main TU
+      extern volatile bool g_uart_cfg_present;
+      extern volatile bool g_uart_cfg_match;
+      g_uart_cfg_present = true;
+      g_uart_cfg_seen_mask |= (uint8_t)(1u << leg);
+      // Expected compile-time mapping names
+      const char* expected[6] = {"Serial8","Serial3","Serial5","Serial7","Serial6","Serial2"};
+      if (val && *val) {
+        if (strcmp(val, expected[leg]) != 0) {
+          g_uart_cfg_match = false;
+        }
+      } else {
+        // Empty value counts as mismatch
+        g_uart_cfg_match = false;
+      }
+    }
+    // Do not count toward applied keys; mapping is not changed at runtime in Phase 1
+    return;
+  }
+
   if (!strcmp(key, "loop_hz"))
 
   {
@@ -536,6 +587,45 @@ static void configParseKV(char* key, char* val)
     if (n < 1) n = 1; if (n > 20) n = 20;
 
     g_servo_fb_fail_threshold = (uint8_t)n;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  // --- Safety keys ---
+  if (!strcmp(key, "safety.soft_limits"))
+
+  {
+    bool on = parse_bool(val);
+    g_safety_soft_limits_enabled = on;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "safety.collision"))
+
+  {
+    bool on = parse_bool(val);
+    g_safety_collision_enabled = on;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "safety.temp_lockout_c"))
+
+  {
+    long c = atol(val);
+    if (c < 30) c = 30; if (c > 120) c = 120;
+    g_safety_temp_lockout_c10 = (int16_t)(c * 10);
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "safety.clearance_mm"))
+
+  {
+    long mm = atol(val);
+    if (mm < 0) mm = 0; if (mm > 500) mm = 500;
+    g_safety_clearance_mm = (float)mm;
     ++g_config_keys_applied;
     return;
   }
@@ -685,6 +775,34 @@ static void configParseKV(char* key, char* val)
     if (cd < 0) cd = 0; if (cd > 24000) cd = 24000;
 
     g_home_cd[leg][j] = (int16_t)cd;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strncmp(key, "offset_cd.", 10))
+
+  {
+    // offset_cd.<LEG>.<coxa|femur|tibia> (centideg, typically within ±3000)
+    char* p = key + 10;
+    char legtok[4] = {0}; int li = 0;
+    while (*p && *p != '.' && li < 3) legtok[li++] = *p++;
+
+    legtok[li] = 0;
+    if (*p != '.') return; ++p;
+
+    char jtok[8] = {0}; int ji = 0;
+    while (*p && *p != '.' && ji < 7) jtok[ji++] = *p++;
+
+    jtok[ji] = 0;
+
+    int leg = legIndexFromToken(legtok);
+    int j = jointIndexFromToken(jtok);
+    if (leg < 0 || j < 0) return;
+
+    long cd = atol(val);
+    if (cd < -3000) cd = -3000; if (cd > 3000) cd = 3000;
+
+    g_offset_cd[leg][j] = (int16_t)cd; // seed from config; hardware refresh will overwrite
     ++g_config_keys_applied;
     return;
   }
@@ -1098,6 +1216,56 @@ static void configParseKV(char* key, char* val)
     return;
   }
 
+  if (!strcmp(key, "test.trigait.cycle_ms"))
+
+  {
+    long ms = atol(val);
+    if (ms < 750) ms = 750; if (ms > 10000) ms = 10000;
+    g_test_cycle_ms = (uint32_t)ms;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.height_mm"))
+
+  {
+    float v = atof(val);
+    if (v > 0.0f) v = 0.0f; if (v < -300.0f) v = -300.0f; // Y: negative is down
+    g_test_base_y_mm = v;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.basex_mm"))
+
+  {
+    float v = atof(val);
+    if (v < -300.0f) v = -300.0f; if (v > 300.0f) v = 300.0f;
+    g_test_base_x_mm = v;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.steplen_mm"))
+
+  {
+    float v = atof(val);
+    if (v < 0.0f) v = 0.0f; if (v > 200.0f) v = 200.0f;
+    g_test_step_len_mm = v;
+    ++g_config_keys_applied;
+    return;
+  }
+
+  if (!strcmp(key, "test.trigait.lift_mm"))
+
+  {
+    float v = atof(val);
+    if (v < 0.0f) v = 0.0f; if (v > 200.0f) v = 200.0f;
+    g_test_lift_y_mm = v;
+    ++g_config_keys_applied;
+    return;
+  }
+
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
   // --- Logging keys (Phase 1) ---
   if (!strcmp(key, "logging.enabled"))
@@ -1237,6 +1405,24 @@ void configLoad()
   g_config_keys_applied = 0;
   g_config_loop_hz = g_loop_hz;
 #endif
+}
+
+// -----------------------------------------------------------------------------
+// Refresh hardware angle offsets into g_offset_cd at startup
+// Reads each in-service servo's stored angle offset (cd) and populates g_offset_cd.
+// Safe on host: fake lx16a-servo stubs return 0.
+// -----------------------------------------------------------------------------
+void refreshOffsetsAtStartup() {
+  for (uint8_t L = 0; L < 6; ++L) {
+    for (uint8_t J = 0; J < 3; ++J) {
+      int16_t cd = 0;
+      uint8_t id = servoId(L, J);
+      if (id >= 1 && id <= 253) {
+        cd = (int16_t)angle_offset_read(L, id);
+      }
+      g_offset_cd[L][J] = cd;
+    }
+  }
 }
 
 // -----------------------------------------------------------------------------

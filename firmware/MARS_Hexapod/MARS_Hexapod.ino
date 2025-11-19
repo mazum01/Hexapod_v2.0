@@ -180,6 +180,7 @@ void splash();
 void processSerial();
 bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t out_cd[3]);
 void refreshOffsetsAtStartup();
+void refreshOffsetsAtStartup();
 // -----------------------------------------------------------------------------
 // -----------------------------------------------------------------------------
 // Safety and lockout state
@@ -243,6 +244,7 @@ static LoopTimerClass g_loopTimer(LOOP_HZ_DEFAULT);
 //  - Completion: when all selected legs have been issued femur/coxa (or timeout), clear active.
 static volatile uint8_t  g_tuck_active     = 0;
 static volatile uint8_t  g_tuck_mask       = 0; // bits 0..5 for LF..RR
+static volatile uint8_t  g_tuck_done_mask  = 0; // femur+coxa within tolerance (stage 2 complete per leg)
 static volatile uint8_t  g_tuck_done_mask  = 0; // femur+coxa within tolerance (stage 2 complete per leg)
 static volatile uint32_t g_tuck_start_ms   = 0;
 
@@ -354,6 +356,11 @@ static volatile uint16_t g_override_mask  = LOCKOUT_CAUSE_NONE; // user override
 // Snapshot of temp trips at lockout time (true if that joint exceeded threshold) and value in 0.1 C
 static volatile bool g_lockout_temp_trip[NUM_LEGS][LEG_SERVOS] = { { false } };
 static volatile int16_t g_lockout_temp_c10[NUM_LEGS][LEG_SERVOS] = { { 0 } };
+
+// UART config presence/match flags from /config.txt (uart.<LEG>=SerialX); mapping is compile-time fixed.
+volatile uint8_t g_uart_cfg_seen_mask = 0;  // bit per leg LF..RR when a uart.<LEG> key is present
+volatile bool    g_uart_cfg_present   = false; // any uart.* key present
+volatile bool    g_uart_cfg_match     = true;  // assumes match until a mismatch is seen
 
 // UART config presence/match flags from /config.txt (uart.<LEG>=SerialX); mapping is compile-time fixed.
 volatile uint8_t g_uart_cfg_seen_mask = 0;  // bit per leg LF..RR when a uart.<LEG> key is present
@@ -955,6 +962,8 @@ void setup() {
   servoObjectsInit();
   // Populate hardware angle offsets before any STATUS is printed/used
   refreshOffsetsAtStartup();
+  // Populate hardware angle offsets before any STATUS is printed/used
+  refreshOffsetsAtStartup();
   g_boot_ms = millis();
   // Initialize uptime tracker
   g_uptime_prev_ms = g_boot_ms;
@@ -1237,6 +1246,7 @@ static void loopTick() {
       int16_t t_meas = g_meas_pos_cd[L][2];
       int16_t t_eff  = g_meas_pos_valid[L][2] ? t_meas : g_last_sent_cd[L][2];
       int16_t t_err  = (int16_t)abs(tibia_target - t_eff);
+      int16_t t_err  = (int16_t)abs(tibia_target - t_eff);
       bool tibia_ok  = (t_err <= TOL_TIBIA_CD) || servoIsOOS(L, 2) || !jointEnabled(L, 2);
 
       // --- Femur & Coxa control (only after tibia acceptable) ---
@@ -1253,6 +1263,9 @@ static void loopTick() {
         int16_t c_eff  = g_meas_pos_valid[L][0] ? c_meas : g_last_sent_cd[L][0];
         int16_t c_err  = (int16_t)(coxa_target - c_eff); if (c_err < 0) c_err = (int16_t)-c_err;
         if (!(servoIsOOS(L,0) || !jointEnabled(L,0))) fem_coxa_ok &= (c_err <= TOL_OTHER_CD);
+        if (tibia_ok && fem_coxa_ok && ((g_tuck_done_mask >> L) & 1u) == 0) {
+          g_tuck_done_mask |= (1u << L);
+        }
         if (tibia_ok && fem_coxa_ok && ((g_tuck_done_mask >> L) & 1u) == 0) {
           g_tuck_done_mask |= (1u << L);
         }
@@ -1902,6 +1915,18 @@ static void loopTick() {
   }
 #if MARS_TIMING_PROBES
   g_probe_tick_us = (uint16_t)tick_elapsed_us;
+  // Update jitter metrics (absolute timing error)
+  if (period_us > 0) {
+    uint32_t diff = (tick_elapsed_us > period_us) ? (tick_elapsed_us - period_us) : (period_us - tick_elapsed_us);
+    uint16_t jd = (diff > 0xFFFFu) ? 0xFFFFu : (uint16_t)diff;
+    if (g_jitter_min_us == 0xFFFFu || jd < g_jitter_min_us) g_jitter_min_us = jd;
+    if (jd > g_jitter_max_us) g_jitter_max_us = jd;
+    g_jitter_sum_us += (uint32_t)jd;
+    if (++g_jitter_count >= 128) {
+      // Reset window each 128 samples; STATUS will read current snapshot
+      g_jitter_min_us = 0xFFFFu; g_jitter_max_us = 0; g_jitter_sum_us = 0; g_jitter_count = 0;
+    }
+  }
   // Update jitter metrics (absolute timing error)
   if (period_us > 0) {
     uint32_t diff = (tick_elapsed_us > period_us) ? (tick_elapsed_us - period_us) : (period_us - tick_elapsed_us);
