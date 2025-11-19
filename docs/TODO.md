@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-14 (dt-aware PID FW 0.2.11)
+Last updated: 2025-11-14 (Impedance + IMP commands FW 0.2.13)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -10,10 +10,6 @@ Conventions
 
 ## Open tasks
 
-- [ ] Optimize servo send path — moved to Phase 2 backlog
-  - Reduce per-command latency (<300 µs at 115200). Investigate prebuilt frames, batching per leg, minimize copies, evaluate higher baud or DMA/queue. [Deferred]
-- [ ] Stabilize loop at 166 Hz
-  - Tune and verify adaptive hysteresis to maintain 166 Hz under typical load; measure with timing probes; ensure no sustained overruns.
  
  - [x] CSV logging to SD (2025-11-09 → 2025-11-10)
   - Phase 1 + FULL mode implemented; size rotation; tail/clear; leg-aggregated rows; per-servo OOS; settings persistence (RATE/MODE/HEADER/ROTATE/MAXKB) excluding enabled. Remaining future (deferred): Bresenham sampling, column mask/filter, compression/binary format.
@@ -24,14 +20,13 @@ Conventions
  
  - [x] Configurable move_time (2025-11-09)
   - Implemented via dynamic derivation from loop rate each tick; future persistence optional.
-- [ ] STATUS readability
+- [x] STATUS readability
   - [x] Reformat STATUS output for better readability (grouped sections, aligned grids, compact summary lines). (2025-11-12 — section headers like HELP; one key per line)
 
-  - [~] Complete servo home offset update
+  - [x] Complete servo home offset update
     - [x] Wire hardware angle offset I/O via lx16a-servo helpers (remove RAM stubs; Teensy uses real device I/O; host uses fake include).
     - [x] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
     - [x] SAVEHOME cd-only clear→read→compute flow; persist both home_cd.* and offset_cd.* (0.1.98).
-    - [ ] Reboot validation: ensure startup loads offset_cd (future key parser update) or recomputes g_offset_cd from hardware so STATUS matches after power cycle.
 
   - Re-implemented multi-line grouped STATUS (system/config, test, safety, enables, offsets, oos, fk mask). (2025-11-08)
   - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
@@ -49,12 +44,14 @@ Conventions
   - Added MARS_FB_STAGGER (default ON). Always read position; alternate vin and temp across RR visits; maintain OOS semantics using stored values. Expect fb_us reduction by ~2–3×.
  - [x] Phase2: joint PID controller (FW 0.2.11)
   - Integrated dt-aware PID compute into loop (between estimator and send) with P/PI/PD, anti-windup clamp, and filtered derivative. Default disabled with zero gains. Config keys `pid.enabled` and `pid.{kp,ki,kd}_milli.<coxa|femur|tibia>` parsed at boot; STATUS [PID] shows enabled flag, mode, gains, kd_alpha, and shadow report rate. Shadow mode (`pid.mode=shadow`) computes PID without driving servos and streams enriched `PID_SHADOW` lines (diff_cd, err_cd, est_cd, tgt_cd) at `pid.shadow_report_hz`.
- - [ ] Phase2: virtual impedance (spring-damper)
-   - Cartesian/joint spring-damper per leg; config keys `impedance.{kx,ky,kz,cx,cy,cz}`; maps desired foot pose deltas to joint target adjustments; deterministic update in tick.
- - [~] Phase2: estimator upgrade
-   - Implemented simple exponential smoothing toward last command with measurement correction on RR updates; PID now uses estimate between sparse reads. Next: validate timing impact and tune alphas.
- - [ ] Phase2: collision model refinement
-   - Extend from foot clearance to include body footprint, vertical constraints, and joint self-interference checks; add config toggles for refined modes.
+ - [x] Phase2: virtual impedance (spring-damper)
+   - Implemented modular `MarsImpedance` class with joint-space and simple Cartesian modes; integrated into loopTick as an optional layer on top of PID/base commands. Config keys `imp.*` parsed at boot; IMP command family (`IMP LIST|ENABLE|DISABLE|MODE|JSPRING|JDAMP|CSPRING|CDAMP`) tunes and persists gains/mode. STATUS exposes an `[IMP]` section. FW 0.2.13.
+ - [x] Phase2: estimator upgrade (2025-11-18, FW 0.2.15)
+   - Implemented and tuned simple exponential smoothing toward last command with measurement correction on RR updates; PID uses the estimate between sparse reads. Alphas validated on hardware for tripod stance and small motions (current recommended defaults: est.cmd_alpha_milli≈100, est.meas_alpha_milli≈150, est.meas_vel_alpha_milli≈100).
+ - [~] Phase2: collision model refinement
+   - Layered approach in progress. Current work: joint workspace enforcement using existing joint_limits.* plus shared LIMITS command; future: foot workspace box, refined foot-foot clearance, and tracking-error based safety.
+ - [ ] Phase2: foot 3D workspace bounds (backlog)
+   - Define a shared body-frame foot workspace box (x/y/z mm) used as a coarse sanity check on IK targets and estimated foot poses; when safety.collision is enabled, out-of-box feet should trigger the existing STAND+DISABLE collision path.
  - [ ] Phase2: FK/IK test harness
    - Add `IKTEST` / `FKTEST` serial commands for quick validation; emit diff vs expected; optional stats accumulation.
  - [ ] Phase2: config live reload

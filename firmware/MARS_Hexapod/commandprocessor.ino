@@ -15,6 +15,7 @@
 #endif
 
 // Externs from other compilation units (defined in MARS_Hexapod.ino / functions.ino)
+
 extern void printHELP();
 extern void printSTATUS();
 extern void rebootNow();
@@ -77,9 +78,11 @@ extern volatile uint32_t g_log_total_bytes;
 extern volatile uint32_t g_log_seq;
 extern char              g_log_buf[8192];
 extern uint16_t          g_log_buf_used;
+#include <SD.h>
 extern File              g_log_file;
 #endif
 extern volatile uint16_t g_loop_hz;
+extern void configApplyLoopHz(uint16_t hz);
 // PID/EST globals
 extern volatile bool     g_pid_enabled;
 extern volatile uint16_t g_pid_kp_milli[3];
@@ -88,6 +91,13 @@ extern volatile uint16_t g_pid_kd_milli[3];
 extern volatile uint16_t g_pid_kd_alpha_milli[3];
 extern volatile uint8_t  g_pid_mode; // 0=active,1=shadow
 extern volatile uint16_t g_pid_shadow_report_hz;
+extern volatile uint16_t g_est_cmd_alpha_milli;
+extern volatile uint16_t g_est_meas_alpha_milli;
+extern volatile uint16_t g_est_meas_vel_alpha_milli;
+
+// Impedance controller
+#include "MarsImpedance.hpp"
+extern MarsImpedance g_impedance;
 
 
 // Hardware angle offset helpers (provided by lx16a-servo library or stubs)
@@ -96,9 +106,7 @@ extern bool angle_offset_adjust(uint8_t leg, uint8_t id, int16_t offset_cd); // 
 extern bool angle_offset_write(uint8_t leg, uint8_t id);
 
 // SD enable flag
-#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-#include <SD.h>
-#endif
+// (SD.h already included above when MARS_ENABLE_SD is enabled)
 
 // -------------------------------------------------------------------------------------------------
 // Command enumeration & mapping (enum defined in command_types.h)
@@ -132,8 +140,14 @@ CommandType parseCommandType(const char* cmd) {
   if (!strcmp(cmd,"SAVEHOME")) return CMD_SAVEHOME;
   if (!strcmp(cmd,"OFFSET")) return CMD_OFFSET;
   if (!strcmp(cmd,"LOG")) return CMD_LOG;
+  if (!strcmp(cmd,"LOOP")) return CMD_LOOP;
   if (!strcmp(cmd,"TUCK")) return CMD_TUCK;
   if (!strcmp(cmd,"PID")) return CMD_PID;
+  if (!strcmp(cmd,"IMP")) return CMD_IMP;
+  if (!strcmp(cmd,"COMP")) return CMD_COMP;
+  if (!strcmp(cmd,"EST")) return CMD_EST;
+  if (!strcmp(cmd,"LIMITS")) return CMD_LIMITS;
+  if (!strcmp(cmd,"CONFIG")) return CMD_CONFIG;
   return CMD_UNKNOWN;
 }
 
@@ -148,6 +162,104 @@ void processCmdSTATUS(const char* line,int s,int len)
 { (void)line;(void)s;(void)len; printSTATUS(); }
 void processCmdREBOOT(const char* line,int s,int len)
 { (void)line;(void)s;(void)len; /* centralized layer will handle OK+reboot */ }
+
+// CONFIG DUMP — stream /config.txt contents to the console (read-only)
+void processCmdCONFIG(const char* line,int s,int len)
+{
+  (void)line; (void)s; (void)len;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+  if (!SD.begin(BUILTIN_SDCARD)) {
+    printERR(1, "NO_SD");
+    return;
+  }
+  File f = SD.open("/config.txt", FILE_READ);
+  if (!f) {
+    printERR(2, "NO_CONFIG");
+    return;
+  }
+  Serial.print(F("# BEGIN CONFIG\r\n"));
+  while (f.available()) {
+    int ch = f.read();
+    if (ch < 0) break;
+    Serial.write((char)ch);
+  }
+  f.close();
+  Serial.print(F("\r\n# END CONFIG\r\n"));
+#else
+  printERR(1, "NO_SD");
+#endif
+}
+// LOOP <hz> — Set control loop frequency and persist loop_hz in config (when SD enabled)
+void processCmdLOOP(const char* line,int s,int len)
+{
+  int ts, tl;
+  s = nextToken(line, s, len, &ts, &tl);
+  if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+  char nb[12] = {0};
+  int nn = min(tl, 11);
+  memcpy(nb, line + ts, nn);
+  nb[nn] = 0;
+  long hz = atol(nb);
+  if (hz <= 0) { printERR(1, "BAD_ARG"); return; }
+  if (hz > 500) hz = 500; // hard cap for safety
+  // Apply loop Hz immediately
+  configApplyLoopHz((uint16_t)hz);
+
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+  // Persist loop_hz in /config.txt as loop_hz=<hz>
+  if (SD.begin(BUILTIN_SDCARD)) {
+    File fin = SD.open("/config.txt", FILE_READ);
+    File fout = SD.open("/config.tmp", FILE_WRITE);
+    if (fout) {
+      bool replaced = false;
+      if (fin) {
+        static char linebuf[256];
+        int llen = 0;
+        while (fin.available()) {
+          int ch = fin.read();
+          if (ch < 0) break;
+          if (ch == '\r') continue;
+          if (ch == '\n') {
+            linebuf[llen] = 0;
+            const char* p = linebuf;
+            while (*p == ' ' || *p == '\t') ++p;
+            const char* key = "loop_hz=";
+            size_t klen = strlen(key);
+            if (strncmp(p, key, klen) == 0) {
+              fout.print(key);
+              fout.print((unsigned int)hz);
+              fout.print('\n');
+              replaced = true;
+            } else {
+              fout.print(linebuf);
+              fout.print('\n');
+            }
+            llen = 0;
+          } else if (llen + 1 < (int)sizeof(linebuf)) {
+            linebuf[llen++] = (char)ch;
+          } else {
+            linebuf[llen] = 0;
+            fout.print(linebuf);
+            fout.print('\n');
+            llen = 0;
+          }
+        }
+        fin.close();
+      }
+      if (!replaced) {
+        fout.print("loop_hz=");
+        fout.print((unsigned int)hz);
+        fout.print('\n');
+      }
+      fout.close();
+      SD.remove("/config.txt");
+      SD.rename("/config.tmp", "/config.txt");
+    } else if (fin) {
+      fin.close();
+    }
+  }
+#endif
+}
 void processCmdENABLE(const char* line,int s,int len)
 { (void)line;(void)s;(void)len; g_enabled=true; }
 void processCmdDISABLE(const char* line,int s,int len)
@@ -372,6 +484,7 @@ void processCmdTEST(const char* line, int s, int len)
   s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
   char vb[24] = {0}; int nv = min(tl, 23); memcpy(vb, line + ts, nv); vb[nv] = 0;
 
+void processCmdIMP(const char* line,int s,int len);
   if (!strcmp(sub, "CYCLE")) {
     long ms = atol(vb); if (ms < 750) ms = 750; if (ms > 10000) ms = 10000;
     g_test_cycle_ms = (uint32_t)ms; return;
@@ -427,7 +540,33 @@ void processCmdTEST(const char* line, int s, int len)
   printERR(1, "BAD_ARG");
 }
 
-void processCmdSTAND(const char* line,int s,int len){ (void)line;(void)s;(void)len; const float BASE_Y=g_test_base_y_mm; const float BASE_X=g_test_base_x_mm; for(int L=0;L<6;++L){ int16_t out[3]; bool ok=calculateIK((uint8_t)L,BASE_X,BASE_Y,0.0f,out); if(!ok){ printERR(1,"IK_FAIL"); return;} bool isRight=(L>=3); if(isRight){ g_cmd_cd[L][0]=out[0]; g_cmd_cd[L][1]=out[1]; g_cmd_cd[L][2]=out[2]; } else { g_cmd_cd[L][0]=(int16_t)(2*g_home_cd[L][0]-out[0]); g_cmd_cd[L][1]=(int16_t)(2*g_home_cd[L][1]-out[1]); g_cmd_cd[L][2]=(int16_t)(2*g_home_cd[L][2]-out[2]); } g_foot_target_x_mm[L]=BASE_X; g_foot_target_z_mm[L]=0.0f; } }
+void processCmdSTAND(const char* line,int s,int len)
+{
+  (void)line;(void)s;(void)len;
+  // STAND should always be executed from a safe, non-test state.
+  // Force MODE IDLE semantics before updating foot targets / IK.
+  modeSetIdle();
+
+  const float BASE_Y = g_test_base_y_mm;
+  const float BASE_X = g_test_base_x_mm;
+  for(int L=0; L<6; ++L){
+    int16_t out[3];
+    bool ok = calculateIK((uint8_t)L, BASE_X, BASE_Y, 0.0f, out);
+    if(!ok){ printERR(1,"IK_FAIL"); return; }
+    bool isRight = (L>=3);
+    if(isRight){
+      g_cmd_cd[L][0]=out[0];
+      g_cmd_cd[L][1]=out[1];
+      g_cmd_cd[L][2]=out[2];
+    } else {
+      g_cmd_cd[L][0]=(int16_t)(2*g_home_cd[L][0]-out[0]);
+      g_cmd_cd[L][1]=(int16_t)(2*g_home_cd[L][1]-out[1]);
+      g_cmd_cd[L][2]=(int16_t)(2*g_home_cd[L][2]-out[2]);
+    }
+    g_foot_target_x_mm[L]=BASE_X;
+    g_foot_target_z_mm[L]=0.0f;
+  }
+}
 
 // PID command — runtime configuration and persistence
 // Syntax:
@@ -507,8 +646,6 @@ void processCmdPID(const char* line, int s, int len)
     return;
   }
 
-  auto jointFromTok = [&](const char* jt)->int { char b[8]={0}; int n=strlen(jt); n=n>7?7:n; memcpy(b,jt,n); for(int i=0;i<n;++i) b[i]=toupper(b[i]); return jointIndexFromToken(b); };
-
   if (!strcmp(sub, "KP") || !strcmp(sub, "KI") || !strcmp(sub, "KD") || !strcmp(sub, "KDALPHA")) {
     bool isAlpha = !strcmp(sub, "KDALPHA"); bool isKP=!strcmp(sub,"KP"), isKI=!strcmp(sub,"KI"), isKD=!strcmp(sub,"KD");
     // joint token
@@ -550,132 +687,432 @@ void processCmdPID(const char* line, int s, int len)
   printERR(1, "BAD_ARG");
 }
 
-// TUCK command — optional leg argument
+// LIMITS command — shared joint workspace tuning
 // Syntax:
-//   TUCK            -> all enabled legs
-//   TUCK <LEG>      -> single leg (LF,LM,LR,RF,RM,RR)
+//   LIMITS LIST
+//   LIMITS <COXA|FEMUR|TIBIA> <MIN_DEG> <MAX_DEG>
+//
 // Behavior:
-//   Initiates a non-blocking sequence (tibia first → then femur/coxa) managed in loopTick.
-extern volatile uint8_t  g_tuck_active;      // defined in MARS_Hexapod.ino
-extern volatile uint8_t  g_tuck_mask;        // legs participating
-extern volatile uint8_t  g_tuck_done_mask;   // legs with femur/coxa issued
-extern volatile uint32_t g_tuck_start_ms;    // start time
-extern volatile int16_t  g_tuck_tibia_cd;
-extern volatile int16_t  g_tuck_femur_cd;
-extern volatile int16_t  g_tuck_coxa_cd;
-extern volatile int16_t  g_tuck_tol_tibia_cd;
-extern volatile int16_t  g_tuck_tol_other_cd;
-extern volatile uint16_t g_tuck_timeout_ms;
-void processCmdTUCK(const char* line,int s,int len)
+//   - Limits are applied identically to all legs for the selected joint type.
+//   - Values are interpreted in degrees and converted to absolute centidegrees
+//     around each leg's g_home_cd[leg][joint].
+//   - On change, corresponding joint_limits.* keys in /config.txt are updated
+//     for all legs.
+void processCmdLIMITS(const char* line, int s, int len)
 {
   int ts, tl;
-  // Syntax extensions:
-  //   TUCK                -> all enabled legs (use current parameters)
-  //   TUCK <LEG>          -> single leg
-  //   TUCK SET <param> <value>  -> update a parameter and persist to /config.txt
-  //   TUCK PARAMS         -> print current tuck parameter values
-  // Parameters: TIBIA, FEMUR, COXA, TOL_TIBIA, TOL_OTHER, TIMEOUT
-  // Values are integers (centideg except TIMEOUT in ms). COXA must remain 12000 (center) for safety.
+  s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { // LIST
+    printERR(1, "BAD_ARG");
+    return;
+  }
+  char sub[16] = {0}; int ns = min(tl, 15); memcpy(sub, line + ts, ns); for (int i=0;i<ns;++i) sub[i] = toupper(sub[i]);
 
-  // Check for SET subcommand first
-  int peekStart = s; int ts_set, tl_set; int afterFirst = nextToken(line, peekStart, len, &ts_set, &tl_set);
-  if (tl_set > 0) {
-    char firstTok[12]={0}; int n1=min(tl_set,11); memcpy(firstTok,line+ts_set,n1); firstTok[n1]=0; for(int i=0;i<n1;++i) firstTok[i]=(char)toupper(firstTok[i]);
-    if (!strcmp(firstTok,"PARAMS")) {
-      // Print current parameters
-      Serial.print(F("TUCK "));
-      Serial.print(F("tibia=")); Serial.print((int)g_tuck_tibia_cd); Serial.print(F(" "));
-      Serial.print(F("femur=")); Serial.print((int)g_tuck_femur_cd); Serial.print(F(" "));
-      Serial.print(F("coxa="));  Serial.print((int)g_tuck_coxa_cd);  Serial.print(F(" "));
-      Serial.print(F("tol_tibia=")); Serial.print((int)g_tuck_tol_tibia_cd); Serial.print(F(" "));
-      Serial.print(F("tol_other=")); Serial.print((int)g_tuck_tol_other_cd); Serial.print(F(" "));
-      Serial.print(F("timeout_ms=")); Serial.print((int)g_tuck_timeout_ms);
-      Serial.print(F("\r\n"));
-      return;
+  if (!strcmp(sub, "LIST")) {
+    const char* jnames[3] = {"COXA","FEMUR","TIBIA"};
+    Serial.print(F("LIMITS "));
+    for (int J = 0; J < 3; ++J) {
+      if (J) Serial.print(F(" "));
+      long min_cd = g_limit_min_cd[0][J];
+      long max_cd = g_limit_max_cd[0][J];
+      Serial.print(jnames[J]);
+      Serial.print('=');
+      Serial.print(min_cd);
+      Serial.print('/');
+      Serial.print(max_cd);
     }
-    if (!strcmp(firstTok,"SET")) {
-      // Parse param
-      int ts_p, tl_p; afterFirst = nextToken(line, afterFirst, len, &ts_p, &tl_p); if (tl_p <= 0) { printERR(1,"BAD_ARG"); return; }
-      char param[16]={0}; int np=min(tl_p,15); memcpy(param,line+ts_p,np); param[np]=0; for(int i=0;i<np;++i) param[i]=(char)toupper(param[i]);
-      // Parse value
-      int ts_v, tl_v; afterFirst = nextToken(line, afterFirst, len, &ts_v, &tl_v); if (tl_v <= 0) { printERR(1,"BAD_ARG"); return; }
-      char valbuf[16]={0}; int nv=min(tl_v,15); memcpy(valbuf,line+ts_v,nv); valbuf[nv]=0; long v = atol(valbuf);
-      bool changed=false; if (!strcmp(param,"TIBIA")) { if (v<0) v=0; if (v>24000) v=24000; g_tuck_tibia_cd=(int16_t)v; changed=true; }
-      else if (!strcmp(param,"FEMUR")) { if (v<0) v=0; if (v>24000) v=24000; g_tuck_femur_cd=(int16_t)v; changed=true; }
-      else if (!strcmp(param,"COXA")) { if (v!=12000) { printERR(1,"COXA_CENTER_ONLY"); return; } g_tuck_coxa_cd=12000; changed=true; }
-      else if (!strcmp(param,"TOL_TIBIA")) { if (v<10) v=10; if (v>5000) v=5000; g_tuck_tol_tibia_cd=(int16_t)v; changed=true; }
-      else if (!strcmp(param,"TOL_OTHER")) { if (v<10) v=10; if (v>5000) v=5000; g_tuck_tol_other_cd=(int16_t)v; changed=true; }
-      else if (!strcmp(param,"TIMEOUT")) { if (v<250) v=250; if (v>10000) v=10000; g_tuck_timeout_ms=(uint16_t)v; changed=true; }
-      else { printERR(1,"BAD_PARAM"); return; }
-      if (!changed) return; // should not happen
+    Serial.print(F("\r\n"));
+    return;
+  }
+
+  // Joint token already consumed into sub
+  int J = jointIndexFromToken(sub);
+  if (J < 0 || J > 2) { printERR(1, "BAD_JOINT"); return; }
+
+  // MIN_CD
+  s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+  char vb1[16] = {0}; int n1 = min(tl, 15); memcpy(vb1, line + ts, n1); vb1[n1] = 0;
+  // MAX_CD
+  s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+  char vb2[16] = {0}; int n2 = min(tl, 15); memcpy(vb2, line + ts, n2); vb2[n2] = 0;
+
+  long min_cd = atol(vb1);
+  long max_cd = atol(vb2);
+  if (min_cd > max_cd) {
+    long tmp = min_cd; min_cd = max_cd; max_cd = tmp;
+  }
+  if (min_cd < 0) min_cd = 0;
+  if (max_cd > 24000) max_cd = 24000;
+
+  for (int L = 0; L < 6; ++L) {
+    g_limit_min_cd[L][J] = (int16_t)min_cd;
+    g_limit_max_cd[L][J] = (int16_t)max_cd;
+  }
+
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-      if (!SD.begin(BUILTIN_SDCARD)) return; // silent if no SD
-      File fin = SD.open("/config.txt", FILE_READ);
-      File fout = SD.open("/config.tmp", FILE_WRITE);
-      if (!fout) { if (fin) fin.close(); printERR(2,"SD_WRITE_FAIL"); return; }
-      const struct KeyVal { const char* key; } keys[6] = {
-        {"tuck.tibia_cd="},{"tuck.femur_cd="},{"tuck.coxa_cd="},{"tuck.tol_tibia_cd="},{"tuck.tol_other_cd="},{"tuck.timeout_ms="}
-      };
-      bool replaced[6]={false,false,false,false,false,false};
-      if (fin) {
-        static char linebuf[256]; int llen=0; while (fin.available()) { int ch2=fin.read(); if (ch2<0) break; if (ch2=='\r') continue; if (ch2=='\n') { linebuf[llen]=0; const char* p=linebuf; while(*p==' '||*p=='\t')++p; bool any=false; for(int k=0;k<6;++k){ size_t klen=strlen(keys[k].key); if (strncmp(p,keys[k].key,klen)==0){ any=true; break; }} if (any) {
-              // Rewrite all tuck keys once when first encountered to keep grouping
-              if (!replaced[0]) { fout.print("tuck.tibia_cd="); fout.print((int)g_tuck_tibia_cd); fout.print('\n'); replaced[0]=true; }
-              if (!replaced[1]) { fout.print("tuck.femur_cd="); fout.print((int)g_tuck_femur_cd); fout.print('\n'); replaced[1]=true; }
-              if (!replaced[2]) { fout.print("tuck.coxa_cd="); fout.print((int)g_tuck_coxa_cd); fout.print('\n'); replaced[2]=true; }
-              if (!replaced[3]) { fout.print("tuck.tol_tibia_cd="); fout.print((int)g_tuck_tol_tibia_cd); fout.print('\n'); replaced[3]=true; }
-              if (!replaced[4]) { fout.print("tuck.tol_other_cd="); fout.print((int)g_tuck_tol_other_cd); fout.print('\n'); replaced[4]=true; }
-              if (!replaced[5]) { fout.print("tuck.timeout_ms="); fout.print((int)g_tuck_timeout_ms); fout.print('\n'); replaced[5]=true; }
-            } else {
-              fout.print(linebuf); fout.print('\n');
-            }
-            llen=0; }
-          else if (llen+1 < (int)sizeof(linebuf)) { linebuf[llen++]=(char)ch2; } else { llen=0; }
-        }
-      }
-      // Append missing tuck keys
-      if (!replaced[0]) { fout.print("tuck.tibia_cd="); fout.print((int)g_tuck_tibia_cd); fout.print('\n'); }
-      if (!replaced[1]) { fout.print("tuck.femur_cd="); fout.print((int)g_tuck_femur_cd); fout.print('\n'); }
-      if (!replaced[2]) { fout.print("tuck.coxa_cd="); fout.print((int)g_tuck_coxa_cd); fout.print('\n'); }
-      if (!replaced[3]) { fout.print("tuck.tol_tibia_cd="); fout.print((int)g_tuck_tol_tibia_cd); fout.print('\n'); }
-      if (!replaced[4]) { fout.print("tuck.tol_other_cd="); fout.print((int)g_tuck_tol_other_cd); fout.print('\n'); }
-      if (!replaced[5]) { fout.print("tuck.timeout_ms="); fout.print((int)g_tuck_timeout_ms); fout.print('\n'); }
-      if (fin) fin.close(); fout.close(); SD.remove("/config.txt"); SD.rename("/config.tmp","/config.txt");
+  // Persist shared centidegree limits for all legs into /config.txt (stored as degrees)
+  const char* legNames[6] = {"LF","LM","LR","RF","RM","RR"};
+  const char* jointNames[3] = {"coxa","femur","tibia"};
+
+  // Convert centidegrees to degrees once for persistence
+  float min_deg = (float)min_cd * 0.01f;
+  float max_deg = (float)max_cd * 0.01f;
+
+  for (int L = 0; L < 6; ++L) {
+    const char* leg = legNames[L];
+
+    char keyMin[64];
+    char keyMax[64];
+
+    snprintf(keyMin, sizeof(keyMin), "joint_limits.%s.%s.min_deg=", leg, jointNames[J]);
+    snprintf(keyMax, sizeof(keyMax), "joint_limits.%s.%s.max_deg=", leg, jointNames[J]);
+
+    (void)config_update_single_key(keyMin, String(min_deg, 3));
+    (void)config_update_single_key(keyMax, String(max_deg, 3));
+  }
 #endif
-      return; // SET path does not start sequence
-    }
+
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+  // Persist shared degree limits for all legs into /config.txt
+  //const char* legNames[6] = {"LF","LM","LR","RF","RM","RR"};
+  //const char* jointNames[3] = {"coxa","femur","tibia"};
+
+  for (int L = 0; L < 6; ++L) {
+    const char* leg = legNames[L];
+
+    char keyMin[64];
+    char keyMax[64];
+
+    snprintf(keyMin, sizeof(keyMin), "joint_limits.%s.%s.min_deg=", leg, jointNames[J]);
+    snprintf(keyMax, sizeof(keyMax), "joint_limits.%s.%s.max_deg=", leg, jointNames[J]);
+
+    (void)config_update_single_key(keyMin, String(min_deg, 3));
+    (void)config_update_single_key(keyMax, String(max_deg, 3));
+  }
+#endif
+}
+
+// IMP command — runtime impedance configuration and (where SD present) persistence
+// Syntax:
+//   IMP LIST
+//   IMP ENABLE | DISABLE
+//   IMP MODE <OFF|JOINT|CART>
+//   IMP SCALE <milli>
+//   IMP JSPRING|JDAMP <COXA|FEMUR|TIBIA|ALL> <milli>
+//   IMP CSPRING|CDAMP <X|Y|Z|ALL> <milli>
+static void imp_print_list() {
+  const ImpedanceConfig& cfg = g_impedance.config();
+  Serial.print(F("IMP "));
+  Serial.print(F("enabled=")); Serial.print(cfg.enabled ? 1 : 0);
+  Serial.print(F(" mode="));
+  switch (cfg.mode) {
+    case IMP_MODE_JOINT: Serial.print(F("joint")); break;
+    case IMP_MODE_CART:  Serial.print(F("cart"));  break;
+    default:             Serial.print(F("off"));   break;
+  }
+  Serial.print(F(" jspring="));
+  Serial.print((unsigned)cfg.joint.k_spring_milli[0]); Serial.print('/');
+  Serial.print((unsigned)cfg.joint.k_spring_milli[1]); Serial.print('/');
+  Serial.print((unsigned)cfg.joint.k_spring_milli[2]);
+  Serial.print(F(" jdamp="));
+  Serial.print((unsigned)cfg.joint.k_damp_milli[0]);   Serial.print('/');
+  Serial.print((unsigned)cfg.joint.k_damp_milli[1]);   Serial.print('/');
+  Serial.print((unsigned)cfg.joint.k_damp_milli[2]);
+  Serial.print(F(" cspring="));
+  Serial.print((unsigned)cfg.cart.k_spring_milli[0]); Serial.print('/');
+  Serial.print((unsigned)cfg.cart.k_spring_milli[1]); Serial.print('/');
+  Serial.print((unsigned)cfg.cart.k_spring_milli[2]);
+  Serial.print(F(" cdamp="));
+  Serial.print((unsigned)cfg.cart.k_damp_milli[0]);   Serial.print('/');
+  Serial.print((unsigned)cfg.cart.k_damp_milli[1]);   Serial.print('/');
+  Serial.print((unsigned)cfg.cart.k_damp_milli[2]);
+  Serial.print(F(" scale="));
+  Serial.print((unsigned)cfg.output_scale_milli);
+  Serial.print(F(" jdb_cd="));
+  Serial.print((unsigned)cfg.joint_deadband_cd);
+  Serial.print(F(" cdb_mm="));
+  Serial.print(cfg.cart_deadband_mm, 2);
+  Serial.print(F("\r\n"));
+}
+
+// COMP command — joint compliance configuration (setpoint adaptation)
+// Syntax:
+//   COMP LIST
+//   COMP ENABLE | DISABLE
+//   COMP KP <COXA|FEMUR|TIBIA|ALL> <milli>
+//   COMP RANGE <COXA|FEMUR|TIBIA|ALL> <cd>
+//   COMP DEADBAND <COXA|FEMUR|TIBIA|ALL> <cd>
+//   COMP LEAK <milli>
+// Joint compliance globals from main sketch
+extern bool     g_comp_enabled;
+extern uint16_t g_comp_kp_milli[3];
+extern uint16_t g_comp_range_cd[3];
+extern uint16_t g_comp_deadband_cd[3];
+extern uint16_t g_comp_leak_milli;
+
+static void comp_print_list() {
+  Serial.print(F("COMP enabled=")); Serial.print(g_comp_enabled ? 1 : 0);
+  Serial.print(F(" kp_milli="));
+  Serial.print((unsigned)g_comp_kp_milli[0]); Serial.print('/');
+  Serial.print((unsigned)g_comp_kp_milli[1]); Serial.print('/');
+  Serial.print((unsigned)g_comp_kp_milli[2]);
+  Serial.print(F(" range_cd="));
+  Serial.print((unsigned)g_comp_range_cd[0]); Serial.print('/');
+  Serial.print((unsigned)g_comp_range_cd[1]); Serial.print('/');
+  Serial.print((unsigned)g_comp_range_cd[2]);
+  Serial.print(F(" deadband_cd="));
+  Serial.print((unsigned)g_comp_deadband_cd[0]); Serial.print('/');
+  Serial.print((unsigned)g_comp_deadband_cd[1]); Serial.print('/');
+  Serial.print((unsigned)g_comp_deadband_cd[2]);
+  Serial.print(F(" leak_milli="));
+  Serial.print((unsigned)g_comp_leak_milli);
+  Serial.print(F("\r\n"));
+}
+
+void processCmdCOMP(const char* line, int s, int len)
+{
+  int ts, tl;
+  s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+  char sub[16] = {0}; int ns = min(tl, 15); memcpy(sub, line + ts, ns); for (int i = 0; i < ns; ++i) sub[i] = toupper(sub[i]);
+
+  if (!strcmp(sub, "LIST")) { comp_print_list(); return; }
+
+  if (!strcmp(sub, "ENABLE")) {
+    g_comp_enabled = true;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("comp.enabled=", String(F("true")));
+#endif
+    return;
+  }
+  if (!strcmp(sub, "DISABLE")) {
+    g_comp_enabled = false;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("comp.enabled=", String(F("false")));
+#endif
+    return;
   }
 
-  // Peek next token; if absent, all legs
-  int s2 = nextToken(line, s, len, &ts, &tl);
-  uint8_t mask = 0;
-  if (tl <= 0) {
-    // All legs
-    for (uint8_t L=0; L<6; ++L) if (leg_enabled_mask_get(L)) mask |= (1u<<L);
-  } else {
-    char legt[4]={0}; int nl=min(tl,3); memcpy(legt,line+ts,nl); for(int i=0;i<nl;++i) legt[i]=toupper(legt[i]);
-    int leg = legIndexFromToken(legt);
-    if (leg < 0) { printERR(1,"BAD_LEG"); return; }
-    if (leg_enabled_mask_get((uint8_t)leg)) mask |= (uint8_t)(1u<<leg);
-    s = s2; // consume
+  if (!strcmp(sub, "LEAK")) {
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char vb[12] = {0}; int nv = min(tl, 11); memcpy(vb, line + ts, nv); vb[nv] = 0; long v = atol(vb);
+    if (v < 0) v = 0; if (v > 1000) v = 1000; // 0..1.0 per tick
+    g_comp_leak_milli = (uint16_t)v;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("comp.leak_milli=", String((unsigned long)v));
+#endif
+    return;
   }
-  if (mask == 0) { printERR(92, "NO_LEGS"); return; }
-  g_tuck_active = 1;
-  g_tuck_mask = mask;
-  g_tuck_done_mask = 0;
-  g_tuck_start_ms = millis();
-  // Initial tibia commands (kick off sequence); femur/coxa set later on convergence
-  for (uint8_t L=0; L<6; ++L) {
-    if ((mask>>L)&1u) {
-      if (joint_enabled_mask_get(L,2) && (((g_servo_oos_mask>>(L*3+2))&1u)==0)) {
-        // Compute mirrored tibia target if right side
-        bool isRight = (L>=3);
-        int16_t tibia_target = g_tuck_tibia_cd;
-        if (isRight) tibia_target = (int16_t)(2 * g_home_cd[L][2] - tibia_target);
-        g_cmd_cd[L][2] = tibia_target;
-      }
+
+  if (!strcmp(sub, "KP") || !strcmp(sub, "RANGE") || !strcmp(sub, "DEADBAND")) {
+    bool isKP = !strcmp(sub, "KP");
+    bool isRange = !strcmp(sub, "RANGE");
+    bool isDB = !strcmp(sub, "DEADBAND");
+
+    // joint token
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char jtok[8] = {0}; int nj = min(tl, 7); memcpy(jtok, line + ts, nj); jtok[nj] = 0; for (int i = 0; i < nj; ++i) jtok[i] = toupper(jtok[i]);
+
+    // value token
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char vb[16] = {0}; int nv = min(tl, 15); memcpy(vb, line + ts, nv); vb[nv] = 0; long v = atol(vb);
+
+    if (isKP) {
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+    } else if (isRange) {
+      if (v < 0) v = 0; if (v > 5000) v = 5000; // up to 50 deg
+    } else if (isDB) {
+      if (v < 0) v = 0; if (v > 2000) v = 2000; // up to 20 deg
     }
+
+    auto apply_one = [&](int J){
+      if (J < 0 || J > 2) return;
+      if (isKP)      g_comp_kp_milli[J]    = (uint16_t)v;
+      else if (isRange)   g_comp_range_cd[J]    = (uint16_t)v;
+      else if (isDB)      g_comp_deadband_cd[J] = (uint16_t)v;
+    };
+    auto persist_one = [&](int J){
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+      const char* names[3] = {"coxa","femur","tibia"};
+      String key;
+      if (isKP)      key = String(F("comp.kp_milli."))      + names[J] + "=";
+      else if (isRange) key = String(F("comp.range_cd."))      + names[J] + "=";
+      else if (isDB)    key = String(F("comp.deadband_cd."))  + names[J] + "=";
+      (void)config_update_single_key(key.c_str(), String((unsigned long)v));
+#else
+      (void)J;
+#endif
+    };
+
+    if (!strcmp(jtok, "ALL")) {
+      for (int J = 0; J < 3; ++J) { apply_one(J); persist_one(J); }
+    } else {
+      int J = jointIndexFromToken(jtok); if (J < 0) { printERR(1, "BAD_JOINT"); return; }
+      apply_one(J); persist_one(J);
+    }
+    return;
   }
+
+  printERR(1, "BAD_ARG");
+}
+
+void processCmdIMP(const char* line,int s,int len)
+{
+  int ts, tl;
+  s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+  char sub[12] = {0}; int ns = min(tl, 11); memcpy(sub, line + ts, ns); for (int i = 0; i < ns; ++i) sub[i] = toupper(sub[i]);
+
+  if (!strcmp(sub, "LIST")) {
+    imp_print_list();
+    return;
+  }
+
+  if (!strcmp(sub, "ENABLE")) {
+    g_impedance.config().enabled = true;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("imp.enabled=", String(F("true")));
+#endif
+    return;
+  }
+  if (!strcmp(sub, "DISABLE")) {
+    g_impedance.config().enabled = false;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("imp.enabled=", String(F("false")));
+#endif
+    return;
+  }
+
+  if (!strcmp(sub, "MODE")) {
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char mt[8] = {0}; int nm = min(tl, 7); memcpy(mt, line + ts, nm); for (int i = 0; i < nm; ++i) mt[i] = toupper(mt[i]);
+    if (!strcmp(mt, "JOINT")) g_impedance.config().mode = IMP_MODE_JOINT;
+    else if (!strcmp(mt, "CART")) g_impedance.config().mode = IMP_MODE_CART;
+    else if (!strcmp(mt, "OFF"))  g_impedance.config().mode = IMP_MODE_OFF;
+    else { printERR(1, "BAD_ARG"); return; }
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    const char* val = (g_impedance.config().mode==IMP_MODE_JOINT)?"joint":(g_impedance.config().mode==IMP_MODE_CART?"cart":"off");
+    (void)config_update_single_key("imp.mode=", String(val));
+#endif
+    return;
+  }
+
+  if (!strcmp(sub, "SCALE")) {
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char vb[12] = {0}; int nv = min(tl, 11); memcpy(vb, line + ts, nv); vb[nv] = 0; long v = atol(vb);
+    if (v < 0) v = 0; if (v > 1000) v = 1000; // 0..1000
+    g_impedance.config().output_scale_milli = (uint16_t)v;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("imp.output_scale_milli=", String((unsigned long)v));
+#endif
+    return;
+  }
+
+  if (!strcmp(sub, "JDB")) {
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char vb[12] = {0}; int nv = min(tl, 11); memcpy(vb, line + ts, nv); vb[nv] = 0; long v = atol(vb);
+    if (v < 0) v = 0; if (v > 5000) v = 5000; // 0..50 deg
+    g_impedance.config().joint_deadband_cd = (uint16_t)v;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("imp.joint_deadband_cd=", String((unsigned long)v));
+#endif
+    return;
+  }
+
+  if (!strcmp(sub, "CDB")) {
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char vb[16] = {0}; int nv = min(tl, 15); memcpy(vb, line + ts, nv); vb[nv] = 0; float v = atof(vb);
+    if (v < 0.0f) v = 0.0f; if (v > 100.0f) v = 100.0f;
+    g_impedance.config().cart_deadband_mm = v;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    // Store with limited precision; sprintf via String is fine here.
+    (void)config_update_single_key("imp.cart_deadband_mm=", String(v, 3));
+#endif
+    return;
+  }
+
+  if (!strcmp(sub, "JSPRING") || !strcmp(sub, "JDAMP")) {
+    bool isSpring = !strcmp(sub, "JSPRING");
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char jtok[8] = {0}; int nj = min(tl, 7); memcpy(jtok, line + ts, nj); jtok[nj] = 0; for (int i = 0; i < nj; ++i) jtok[i] = toupper(jtok[i]);
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char vb[16] = {0}; int nv = min(tl, 15); memcpy(vb, line + ts, nv); vb[nv] = 0; long v = atol(vb);
+    if (v < 0) v = 0; if (v > 65535) v = 65535;
+
+    auto apply_one = [&](int J){ if (J<0||J>2) return; if (isSpring) g_impedance.config().joint.k_spring_milli[J]=(uint16_t)v; else g_impedance.config().joint.k_damp_milli[J]=(uint16_t)v; };
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    auto persist_one = [&](int J){ const char* names[3] = {"coxa","femur","tibia"}; String key;
+      if (isSpring) key = String(F("imp.joint.k_spring_milli.")) + names[J] + "=";
+      else          key = String(F("imp.joint.k_damp_milli."))   + names[J] + "=";
+      (void)config_update_single_key(key.c_str(), String((unsigned long)v)); };
+#endif
+
+    if (!strcmp(jtok, "ALL")) {
+      for (int J=0; J<3; ++J) { apply_one(J);
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+        persist_one(J);
+#endif
+      }
+    } else {
+      int J = jointIndexFromToken(jtok); if (J<0) { printERR(1, "BAD_JOINT"); return; }
+      apply_one(J);
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+      persist_one(J);
+#endif
+    }
+    return;
+  }
+
+  if (!strcmp(sub, "CSPRING") || !strcmp(sub, "CDAMP")) {
+    bool isSpring = !strcmp(sub, "CSPRING");
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char atok[4] = {0}; int na = min(tl, 3); memcpy(atok, line + ts, na); atok[na] = 0; for (int i = 0; i < na; ++i) atok[i] = toupper(atok[i]);
+    s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char vb[16] = {0}; int nv = min(tl, 15); memcpy(vb, line + ts, nv); vb[nv] = 0; long v = atol(vb);
+    if (v < 0) v = 0; if (v > 65535) v = 65535;
+
+    auto apply_axis = [&](int A){
+      if (A<0||A>2) return;
+      if (isSpring) g_impedance.config().cart.k_spring_milli[A]=(uint16_t)v;
+      else          g_impedance.config().cart.k_damp_milli[A]=(uint16_t)v;
+    };
+    auto persist_axis = [&](int A){
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+      const char* names[3]={"x","y","z"}; String key;
+      if (isSpring) key = String(F("imp.cart.k_spring_milli.")) + names[A] + "=";
+      else          key = String(F("imp.cart.k_damp_milli."))   + names[A] + "=";
+      (void)config_update_single_key(key.c_str(), String((unsigned long)v));
+#else
+      (void)A; // unused
+#endif
+    };
+
+    if (!strcmp(atok, "ALL")) {
+      for (int A=0; A<3; ++A) {
+        apply_axis(A);
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+        persist_axis(A);
+#endif
+      }
+    } else if (!strcmp(atok, "X")) {
+      apply_axis(0);
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+      persist_axis(0);
+#endif
+    } else if (!strcmp(atok, "Y")) {
+      apply_axis(1);
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+      persist_axis(1);
+#endif
+    } else if (!strcmp(atok, "Z")) {
+      apply_axis(2);
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+      persist_axis(2);
+#endif
+    } else {
+      printERR(1, "BAD_AXIS"); return;
+    }
+    return;
+  }
+
+  printERR(1, "BAD_ARG");
 }
 
 void processCmdSAFETY(const char* line, int s, int len)
@@ -862,6 +1299,90 @@ void processCmdSAFETY(const char* line, int s, int len)
 #else
     printERR(2, "NO_SD"); return;
 #endif
+  }
+
+  printERR(1, "BAD_ARG");
+}
+
+// TUCK <SET|CLEAR> [LEG]
+//   SET   – arm the tuck sequence for one leg or all enabled legs
+//   CLEAR – cancel any active tuck sequence
+void processCmdTUCK(const char* line, int s, int len)
+{
+  extern volatile uint8_t  g_tuck_active;
+  extern volatile uint8_t  g_tuck_mask;
+  extern volatile uint8_t  g_tuck_done_mask;
+  extern volatile uint32_t g_tuck_start_ms;
+  extern volatile int16_t  g_tuck_tibia_cd;
+
+  int ts, tl;
+  s = nextToken(line, s, len, &ts, &tl);
+
+  // If no subcommand is provided, treat plain "TUCK" as "TUCK SET" for all enabled legs.
+  char sub[8] = {0};
+  if (tl <= 0) {
+    strcpy(sub, "SET");
+  } else {
+    int ns = min(tl, 7);
+    memcpy(sub, line + ts, ns);
+    for (int i = 0; i < ns; ++i) sub[i] = (char)toupper(sub[i]);
+  }
+
+  // TUCK CLEAR: cancel tuck state
+  if (!strcmp(sub, "CLEAR")) {
+    g_tuck_active     = 0;
+    g_tuck_mask       = 0;
+    g_tuck_done_mask  = 0;
+    g_tuck_start_ms   = 0;
+    return;
+  }
+
+  // TUCK SET [LEG]
+  if (!strcmp(sub, "SET")) {
+    // TUCK is a supervisory motion; ensure we are in MODE IDLE
+    // so that test gait or other planners are not concurrently writing targets.
+    modeSetIdle();
+
+    // Peek optional leg token (ignore returned index; we only care about ts/tl)
+    nextToken(line, s, len, &ts, &tl);
+    uint8_t mask = 0;
+
+    if (tl <= 0) {
+      // No leg specified -> all enabled legs
+      for (uint8_t L = 0; L < 6; ++L) {
+        if (leg_enabled_mask_get(L)) mask |= (uint8_t)(1u << L);
+      }
+    } else {
+      char legt[4] = {0};
+      int nl = min(tl, 3);
+      memcpy(legt, line + ts, nl);
+      for (int i = 0; i < nl; ++i) legt[i] = (char)toupper(legt[i]);
+      int leg = legIndexFromToken(legt);
+      if (leg < 0) { printERR(1, "BAD_LEG"); return; }
+      if (leg_enabled_mask_get((uint8_t)leg)) mask |= (uint8_t)(1u << leg);
+    }
+
+    if (mask == 0) { printERR(92, "NO_LEGS"); return; }
+
+    g_tuck_active    = 1;
+    g_tuck_mask      = mask;
+    g_tuck_done_mask = 0;
+    g_tuck_start_ms  = millis();
+
+    // Kick off tibia motion for selected legs; rest of sequence is handled in loopTick()
+    for (uint8_t L = 0; L < 6; ++L) {
+      if ((mask >> L) & 1u) {
+        if (joint_enabled_mask_get(L, 2) && (((g_servo_oos_mask >> (L * 3 + 2)) & 1u) == 0)) {
+          bool isRight = (L >= 3);
+          int16_t tibia_target = g_tuck_tibia_cd;
+          if (isRight) {
+            tibia_target = (int16_t)(2 * g_home_cd[L][2] - tibia_target);
+          }
+          g_cmd_cd[L][2] = tibia_target;
+        }
+      }
+    }
+    return;
   }
 
   printERR(1, "BAD_ARG");
@@ -1263,9 +1784,6 @@ void processCmdOFFSET(const char* line, int s, int len)
 // LOG <ENABLE|RATE|MODE|HEADER|FLUSH|STATUS> [...]
 void processCmdLOG(const char* line,int s,int len)
 {
-#if !(defined(MARS_ENABLE_SD) && MARS_ENABLE_SD)
-  (void)line; (void)s; (void)len; printERR(2, "NO_SD"); return;
-#else
   int ts, tl;
   s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
   char sub[10] = {0}; int ns = min(tl, 9); memcpy(sub, line + ts, ns); for (int i = 0; i < ns; ++i) sub[i] = toupper(sub[i]);
@@ -1273,8 +1791,8 @@ void processCmdLOG(const char* line,int s,int len)
   // New syntax: LOG ENABLE (no argument) turns logging on; LOG DISABLE turns it off.
   // Backwards compatibility: LOG ENABLE <ON|OFF> still supported.
   if (!strcmp(sub, "ENABLE") || !strcmp(sub, "DISABLE")) {
-  bool request_enable = !strcmp(sub, "ENABLE");
-  // Peek optional token if ENABLE form used
+    bool request_enable = !strcmp(sub, "ENABLE");
+    // Peek optional token if ENABLE form used
     int ts2, tl2; int s2 = nextToken(line, s, len, &ts2, &tl2);
     if (request_enable && tl2 > 0) {
       char vb[8] = {0}; int nv = min(tl2, 7); memcpy(vb, line + ts2, nv); for (int i = 0; i < nv; ++i) vb[i] = toupper(vb[i]);
@@ -1658,7 +2176,58 @@ void processCmdLOG(const char* line,int s,int len)
     printERR(2, "NO_SD"); return;
 #endif
   }
+}
+
+// -----------------------------------------------------------------------------
+// EST (Estimator) command handler
+// -----------------------------------------------------------------------------
+
+static void est_print_list() {
+  Serial.print(F("EST cmd_alpha_milli=")); Serial.print((unsigned int)g_est_cmd_alpha_milli);
+  Serial.print(F(" meas_alpha_milli=")); Serial.print((unsigned int)g_est_meas_alpha_milli);
+  Serial.print(F(" meas_vel_alpha_milli=")); Serial.print((unsigned int)g_est_meas_vel_alpha_milli);
+  Serial.print(F("\r\n"));
+}
+
+void processCmdEST(const char* line, int s, int len)
+{
+  int ts, tl;
+  s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+  char sub[20] = {0}; int ns = min(tl, 19); memcpy(sub, line + ts, ns);
+  for (int i = 0; i < ns; ++i) sub[i] = toupper(sub[i]);
+
+  if (!strcmp(sub, "LIST")) { est_print_list(); return; }
+
+  // EST <FIELD> <VAL>
+  s = nextToken(line, s, len, &ts, &tl); if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+  char vb[16] = {0}; int nv = min(tl, 15); memcpy(vb, line + ts, nv); vb[nv] = 0; long v = atol(vb);
+
+  if (!strcmp(sub, "CMD_ALPHA")) {
+    if (v < 0) v = 0; if (v > 1000) v = 1000;
+    g_est_cmd_alpha_milli = (uint16_t)v;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("est.cmd_alpha_milli=", String((unsigned long)g_est_cmd_alpha_milli));
+#endif
+    return;
+  }
+
+  if (!strcmp(sub, "MEAS_ALPHA")) {
+    if (v < 0) v = 0; if (v > 1000) v = 1000;
+    g_est_meas_alpha_milli = (uint16_t)v;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("est.meas_alpha_milli=", String((unsigned long)g_est_meas_alpha_milli));
+#endif
+    return;
+  }
+
+  if (!strcmp(sub, "MEAS_VEL_ALPHA")) {
+    if (v < 0) v = 0; if (v > 2000) v = 2000;
+    g_est_meas_vel_alpha_milli = (uint16_t)v;
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+    (void)config_update_single_key("est.meas_vel_alpha_milli=", String((unsigned long)g_est_meas_vel_alpha_milli));
+#endif
+    return;
+  }
 
   printERR(1, "BAD_ARG");
-#endif
 }

@@ -8,7 +8,7 @@ All code must be clearly commented:
 # Hexapod v2.0 Controller — Project Specification (Phase 1)
 Project codename: MARS — Modular Autonomous Robotic System
 
-Last updated: 2025-11-13 (PID dt-aware + shadow telemetry)
+Last updated: 2025-11-18 (Estimator tuning finalized + STAND/TUCK idle semantics FW 0.2.15)
 Target MCU: Teensy 4.1
 Servo type: Hiwonder HTS-35S (serial bus)
 Servo library: lx16a-servo
@@ -62,7 +62,7 @@ Phase 2 preview (not in Phase 1): outer‑loop PID per joint; virtual spring‑d
 
 ## 4. Control loop details
 
-- Frequency: Target 166 Hz (period ≈ 6.024 ms). Default temporarily set to 100 Hz for overrun testing; SD config `loop_hz` may override.
+- Frequency: Target 166 Hz (period ≈ 6.024 ms). Default compiled to 166 Hz; SD config `loop_hz` or the `LOOP <hz>` runtime command may adjust the active loop rate (50..500 Hz) within safety-tested bounds.
 - Scheduling:
   - Command broadcast: all servos each tick.
   - Feedback read: one servo per tick (round‑robin order: LF→…→RR, coxa→femur→tibia within leg; exact order TBD).
@@ -76,6 +76,12 @@ Implementation notes
    - All robot characteristics (geometry, offsets, UART mapping summary, TX pins, buffer OE pins, default baud) live in `firmware/MARS_Hexapod/robot_config.h`.
    - All helper functions (printing, serial parsing, reboot, config parsing, hardware init helpers like buffers/buses) live in `firmware/MARS_Hexapod/functions.ino`.
  - PID time base: D-term computes de/dt using measured loop dt; I-term integrates e*dt (cd·ms) with scaling so behavior is consistent under loop jitter.
+
+Versioning and builds
+- Firmware uses SemVer-style `FW_VERSION` plus a monotonic `FW_BUILD` number defined in `MARS_Hexapod.ino`.
+- Assistant policy: every assistant-made code change must bump at least the patch component of `FW_VERSION` and increment `FW_BUILD`, and must add a concise `CHANGELOG.md` entry describing behavior/config changes.
+- Behavioral changes or completed TODOs typically bump the SemVer patch; pure profiling/formatting-only edits may opt to bump only `FW_BUILD` when agreed explicitly.
+- Both `FW_VERSION` and `FW_BUILD` are printed in the startup splash, STATUS, and CSV log headers to make traces self-describing.
 
 ## 5. Kinematics
 
@@ -122,8 +128,12 @@ IK implementation notes (as provided)
 
 - Motion enable gate: commands to servos are suppressed unless enabled.
 - Soft limits: joint angle bounds from config; rate limits on commanded steps. [impl]
-- Leg/body collision detection: kinematic check against body footprint/keep‑out; on violation → lockout and require re‑enable. [impl]
-  - Keep-out model (Phase 1): simple foot-to-foot minimum clearance in the X/Z plane. If any pair of feet are closer than `safety.clearance_mm`, trigger a lockout (E40 COLLISION). Configurable at runtime via `SAFETY CLEARANCE <mm>` and persisted to `/config.txt`.
+- Joint workspace (collision layer 1): when `safety.collision` is enabled, effective joint commands are required to stay within the configured `joint_limits.<LEG>.<coxa|femur|tibia>.{min_deg,max_deg}` workspace. Attempts to command a joint outside this workspace are treated as a collision and trigger the STAND+DISABLE sequence (E40/E90 with `LOCKOUT_CAUSE_COLLISION`). [impl]
+- Leg/body collision detection: kinematic check against body footprint/keep‑out; on violation → STAND+DISABLE and require re‑enable. [impl]
+  - Keep-out model (Phase 1): simple foot-to-foot minimum clearance in the X/Z plane, evaluated on the BODY-frame FK foot positions. When `safety.collision` is enabled, the controller checks a fixed set of leg pairs each tick:
+    - Same-side adjacent pairs: LF–LM, LM–LR, RF–RM, RM–RR
+    - Opposite-side facing pairs: LF–RF, LM–RM, LR–RR
+    If any checked pair is closer in X/Z than `safety.clearance_mm`, a collision lockout (E40 COLLISION with `LOCKOUT_CAUSE_COLLISION`) is triggered via the STAND+DISABLE path. Clearance is configurable at runtime via `SAFETY CLEARANCE <mm>` and persisted to `/config.txt` as `safety.clearance_mm`.
 - E‑stop concept: serial command to DISABLE; clears motion and optionally torque‑off (as supported).
 
 ## 7. Configuration (SD card)
@@ -133,7 +143,7 @@ IK implementation notes (as provided)
   - Ignore blank lines; allow comments starting with #; trim whitespace.
   - Values parsed as int/float/bool/strings; invalid lines logged and ignored.
 - Example keys (Phase 1 implemented subset marked [impl]):
-  - loop_hz=166 [impl]
+  - loop_hz=166 [impl]                         # default control loop frequency (Hz); can also be set live via `LOOP <hz>`
   - uart.LF=Serial8 [not-impl]
   - uart.LM=Serial3 [not-impl]
   - uart.LR=Serial5 [not-impl]
@@ -169,10 +179,19 @@ IK implementation notes (as provided)
   - pid.ki_milli.<coxa|femur|tibia>=0 [impl]
   - pid.kd_milli.<coxa|femur|tibia>=0 [impl]
   - pid.kd_alpha_milli.<coxa|femur|tibia>=200 [impl]  # derivative smoothing factor (0..1000)
-  - est.cmd_alpha_milli=200 [impl]                    # per-tick blend toward last command (0..1000)
-  - est.meas_alpha_milli=800 [impl]                   # blend toward measurement on RR updates (0..1000)
+  - est.cmd_alpha_milli=100 [impl]                    # per-tick blend toward last command (0..1000); tuned for light command pull
+  - est.meas_alpha_milli=150 [impl]                   # blend toward measurement on RR updates (0..1000); tuned for moderate correction
   - pid.mode=active [impl]                            # PID application mode: 'active' applies corrections; 'shadow' computes but does not drive (comparison stream)
   - pid.shadow_report_hz=2 [impl]                     # In shadow mode, frequency (Hz) to stream PID_SHADOW diff lines (1..50)
+  - imp.enabled=false [impl]                          # Master enable for virtual impedance layer
+  - imp.mode=off [impl]                               # off|joint|cart: disable, joint-space, or Cartesian-space impedance
+  - imp.output_scale_milli=1000 [impl]                # Global scaling for impedance correction magnitudes (0..1000)
+  - imp.joint_deadband_cd=0 [impl]                    # Symmetric deadband on joint error (centideg) before impedance kicks in
+  - imp.cart_deadband_mm=0.0 [impl]                   # Symmetric deadband on Cartesian displacement magnitude (mm) before impedance kicks in
+  - imp.joint.k_spring_milli.<coxa|femur|tibia>=0 [impl]  # Joint-space spring gains (milli-scale) per joint
+  - imp.joint.k_damp_milli.<coxa|femur|tibia>=0 [impl]    # Joint-space damping gains (milli-scale) per joint
+  - imp.cart.k_spring_milli.<x|y|z>=0 [impl]          # Cartesian spring gains (milli-scale) per axis in body frame
+  - imp.cart.k_damp_milli.<x|y|z>=0 [impl]            # Cartesian damping gains (milli-scale) per axis in body frame
 - Reload: Phase 1 loads once at boot; live reload TBD. If SD is disabled at build time (`MARS_ENABLE_SD=0`) or missing, compiled-in defaults are used.
 - Defaults: compiled‑in defaults used when keys are missing.
 
@@ -237,7 +256,7 @@ PID_SHADOW t_ms=<millis> <LEG>:diff_cd=c/f/t err_cd=c/f/t est_cd=c/f/t tgt_cd=c/
   - `lx/ly/lz` are coordinates relative to the leg’s hip origin (LEG-frame), expressed in BODY axes (no COXA_OFFSET translation).
  - Torque policy: `DISABLE` torques off all servos at the next control tick; `ENABLE` does not torque-on any servo automatically. `SERVO ... ENABLE` torques on only when global is enabled; otherwise, it updates masks without sending torque-on.
 
-Core commands (Phase 1)
+Core commands (Phase 1 + Phase 2 PID/impedance)
 - `HELP` — prints the command list.
 - `ENABLE` — enable motion output (clears lockout only after power‑on self‑check).
 - `DISABLE` — immediate stop/hold; motion output suppressed until `ENABLE`.
@@ -258,6 +277,32 @@ Core commands (Phase 1)
  - `OFFSET CLEAR <LEG|ALL> <JOINT|ALL>` — clear hardware angle offsets for selected servos and update `home_cd` to preserve logical pose.
 - `LEGS` — prints per-leg enable mask in human-friendly form: `LEGS LF=1 LM=0 ...` (CR/LF-terminated).
 - `SERVOS` — prints per-leg 3-bit joint enable masks: `SERVOS LF=111 LM=101 ...` (CR/LF-terminated).
+- `LIMITS LIST` — report shared joint workspace per joint group (coxa/femur/tibia) as min/max degrees, applied consistently across all legs.
+- `LIMITS <COXA|FEMUR|TIBIA> <MIN_DEG> <MAX_DEG>` — set shared per-joint workspace bounds in degrees around each leg's `home_cd`; values are persisted for all legs as `joint_limits.<LEG>.<joint>.{min_deg,max_deg}`.
+ - `PID` — family of commands to list and tune joint PID gains and mode at runtime (enabled flag, kp/ki/kd/kd_alpha per joint, shadow report rate). Changes are persisted back to `/config.txt` where SD is available.
+ - `IMP` — family of commands to list and tune virtual impedance gains/mode at runtime; see below.
+
+### IMP command family (virtual impedance)
+
+- Purpose: configure and inspect the virtual spring‑damper layer that sits on top of the joint PID/base commands.
+- Modes:
+  - `off`   — impedance disabled (no corrections applied).
+  - `joint` — joint‑space impedance: spring/damper on joint angle error per joint group (coxa/femur/tibia).
+  - `cart`  — Cartesian impedance: virtual spring/damper on body‑frame foot position; Phase 1 implementation focuses on vertical (Z‑axis) behavior mapped primarily into tibia.
+- Config keys (see above) mirror the runtime commands.
+- Commands:
+  - `IMP LIST` — print current impedance state (enabled, mode, joint gains, Cartesian gains, scale, deadbands).
+  - `IMP ENABLE` / `IMP DISABLE` — toggle the impedance layer (persist `imp.enabled`).
+  - `IMP MODE <OFF|JOINT|CART>` — select impedance mode (persist `imp.mode`).
+  - `IMP SCALE <milli 0..1000>` — set global impedance scale (persist `imp.output_scale_milli`).
+  - `IMP JSPRING <COXA|FEMUR|TIBIA|ALL> <milli>` — set joint‑space spring gain(s) (persist `imp.joint.k_spring_milli.*`).
+  - `IMP JDAMP <COXA|FEMUR|TIBIA|ALL> <milli>` — set joint‑space damping gain(s) (persist `imp.joint.k_damp_milli.*`).
+  - `IMP CSPRING <X|Y|Z|ALL> <milli>` — set Cartesian spring gains (body-frame X/Y/Z; persists `imp.cart.k_spring_milli.*`).
+  - `IMP CDAMP <X|Y|Z|ALL> <milli>` — set Cartesian damping gains (body-frame X/Y/Z; persists `imp.cart.k_damp_milli.*`).
+  - `IMP JDB <cd>` — set joint error deadband (centideg) before impedance applies joint corrections (persist `imp.joint_deadband_cd`).
+  - `IMP CDB <mm>` — set Cartesian deadband radius (mm) before impedance applies Cartesian corrections (persist `imp.cart_deadband_mm`).
+
+STATUS exposes an `[IMP]` section summarizing enabled flag, mode, and the configured joint/Cartesian gains to aid tuning.
 - `LEG <LEG|ALL> <ENABLE|DISABLE>` — toggle per-leg motion gating.
 - `SERVO <LEG|ALL> <JOINT|ALL> <ENABLE|DISABLE>` — toggle per-joint (servo) motion gating.
 - `FK <LEG|ALL> <ON|OFF>` — enable/disable FK body-frame stream for selected leg(s); output occurs once per tick for the leg currently served by the round-robin feedback.

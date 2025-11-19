@@ -1,3 +1,53 @@
+## [0.2.13] - 2025-11-14
+### Added
+- Virtual impedance layer (`MarsImpedance`) with joint-space and simple Cartesian (Z-axis focused) modes. Applied on top of PID/base commands with bounded centidegree corrections per joint.
+- Config keys parsed from `/config.txt`: `imp.enabled`, `imp.mode=off|joint|cart`, `imp.joint.k_spring_milli.<coxa|femur|tibia>`, `imp.joint.k_damp_milli.<coxa|femur|tibia>`, `imp.cart.k_spring_milli.z`, and `imp.cart.k_damp_milli.z`.
+- IMP command family for runtime tuning and persistence: `IMP LIST`, `IMP ENABLE|DISABLE`, `IMP MODE <OFF|JOINT|CART>`, `IMP JSPRING|JDAMP <COXA|FEMUR|TIBIA|ALL> <milli>`, `IMP CSPRING|CDAMP <X|Y|Z|ALL> <milli>`. When SD is present, changes are written back to `/config.txt` via the existing single-key update helper.
+- STATUS now includes an `[IMP]` section summarizing impedance enabled flag, mode, joint-space gains, and Cartesian gains (x/y/z) to support on-robot tuning.
+
+## 0.2.23 — 2025-11-19
+
+- UX: Reformatted startup splash so firmware version/build, build metadata+loop_hz, and UART/config summary each print on their own line for better readability, keeping content and timing behavior unchanged.
+
+## 0.2.22 — 2025-11-18
+
+- Safety/collision: Refined foot-to-foot XZ clearance check to consider only same-side adjacent (LF–LM, LM–LR, RF–RM, RM–RR) and opposite-side facing (LF–RF, LM–RM, LR–RR) leg pairs using BODY-frame FK foot positions when `safety.collision` is enabled, still comparing against `safety.clearance_mm` and triggering the unified STAND+DISABLE collision path.
+
+## 0.2.21 — 2025-11-18
+
+- Commands/UX: Added `CONFIG` command with `CONFIG` dumping `/config.txt` contents over USB serial when SD is present, wrapped with simple `NO_SD`/`NO_CONFIG` errors and documented in HELP under [SYSTEM].
+
+## 0.2.20 — 2025-11-18
+
+- Commands/UX: LIMITS command now takes absolute centidegree limits (`LIMITS <COXA|FEMUR|TIBIA> <MIN_CD> <MAX_CD>`), reports them in raw centidegrees via `LIMITS LIST`, and persists them to `/config.txt` as degrees (`joint_limits.<LEG>.<joint>.min_deg/max_deg`).
+
+## 0.2.19 — 2025-11-18
+
+- Commands/UX: LIMITS command now persists updated shared joint workspace values back to `/config.txt` for all legs as `joint_limits.<LEG>.<joint>.{min_deg,max_deg}` using the existing single-key update helper.
+
+## 0.2.18 — 2025-11-18
+
+- HELP: Added LIMITS command documentation under [GEOMETRY], describing `LIMITS LIST` and `LIMITS <COXA|FEMUR|TIBIA> <MIN_DEG> <MAX_DEG>` as shared per-joint workspace controls across all legs.
+
+## 0.2.17 — 2025-11-18
+
+- Policy: Documented an explicit assistant/automation rule in `MARS_Hexapod.ino` and `docs/PROJECT_SPEC.md` that every assistant-made code change must bump `FW_VERSION` (patch) and `FW_BUILD` and add a concise `CHANGELOG.md` entry describing the behavior or configuration changes.
+
+## 0.2.16 — 2025-11-18
+
+- Safety/collision: Reworked collision handling to use a common STAND+DISABLE path. Any collision-style violation (including foot-to-foot keep-out and the new joint workspace enforcement) now commands STAND, then immediately disables torque and enters LOCKOUT with `LOCKOUT_CAUSE_COLLISION` set.
+- Joint workspace: Effective joint commands now respect the configured `joint_limits.*` workspace when `safety.collision` is enabled. Attempts to command joints outside their workspace trigger the STAND+DISABLE collision sequence instead of silently clamping.
+- Commands/UX: Added `LIMITS` command family with `LIMITS LIST` and `LIMITS <COXA|FEMUR|TIBIA> <MIN_DEG> <MAX_DEG>` to tune shared per-joint workspace limits (degrees) applied consistently across all legs and persisted to `/config.txt` as `joint_limits.<LEG>.<joint>.{min_deg,max_deg}`.
+
+## 0.2.15 — 2025-11-18
+
+- Estimator: Finalized tuning rubric and defaults based on hardware testing. Recommended starting values are now `est.cmd_alpha_milli=100`, `est.meas_alpha_milli=150`, and `est.meas_vel_alpha_milli=100`, with updated guidance in `docs/ESTIMATOR_TUNING.md` and `docs/PROJECT_SPEC.md`.
+- Commands/UX: STAND and TUCK now force MODE IDLE semantics before applying motion (via `modeSetIdle()`), ensuring tripod test gait or other planners are not concurrently writing to joint targets when these supervisory poses are requested.
+- Control smoothing: Servo MOVE_TIME for the fast send path is now set to approximately one control tick (`≈1000/g_loop_hz` ms, floored to 1 ms), turning each incremental command into a short ramp at the device level and slightly reducing visible jitter, especially on the coxa joints.
+
+## 0.2.14 — 2025-11-17
+
+- Commands/UX: Added `LOOP <hz>` console command to adjust control loop frequency at runtime (50..500 Hz). Command applies via `configApplyLoopHz`, updates `g_loop_hz`/`g_config_loop_hz`, and, when SD is enabled, persists `loop_hz=<hz>` in `/config.txt` (create or update key). HELP now documents LOOP under [SYSTEM], and NOTES mention the relationship between `loop_hz` and `logging.rate_hz`.
 ## [0.2.11] - 2025-11-13
 ### Changed
 - PID now accounts for variable loop timing: derivative uses de/dt with dt from the loop timer; integral accumulates e*dt (cd·ms) with proper scaling. Keeps low-pass derivative smoothing and correction clamp. Behavior is more consistent under jitter.

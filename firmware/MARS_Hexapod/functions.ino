@@ -92,6 +92,19 @@ extern volatile uint16_t g_pid_shadow_report_hz;
 // Estimator globals
 extern volatile uint16_t g_est_cmd_alpha_milli;
 extern volatile uint16_t g_est_meas_alpha_milli;
+extern volatile uint16_t g_est_meas_vel_alpha_milli;
+// Impedance globals (access to MarsImpedance instance)
+#include "MarsImpedance.hpp"
+extern MarsImpedance g_impedance;
+// Command handlers provided by commandprocessor.ino
+void processCmdLIMITS(const char* line, int s, int len);
+
+// Joint compliance globals (defined in MARS_Hexapod.ino)
+extern bool     g_comp_enabled;
+extern uint16_t g_comp_kp_milli[3];
+extern uint16_t g_comp_range_cd[3];
+extern uint16_t g_comp_deadband_cd[3];
+extern uint16_t g_comp_leak_milli;
 
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
 // Logging globals (defined in MARS_Hexapod.ino)
@@ -274,7 +287,10 @@ bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t out_cd
 
 // Externs provided by other compilation units
 extern int nextToken(const char* s, int start, int len, int* tokStart, int* tokLen);
-extern void printERR(uint8_t code, const char* msg);
+// printERR is defined later in this file; only declare its prototype here to
+// avoid multiple-definition/linker issues when functions.ino and
+// commandprocessor.ino are linked together.
+void printERR(uint8_t code, const char* msg);
 extern CommandType parseCommandType(const char* cmd);
 extern void processCmdHELP(const char* line,int s,int len);
 extern void processCmdSTATUS(const char* line,int s,int len);
@@ -302,6 +318,12 @@ extern void processCmdSAVEHOME(const char* line,int s,int len);
 extern void processCmdOFFSET(const char* line,int s,int len);
 extern void processCmdLOG(const char* line,int s,int len);
 extern void processCmdPID(const char* line,int s,int len);
+extern void processCmdIMP(const char* line,int s,int len);
+extern void processCmdCOMP(const char* line,int s,int len);
+extern void processCmdEST(const char* line,int s,int len);
+extern void processCmdLOOP(const char* line,int s,int len);
+extern void processCmdLIMITS(const char* line,int s,int len);
+extern void processCmdCONFIG(const char* line,int s,int len);
 
 extern char    lineBuf[160];
 extern uint8_t lineLen;
@@ -360,7 +382,13 @@ void handleLine(const char* line) {
     case CMD_SAVEHOME:  processCmdSAVEHOME(line, s, len); break;
     case CMD_OFFSET:    processCmdOFFSET(line, s, len); break;
   case CMD_LOG:       processCmdLOG(line, s, len); break;
+  case CMD_LOOP:      processCmdLOOP(line, s, len); break;
   case CMD_PID:       processCmdPID(line, s, len); break;
+  case CMD_IMP:       processCmdIMP(line, s, len); break;
+  case CMD_COMP:      processCmdCOMP(line, s, len); break;
+  case CMD_EST:       processCmdEST(line, s, len); break;
+  case CMD_LIMITS:    processCmdLIMITS(line, s, len); break;
+  case CMD_CONFIG:    processCmdCONFIG(line, s, len); break;
     default:            printERR(1, "UNKNOWN_CMD"); break;
   }
 
@@ -397,6 +425,8 @@ void splash() {
   if (!Serial) return;
   Serial.print(Robot::SPLASH_BANNER);
   Serial.print(F("MARS — Modular Autonomous Robotic System\r\n"));
+
+  // Firmware version/build line
   Serial.print(F("FW "));
 #ifdef FW_VERSION
   Serial.print(FW_VERSION);
@@ -406,9 +436,17 @@ void splash() {
 #ifdef FW_BUILD
   Serial.print(F(" b=")); Serial.print((unsigned long)FW_BUILD);
 #endif
-  Serial.print(F(" build=")); Serial.print(__DATE__); Serial.print(F(" ")); Serial.print(__TIME__);
+  Serial.print(F("\r\n"));
+
+  // Build metadata line
+  Serial.print(F("BUILD "));
+  Serial.print(__DATE__); Serial.print(F(" ")); Serial.print(__TIME__);
   Serial.print(F(" loop_hz=")); Serial.print((int)g_loop_hz);
-  Serial.print(F(" UARTs: ")); Serial.print(Robot::UART_MAP_SUMMARY);
+  Serial.print(F(" cfg_loop_hz=")); Serial.print((int)g_config_loop_hz);
+  Serial.print(F("\r\n"));
+
+  // UART mapping / config summary line
+  Serial.print(F("UARTs: ")); Serial.print(Robot::UART_MAP_SUMMARY);
   // If uart.* keys were present in /config.txt, show a brief sanity note (mapping is compile-time fixed)
   extern volatile bool g_uart_cfg_present; extern volatile bool g_uart_cfg_match;
   if (g_uart_cfg_present) {
@@ -418,7 +456,6 @@ void splash() {
   }
   Serial.print(F(" cfg=")); Serial.print(g_config_loaded ? 1 : 0);
   Serial.print(F(" keys=")); Serial.print((int)g_config_keys_applied);
-  Serial.print(F(" cfg_loop_hz=")); Serial.print((int)g_config_loop_hz);
   Serial.print(F("\r\n"));
 }
 
@@ -851,6 +888,155 @@ static void configParseKV(char* key, char* val)
     g_est_meas_alpha_milli = (uint16_t)v;
     ++g_config_keys_applied; return;
   }
+  if (!strcmp(key, "est.meas_vel_alpha_milli"))
+  {
+    long v = atol(val); if (v < 0) v = 0; if (v > 2000) v = 2000; // allow slightly higher gain for velocity
+    g_est_meas_vel_alpha_milli = (uint16_t)v;
+    ++g_config_keys_applied; return;
+  }
+
+  // --- Impedance keys ---
+  if (!strcmp(key, "imp.enabled"))
+  {
+    bool on = parse_bool(val);
+    g_impedance.config().enabled = on;
+    ++g_config_keys_applied; return;
+  }
+  if (!strcmp(key, "imp.mode"))
+  {
+    // off|joint|cart (case-insensitive, check first char)
+    char c0 = tolower(val[0]);
+    if (c0 == 'j') g_impedance.config().mode = IMP_MODE_JOINT;
+    else if (c0 == 'c') g_impedance.config().mode = IMP_MODE_CART;
+    else g_impedance.config().mode = IMP_MODE_OFF;
+    ++g_config_keys_applied; return;
+  }
+  if (!strcmp(key, "imp.joint_deadband_cd"))
+  {
+    long v = atol(val);
+    if (v < 0) v = 0; if (v > 5000) v = 5000; // up to 50 deg
+    g_impedance.config().joint_deadband_cd = (uint16_t)v;
+    ++g_config_keys_applied; return;
+  }
+  if (!strcmp(key, "imp.cart_deadband_mm"))
+  {
+    float v = atof(val);
+    if (v < 0.0f) v = 0.0f; if (v > 100.0f) v = 100.0f;
+    g_impedance.config().cart_deadband_mm = v;
+    ++g_config_keys_applied; return;
+  }
+  if (!strcmp(key, "imp.output_scale_milli"))
+  {
+    long v = atol(val);
+    if (v < 0) v = 0; if (v > 1000) v = 1000; // 0..1000 scaling
+    g_impedance.config().output_scale_milli = (uint16_t)v;
+    ++g_config_keys_applied; return;
+  }
+  // Joint compliance keys: comp.enabled, comp.kp_milli.<coxa|femur|tibia>,
+  // comp.range_cd.<coxa|femur|tibia>, comp.deadband_cd.<coxa|femur|tibia>, comp.leak_milli
+  if (!strcmp(key, "comp.enabled"))
+  {
+    g_comp_enabled = parse_bool(val);
+    ++g_config_keys_applied; return;
+  }
+  if (!strcmp(key, "comp.leak_milli"))
+  {
+    long v = atol(val);
+    if (v < 0) v = 0; if (v > 1000) v = 1000; // 0..1.0 per tick
+    g_comp_leak_milli = (uint16_t)v;
+    ++g_config_keys_applied; return;
+  }
+  if (!strncmp(key, "comp.kp_milli.", 14))
+  {
+    const char* jtok = key + 14;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_comp_kp_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  if (!strncmp(key, "comp.range_cd.", 14))
+  {
+    const char* jtok = key + 14;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 5000) v = 5000; // up to 50 deg of compliance
+      g_comp_range_cd[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  if (!strncmp(key, "comp.deadband_cd.", 18))
+  {
+    const char* jtok = key + 18;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 2000) v = 2000; // up to 20 deg deadband
+      g_comp_deadband_cd[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  // Joint-space impedance gains: imp.joint.k_spring_milli.<coxa|femur|tibia>
+  if (!strncmp(key, "imp.joint.k_spring_milli.", 25))
+  {
+    const char* jtok = key + 25;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_impedance.config().joint.k_spring_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  // Joint-space damping: imp.joint.k_damp_milli.<coxa|femur|tibia>
+  if (!strncmp(key, "imp.joint.k_damp_milli.", 23))
+  {
+    const char* jtok = key + 23;
+    int j = jointIndexFromToken(jtok);
+    if (j >= 0 && j < 3) {
+      long v = atol(val);
+      if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_impedance.config().joint.k_damp_milli[j] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  // Cartesian impedance gains (body frame): imp.cart.k_spring_milli.<x|y|z> / imp.cart.k_damp_milli.<x|y|z>
+  if (!strncmp(key, "imp.cart.k_spring_milli.", 25))
+  {
+    const char* atok = key + 25;
+    int axis = -1;
+    if      (!strcmp(atok, "x")) axis = 0;
+    else if (!strcmp(atok, "y")) axis = 1;
+    else if (!strcmp(atok, "z")) axis = 2;
+    if (axis >= 0 && axis < 3) {
+      long v = atol(val); if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_impedance.config().cart.k_spring_milli[axis] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
+  if (!strncmp(key, "imp.cart.k_damp_milli.", 23))
+  {
+    const char* atok = key + 23;
+    int axis = -1;
+    if      (!strcmp(atok, "x")) axis = 0;
+    else if (!strcmp(atok, "y")) axis = 1;
+    else if (!strcmp(atok, "z")) axis = 2;
+    if (axis >= 0 && axis < 3) {
+      long v = atol(val); if (v < 0) v = 0; if (v > 65535) v = 65535;
+      g_impedance.config().cart.k_damp_milli[axis] = (uint16_t)v;
+      ++g_config_keys_applied;
+    }
+    return;
+  }
 
   if (!strcmp(key, "test.trigait.overlap_pct"))
 
@@ -1074,7 +1260,7 @@ void refreshOffsetsAtStartup() {
 // -----------------------------------------------------------------------------
 // Missing helpers required by commandprocessor.ino
 //  - Tokenizer
-//  - OK/ERR/HELP/STATUS printers
+//  - STATUS/HELP printers
 //  - Reboot
 //  - Angle offset helpers are provided by lx16a-servo library
 // -----------------------------------------------------------------------------
@@ -1189,6 +1375,78 @@ void printSTATUS()
     Serial.print(F("\r\n"));
   }
 
+  // [CONTROL MODES]
+  Serial.print(F("[CONTROL]\r\n"));
+  {
+    // PID summary
+    Serial.print(F("  pid.enabled=")); Serial.print(g_pid_enabled ? 1 : 0);
+    Serial.print(F(" mode=")); Serial.print((g_pid_mode==0)?F("active"):F("shadow"));
+    Serial.print(F(" kp_milli="));
+    Serial.print((unsigned)g_pid_kp_milli[0]); Serial.print('/');
+    Serial.print((unsigned)g_pid_kp_milli[1]); Serial.print('/');
+    Serial.print((unsigned)g_pid_kp_milli[2]);
+    Serial.print(F(" ki_milli="));
+    Serial.print((unsigned)g_pid_ki_milli[0]); Serial.print('/');
+    Serial.print((unsigned)g_pid_ki_milli[1]); Serial.print('/');
+    Serial.print((unsigned)g_pid_ki_milli[2]);
+    Serial.print(F(" kd_milli="));
+    Serial.print((unsigned)g_pid_kd_milli[0]); Serial.print('/');
+    Serial.print((unsigned)g_pid_kd_milli[1]); Serial.print('/');
+    Serial.print((unsigned)g_pid_kd_milli[2]);
+    Serial.print(F("\r\n"));
+
+    // Impedance summary (JOINT/CART outer loop around effective joint commands)
+    const ImpedanceConfig& icfg = g_impedance.config();
+    Serial.print(F("  imp.enabled=")); Serial.print(icfg.enabled ? 1 : 0);
+    Serial.print(F(" mode="));
+    switch (icfg.mode) {
+      case IMP_MODE_JOINT: Serial.print(F("joint")); break;
+      case IMP_MODE_CART:  Serial.print(F("cart"));  break;
+      default:             Serial.print(F("off"));   break;
+    }
+    Serial.print(F(" jspring="));
+    Serial.print((unsigned)icfg.joint.k_spring_milli[0]); Serial.print('/');
+    Serial.print((unsigned)icfg.joint.k_spring_milli[1]); Serial.print('/');
+    Serial.print((unsigned)icfg.joint.k_spring_milli[2]);
+    Serial.print(F(" jdamp="));
+    Serial.print((unsigned)icfg.joint.k_damp_milli[0]);   Serial.print('/');
+    Serial.print((unsigned)icfg.joint.k_damp_milli[1]);   Serial.print('/');
+    Serial.print((unsigned)icfg.joint.k_damp_milli[2]);
+    Serial.print(F(" cspring="));
+    Serial.print((unsigned)icfg.cart.k_spring_milli[0]);  Serial.print('/');
+    Serial.print((unsigned)icfg.cart.k_spring_milli[1]);  Serial.print('/');
+    Serial.print((unsigned)icfg.cart.k_spring_milli[2]);
+    Serial.print(F(" cdamp="));
+    Serial.print((unsigned)icfg.cart.k_damp_milli[0]);    Serial.print('/');
+    Serial.print((unsigned)icfg.cart.k_damp_milli[1]);    Serial.print('/');
+    Serial.print((unsigned)icfg.cart.k_damp_milli[2]);
+    Serial.print(F(" scale="));
+    Serial.print((unsigned)icfg.output_scale_milli);
+    Serial.print(F(" jdb_cd="));
+    Serial.print((unsigned)icfg.joint_deadband_cd);
+    Serial.print(F(" cdb_mm="));
+    Serial.print(icfg.cart_deadband_mm, 2);
+    Serial.print(F("\r\n"));
+
+    // Joint compliance summary (setpoint adaptation around estimator)
+    Serial.print(F("  comp.enabled=")); Serial.print(g_comp_enabled ? 1 : 0);
+    Serial.print(F(" kp_milli="));
+    Serial.print((unsigned)g_comp_kp_milli[0]); Serial.print('/');
+    Serial.print((unsigned)g_comp_kp_milli[1]); Serial.print('/');
+    Serial.print((unsigned)g_comp_kp_milli[2]);
+    Serial.print(F(" range_cd="));
+    Serial.print((unsigned)g_comp_range_cd[0]); Serial.print('/');
+    Serial.print((unsigned)g_comp_range_cd[1]); Serial.print('/');
+    Serial.print((unsigned)g_comp_range_cd[2]);
+    Serial.print(F(" deadband_cd="));
+    Serial.print((unsigned)g_comp_deadband_cd[0]); Serial.print('/');
+    Serial.print((unsigned)g_comp_deadband_cd[1]); Serial.print('/');
+    Serial.print((unsigned)g_comp_deadband_cd[2]);
+    Serial.print(F(" leak_milli="));
+    Serial.print((unsigned)g_comp_leak_milli);
+    Serial.print(F("\r\n"));
+  }
+
   // [HOME]
   Serial.print(F("[HOME]\r\n"));
   {
@@ -1278,6 +1536,36 @@ void printSTATUS()
   {
     Serial.print(F("  cmd_alpha_milli=")); Serial.print((unsigned int)g_est_cmd_alpha_milli); Serial.print(F("\r\n"));
     Serial.print(F("  meas_alpha_milli=")); Serial.print((unsigned int)g_est_meas_alpha_milli); Serial.print(F("\r\n"));
+    Serial.print(F("  meas_vel_alpha_milli=")); Serial.print((unsigned int)g_est_meas_vel_alpha_milli); Serial.print(F("\r\n"));
+  }
+  
+  // [IMP]
+  Serial.print(F("[IMP]\r\n"));
+  {
+    const ImpedanceConfig& cfg = g_impedance.config();
+    Serial.print(F("  enabled=")); Serial.print(cfg.enabled ? 1 : 0); Serial.print(F("\r\n"));
+    Serial.print(F("  mode="));
+    switch (cfg.mode) {
+      case IMP_MODE_JOINT: Serial.print(F("joint")); break;
+      case IMP_MODE_CART:  Serial.print(F("cart"));  break;
+      default:             Serial.print(F("off"));   break;
+    }
+    Serial.print(F("\r\n"));
+    const char* jn[3] = {"coxa","femur","tibia"};
+    Serial.print(F("  joint_k_spring_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)cfg.joint.k_spring_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  joint_k_damp_milli="));
+    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)cfg.joint.k_damp_milli[j]); }
+    Serial.print(F("\r\n"));
+    Serial.print(F("  cart_k_spring_milli="));
+    Serial.print(F("x=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[0]); Serial.print(F("/"));
+    Serial.print(F("y=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[1]); Serial.print(F("/"));
+    Serial.print(F("z=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[2]); Serial.print(F("\r\n"));
+    Serial.print(F("  cart_k_damp_milli="));
+    Serial.print(F("x=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[0]); Serial.print(F("/"));
+    Serial.print(F("y=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[1]); Serial.print(F("/"));
+    Serial.print(F("z=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[2]); Serial.print(F("\r\n"));
   }
   }
 #endif
@@ -1312,6 +1600,8 @@ void printHELP() {
   Serial.print(F("  HELP                      Show this help\r\n"));
   Serial.print(F("  STATUS                    Show system status summary\r\n"));
   Serial.print(F("  REBOOT                    Reboot controller\r\n"));
+  Serial.print(F("  CONFIG                    Dump /config.txt contents (when SD present)\r\n"));
+  Serial.print(F("  LOOP <hz>                 Set control loop frequency (50..500 Hz, persists loop_hz when SD enabled)\r\n"));
 
   // Enable / disable
   Serial.print(F("[ENABLE]\r\n"));
@@ -1340,6 +1630,8 @@ void printHELP() {
   Serial.print(F("  SAVEHOME                  Capture current positions as new home_cd (enabled/in-service)\r\n"));
   Serial.print(F("  OFFSET LIST               List hardware angle offsets (centideg)\r\n"));
   Serial.print(F("  OFFSET CLEAR <LEG|ALL> <JOINT|ALL>  Clear hardware angle offsets\r\n"));
+  Serial.print(F("  LIMITS LIST               Show shared joint workspace limits (per joint type, all legs)\r\n"));
+  Serial.print(F("  LIMITS <COXA|FEMUR|TIBIA> <MIN_DEG> <MAX_DEG>  Set shared joint workspace (deg, applied around home_cd)\r\n"));
 
   // Mode / test / shortcuts
   Serial.print(F("[MODE]\r\n"));
@@ -1380,7 +1672,7 @@ void printHELP() {
   // Notes
   Serial.print(F("[NOTES]\r\n"));
   Serial.print(F("  Units: angles=centideg (0..24000); positions=mm (body frame). Left legs mirror IK angles.\r\n"));
-  Serial.print(F("  Config: test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}\r\n"));
+  Serial.print(F("  Config: loop_hz, logging.rate_hz (<= loop_hz), test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}\r\n"));
   Serial.print(F("  PID config keys (Phase 2): pid.enabled, pid.kp_milli.<coxa|femur|tibia>, pid.ki_milli.<...>, pid.kd_milli.<...>\r\n"));
   Serial.print(F("  PID shadow mode keys: pid.mode=active|shadow, pid.shadow_report_hz=<1..50>\r\n"));
   Serial.print(F("[PID COMMANDS]\r\n"));
@@ -1390,6 +1682,27 @@ void printHELP() {
   Serial.print(F("  PID KP|KI|KD <COXA|FEMUR|TIBIA|ALL> <milli>\r\n"));
   Serial.print(F("  PID KDALPHA <COXA|FEMUR|TIBIA|ALL> <milli 0..1000>\r\n"));
   Serial.print(F("  PID SHADOW_RATE <hz 1..50>\r\n"));
+  Serial.print(F("[IMP COMMANDS]\r\n"));
+  Serial.print(F("  IMP LIST\r\n"));
+  Serial.print(F("  IMP ENABLE | DISABLE\r\n"));
+  Serial.print(F("  IMP MODE <OFF|JOINT|CART>\r\n"));
+  Serial.print(F("  IMP SCALE <milli 0..1000>\r\n"));
+  Serial.print(F("  IMP JSPRING|JDAMP <COXA|FEMUR|TIBIA|ALL> <milli>\r\n"));
+  Serial.print(F("  IMP CSPRING|CDAMP <X|Y|Z|ALL> <milli>\r\n"));
+  Serial.print(F("  IMP JDB <cd> (joint deadband)\r\n"));
+  Serial.print(F("  IMP CDB <mm> (Cartesian deadband radius)\r\n"));
+  Serial.print(F("[COMP (JOINT COMPLIANCE) COMMANDS]\r\n"));
+  Serial.print(F("  COMP LIST\r\n"));
+  Serial.print(F("  COMP ENABLE | DISABLE\r\n"));
+  Serial.print(F("  COMP KP <COXA|FEMUR|TIBIA|ALL> <milli>\r\n"));
+  Serial.print(F("  COMP RANGE <COXA|FEMUR|TIBIA|ALL> <cd>\r\n"));
+  Serial.print(F("  COMP DEADBAND <COXA|FEMUR|TIBIA|ALL> <cd>\r\n"));
+  Serial.print(F("  COMP LEAK <milli 0..1000>\r\n"));
+  Serial.print(F("[EST (ESTIMATOR) COMMANDS]\r\n"));
+  Serial.print(F("  EST LIST\r\n"));
+  Serial.print(F("  EST CMD_ALPHA <milli 0..1000>\r\n"));
+  Serial.print(F("  EST MEAS_ALPHA <milli 0..1000>\r\n"));
+  Serial.print(F("  EST MEAS_VEL_ALPHA <milli 0..2000>\r\n"));
 }
 
 void rebootNow() {
