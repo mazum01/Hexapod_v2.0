@@ -34,34 +34,44 @@ struct ImpedanceConfig {
 };
 
 class MarsImpedance {
-public:
-  MarsImpedance() { reset(); }
+  public:
+    MarsImpedance() {
+      reset();
+    }
 
-  void reset();
+    void reset();
 
-  void setEnabled(bool on) { cfg_.enabled = on; }
-  void setMode(ImpedanceMode m) { cfg_.mode = m; }
+    void setEnabled(bool on) {
+      cfg_.enabled = on;
+    }
+    void setMode(ImpedanceMode m) {
+      cfg_.mode = m;
+    }
 
-  void setJointSpring(int jointIdxOrAll, uint16_t k_milli);
-  void setJointDamp(int jointIdxOrAll, uint16_t c_milli);
+    void setJointSpring(int jointIdxOrAll, uint16_t k_milli);
+    void setJointDamp(int jointIdxOrAll, uint16_t c_milli);
 
-  void setCartSpring(int axisOrAll, uint16_t k_milli);
-  void setCartDamp(int axisOrAll, uint16_t c_milli);
+    void setCartSpring(int axisOrAll, uint16_t k_milli);
+    void setCartDamp(int axisOrAll, uint16_t c_milli);
 
-  const ImpedanceConfig& config() const { return cfg_; }
-  ImpedanceConfig& config() { return cfg_; }
+    const ImpedanceConfig& config() const {
+      return cfg_;
+    }
+    ImpedanceConfig& config() {
+      return cfg_;
+    }
 
-  // Compute joint-space corrections for a single leg.
-  // Inputs:
-  //  - leg: leg index (0..5), unused for now but kept for future per-leg options
-  //  - est_cd[3]: estimated joint angles (centideg)
-  //  - cmd_cd[3]: nominal joint commands (centideg)
-  //  - dt_s: tick duration in seconds
-  //  - bodyFoot: optional BODY-frame foot position (x,y,z) in mm; may be nullptr when mode==JOINT
-  //  - bodyRef: optional BODY-frame reference foot position (x,y,z) in mm; may be nullptr when mode==JOINT
-  // Output:
-  //  - out_corr_cd[3]: additive joint corrections (centideg)
-  void computeLegCorrection(
+    // Compute joint-space corrections for a single leg.
+    // Inputs:
+    //  - leg: leg index (0..5), unused for now but kept for future per-leg options
+    //  - est_cd[3]: estimated joint angles (centideg)
+    //  - cmd_cd[3]: nominal joint commands (centideg)
+    //  - dt_s: tick duration in seconds
+    //  - bodyFoot: optional BODY-frame foot position (x,y,z) in mm; may be nullptr when mode==JOINT
+    //  - bodyRef: optional BODY-frame reference foot position (x,y,z) in mm; may be nullptr when mode==JOINT
+    // Output:
+    //  - out_corr_cd[3]: additive joint corrections (centideg)
+    void computeLegCorrection(
       uint8_t leg,
       const int16_t est_cd[3],
       const int16_t cmd_cd[3],
@@ -70,16 +80,16 @@ public:
       const float* bodyRef,
       int16_t out_corr_cd[3]);
 
-private:
-  ImpedanceConfig cfg_;
+  private:
+    ImpedanceConfig cfg_;
 
-  // For simple Cartesian damping, track last foot position per leg (x,y,z in mm).
-  struct FootState {
-    float last_x_mm;
-    float last_y_mm;
-    float last_z_mm;
-    bool  valid;
-  };
+    // For simple Cartesian damping, track last foot position per leg (x,y,z in mm).
+    struct FootState {
+      float last_x_mm;
+      float last_y_mm;
+      float last_z_mm;
+      bool  valid;
+    };
 
-  FootState foot_state_[6];
+    FootState foot_state_[6];
 };

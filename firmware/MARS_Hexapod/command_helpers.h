@@ -29,11 +29,18 @@ static inline int jointIndexFromToken(const char* t) {
 }
 
 // Enable mask queries
-static inline bool leg_enabled_mask_get(uint8_t leg){ return ((g_leg_enabled_mask >> leg) & 1u)!=0; }
-static inline bool joint_enabled_mask_get(uint8_t leg,uint8_t joint){ uint8_t idx=(uint8_t)(leg*3u+joint); return ((g_joint_enabled_mask>>idx)&1u)!=0; }
+static inline bool leg_enabled_mask_get(uint8_t leg) {
+  return ((g_leg_enabled_mask >> leg) & 1u) != 0;
+}
+static inline bool joint_enabled_mask_get(uint8_t leg, uint8_t joint) {
+  uint8_t idx = (uint8_t)(leg * 3u + joint);
+  return ((g_joint_enabled_mask >> idx) & 1u) != 0;
+}
 
 // LX-16A unit conversions: 1 unit ≈ 0.24° = 24 centideg
-static inline int16_t units_to_cd(int units) { return (int16_t)(units * 24); }
+static inline int16_t units_to_cd(int units) {
+  return (int16_t)(units * 24);
+}
 static inline int16_t cd_to_units_round(int cd) {
   if (cd < -32768) cd = -32768; if (cd > 32767) cd = 32767;
   // round to nearest

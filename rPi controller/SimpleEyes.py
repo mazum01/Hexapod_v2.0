@@ -33,6 +33,7 @@ class SimpleEyes:
         self.right_shape = EYE_SHAPE.ROUNDRECTANGLE
         self.rotation = 0
         self.eye_center_offset = 15;  # offset from the screen center to the middle of the eyes
+        self.eye_vertical_offset = 0  # vertical offset in pixels (+ for down, - for up)
         self.eye_spacing_offset = 0 # number of pixels between the eyes to move them closer or farther apart (+ for closer, - for farther)
         self.eyelid_angle = 0 # angle of the eyelid vs the vertical axis of the unrotaated eye, in degrees
         self.eyelid_percent = 0.0 # percentage of the eye that is closed, from 0.0 to 1.0
@@ -121,12 +122,14 @@ class SimpleEyes:
             self.render_eye()
             
             # draw the right eye
-            middle = (self.eye_center_offset + self.eye_spacing_offset + self.display_size[0] * .25, (self.display_size[1] - 2) * .45)
+            middle = (self.eye_center_offset + self.eye_spacing_offset + self.display_size[0] * .25, 
+                      self.eye_vertical_offset + (self.display_size[1] - 2) * .45)
             eye_rot = self.eye_image_right.rotate(-self.rotation, resample = 3, expand=True)
             self.display_image.paste(eye_rot, (int(middle[0] - eye_rot.width/2), int(middle[1] - eye_rot.height/2)))
 
             # draw the left eye
-            middle = (self.eye_center_offset - self.eye_spacing_offset + self.display_size[0] * .75, (self.display_size[1] - 2) * .45)
+            middle = (self.eye_center_offset - self.eye_spacing_offset + self.display_size[0] * .75, 
+                      self.eye_vertical_offset + (self.display_size[1] - 2) * .45)
             eye_rot = self.eye_image_left.rotate(self.rotation, resample = 3, expand=True)
             self.display_image.paste(eye_rot, (int(middle[0] - eye_rot.width/2), int(middle[1] - eye_rot.height/2)))
 

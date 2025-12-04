@@ -63,6 +63,8 @@ Conventions
    - Document SerialX TX/RX/enable pins & power wiring; mirror in `robot_config.h`; splash sanity print of pin set completeness.
  - [ ] Phase2: logging enhancements
    - Add `logging.mode=profile` (per-tick timing, rr index, overruns); jitter histogram snapshot command; optional servo read distribution metrics.
+ - [x] Phase2: eye updates during gait (Python controller) (2025-12-04)
+   - Implemented DisplayThread running at configurable Hz (default 15, tested at 30Hz). Eyes update in background thread with joystick-driven look direction. Optimized st7789.py with show_image_fast() using numpy.tobytes() and writebytes2() to minimize GIL contention - eliminates leg jitter during blinks entirely.
  - [ ] Phase2: homeAngles calibration workflow
    - Add `CALIBRATE <LEG|ALL>` automation; unify offset/home persistence strategy; clearly separate hardware offset vs logical home.
  - [ ] Phase2: loop_hz strategy review

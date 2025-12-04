@@ -16,6 +16,7 @@ enum CommandType : uint8_t {
   CMD_LOOP,
   CMD_TUCK, CMD_PID, CMD_IMP, CMD_COMP, CMD_EST,
   CMD_LIMITS, CMD_CONFIG,
+  CMD_Y,
   CMD_UNKNOWN
 };
 

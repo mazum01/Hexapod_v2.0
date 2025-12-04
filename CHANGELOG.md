@@ -1,3 +1,237 @@
+## Python Controller 0.4.0 (b65) — 2025-12-04
+### Added
+- **Display thread**: Background thread for eye animation and LCD updates:
+  - Runs at configurable Hz (default 15Hz, via `[display] thread_hz`)
+  - Enable/disable via `[display] thread_enabled` in controller.ini
+  - Decouples rendering from main loop timing — eyes now animate during gait!
+  - Thread-safe state updates from main loop
+  - Proper shutdown on exit
+- Minor version bump (0.3 → 0.4) for significant architectural change
+
+## Python Controller 0.3.31 (b64) — 2025-12-04
+### Added
+- **Complete config centralization**: All magic numbers now in `controller.ini`:
+  - `[serial]`: error_threshold (disconnect after N read errors)
+  - `[gait]`: cycle_ms, step_len_mm, base_y_mm, max_step_len_mm, overlap_pct, smoothing_alpha, send_divisor, cmd_throttle_ms
+  - `[gait]`: Bezier curve shape: bezier_p1_height, bezier_p1_overshoot, bezier_p2_height, bezier_p3_height, bezier_p3_overshoot
+  - `[eyes]`: spacing_offset, center_offset, eyelid_angle, blink_percent_step, rotation, size_x, size_y
+- GaitParams dataclass extended with Bezier control point parameters
+- send_cmd() and apply_posture() now use config values for throttle_ms and auto_disable_s
+
+## Python Controller 0.3.30 (b63) — 2025-12-04
+### Added
+- **Centralized configuration**: Magic numbers moved to `controller.ini` sections:
+  - `[timing]`: loop_target_ms, teensy_loop_us, telem_sync_fallback_ms, teensy_reconnect_backoff_s
+  - `[display]`: screen_refresh_ms, brightness, auto_disable_s
+  - `[gait]`: Added width_min_mm, width_max_mm, lift_min_mm, lift_max_mm for configurable ranges
+- All timing and display constants now loaded from config with safe fallback defaults
+
+## Python Controller 0.3.29 (b62) — 2025-12-03
+### Added
+- **Persistent gait settings**: Gait width and lift height are now saved to `controller.ini` [gait] section when left stick button is released.
+  - Settings persist across controller restarts
+  - Loaded on startup and applied to new gait sessions
+  - Fallback defaults: width=100mm, lift=60mm
+
+## Python Controller 0.3.28 (b61) — 2025-12-03
+### Added
+- **Lift height adjustment**: Hold left stick button + right trigger to adjust lift height (20-100mm).
+  - Right trigger (code 9) maps 0-1023 to 20-100mm range
+  - Saved lift height used when starting new gait
+  - Real-time adjustment during active gait supported
+
+## Python Controller 0.3.27 (b60) — 2025-12-03
+### Changed
+- **Gait width range**: Expanded from 60-140mm to 50-175mm for more adjustment range.
+
+## Python Controller 0.3.26 (b59) — 2025-12-03
+### Fixed
+- **Left trigger event code**: Changed from code 2 to code 10 for Xbox controller left trigger detection.
+- **Analog debug output**: Added debug print for all analog events when left stick button is held (for controller mapping).
+
+## Python Controller 0.3.25 (b58) — 2025-12-03
+### Added
+- **Gait width adjustment**: Hold left stick button + left trigger to adjust gait width (lateral foot offset).
+  - Left trigger maps 0-1023 to 60-140mm width range
+  - Width is saved when left stick button is released
+  - Saved width is used when starting new gait (LB button)
+  - Real-time adjustment during active gait supported
+
+## Python Controller 0.3.24 (b57) — 2025-12-03
+### Changed
+- **Bezier lift height tuning**: Increased lift_mm to 60mm and Bezier peak control point to 150% to compensate for curve attenuation. Actual peak now reaches target height.
+- **Bezier control points adjusted**: P1 (15% height), P2 (150% height), P3 (35% height) for proper arc shape.
+
+## Python Controller 0.3.23 (b56) — 2025-12-03
+### Added
+- **Bezier curve foot trajectories**: Swing phase now uses a 5-point Bezier curve for smooth, natural foot motion:
+  - P0: Start (back position, on ground)
+  - P1: Initial lift with slight backward overshoot (10% height, -110% stride)
+  - P2: Peak height at center (-10% stride position)
+  - P3: Descending with forward overshoot (25% height, +110% stride)
+  - P4: End (front position, on ground)
+- **Bezier utilities**: Added `bezier_point()`, `binomial_coefficient()`, and `map_range()` functions to gait_engine.py
+
+### Changed
+- **Stance phase**: Simplified to linear interpolation (equivalent to 2-point Bezier)
+
+## Python Controller 0.3.22 (b55) — 2025-12-03
+### Fixed
+- **Safe shutdown on exit**: Script now sends `LEG ALL DISABLE` + `DISABLE` before stopping telemetry when exiting.
+
+### Changed
+- **Strafe (crab walk) fully working**: Rewrote `_apply_leg_rotation` with proper 2D rotation math:
+  - Base foot position computed from `LEG_BASE_SIN/COS` arrays
+  - Full rotation angle = leg base rotation + side-dependent heading offset
+  - Left legs (LF,LM,LR) add heading, right legs (RF,RM,RR) subtract for coordinated body-frame motion
+  - Stride vector rotated then translated back to leg base position
+
+## Python Controller 0.3.21 (b54) — 2025-11-30
+### Fixed
+- **Middle leg strafe motion**: LM and RM legs now properly participate in crab walk. Strafe component routed to their local Z axis (body lateral direction) with correct sign per side (LM positive, RM negative).
+- **Print statement line endings**: All print() calls now use `end="\r\n"` for proper terminal display.
+- **MODE IDLE on gait start**: Python gait (LB button) now sends MODE IDLE to prevent Teensy TEST mode from overriding FEET commands.
+
+## Python Controller 0.2.1 (b28) — 2025-11-26
+### Added
+- **Monotonic build number**: Introduced `CONTROLLER_BUILD` (starts at 28, never resets across version changes). Increment on every code edit for precise tracking.
+- Bumped `CONTROLLER_VERSION` to 0.2.1.
+
+## Python Controller 0.2.0 (b27) — 2025-11-26
+### Changed (Session 2 Performance Improvements)
+- **Serial read batching**: Replaced inefficient byte-by-byte reads with batch `read(in_waiting)` and incomplete line buffering. Partial lines are now preserved across reads, preventing data corruption on line boundaries.
+- **Loop timing drift correction**: Replaced fixed `time.sleep(0.005)` with monotonic next-tick scheduling. Sleep time is now calculated to hit the target tick time, preventing accumulated drift. Includes catch-up logic to reset if >50ms behind.
+- **Keyboard input optimization**: Replaced per-loop `curses.wrapper(getkey)` with persistent `init_keyboard()` + `poll_keyboard()`. Curses is now initialized once and cleaned up on exit, eliminating significant per-loop overhead.
+- **Removed debug prints**: Cleaned up temporary X/Y button debug print statements.
+- Bumped `CONTROLLER_VERSION` to 0.2.0.
+
+## Python Controller 0.1.24 — 2025-11-25
+### Changed
+- **X button (306)**: Now toggles between `MODE TEST` and `MODE IDLE` with internal state tracking.
+- **Y button (307)**: Changed from `MODE TEST` to `TUCK` posture command with 4-second auto-disable.
+- Bumped `CONTROLLER_VERSION` to 0.1.24.
+
+## Python Controller 0.1.23 — 2025-11-25
+### Changed
+- **Xbox controller button remapping**: Updated face buttons and right joystick to use modern Teensy firmware commands:
+  - **Y button (307)**: `MODE TEST` - enters tripod gait test mode
+  - **X button (306)**: `MODE IDLE` - exits test mode to idle
+  - **A button (304)**: `STAND` - stand posture with 4-second auto-disable
+  - **B button (305)**: `HOME` - home position with 4-second auto-disable
+  - **Right joystick press (318)**: `DISABLE` - immediate disable/stop
+- **Removed obsolete commands**: Eliminated legacy single-letter commands (`r`, `w`, `t`, `m`, `f`) and steering mode (`b0`/`b1`) that are not supported by current firmware.
+- **Left joystick press (317)**: Reserved for future functionality.
+- Bumped `CONTROLLER_VERSION` to 0.1.23.
+
+## Python Controller 0.1.22 — 2025-11-25
+### Fixed
+- **Enhanced power button detection**: Added support for multiple Xbox guide button event codes (139, 158, 172) and debug logging for unhandled button events.
+- Bumped `CONTROLLER_VERSION` to 0.1.22.
+
+## Python Controller 0.1.21 — 2025-11-25
+### Fixed
+- **Power button application exit**: Fixed Xbox controller power button (event code 172) not terminating the application. Added `requestExit` flag to Controller class; power button handler now sets this flag, and main loop checks it to set `_run = False` and break execution.
+- Bumped `CONTROLLER_VERSION` to 0.1.21.
+
+## Python Controller 0.1.20 — 2025-11-25
+### Fixed
+- **Menu display bug**: Menu toggle ('n' key) now properly syncs between global state and Controller instance, fixing menu visibility in mirror display mode.
+- **Stand auto-disable bug**: Stand command ('s' key) now properly schedules auto-disable by syncing `autoDisableAt` to Controller instance.
+- **Tuck auto-disable bug**: Tuck command ('k' key) now properly schedules auto-disable by syncing `autoDisableAt` to Controller instance.
+- **Auto-disable execution**: Auto-disable logic now uses Controller state consistently for reliable execution.
+- Bumped `CONTROLLER_VERSION` to 0.1.20.
+
+## Python Controller 0.1.19 — 2025-11-25
+### Fixed
+- **Critical bugfix**: Added missing `connect_teensy()` and `handle_teensy_disconnect()` methods to Controller class that were referenced but not implemented, causing runtime crashes.
+- Bumped `CONTROLLER_VERSION` to 0.1.19.
+
+## Python Controller 0.1.18 — 2025-11-25
+### Changed
+- Controller refactor (phase 1e): completed migration of all global state into `Controller` class. All polling, display, and connection management now encapsulated in instance methods.
+- Added Teensy connection management with `controller.ini` serial config support (port override and baud rate from config).
+- Bumped `CONTROLLER_VERSION` to 0.1.18.
+
+## Python Controller 0.1.17 — 2025-11-24
+### Changed
+- Controller refactor (phase 1d): migrated Teensy telemetry polling, gamepad event handling, and display update into `Controller.poll_teensy()`, `Controller.poll_gamepad()`, and `Controller.update_display()` methods. Behavior unchanged (structural consolidation only).
+- Bumped `CONTROLLER_VERSION` to 0.1.17.
+
+## Python Controller 0.1.16 — 2025-11-24
+### Fixed
+- Mirror ('m') and verbose ('v') toggles now persist correctly after Controller state mirroring (sync into class before global write-back).
+### Changed
+- Bumped `CONTROLLER_VERSION` to 0.1.16.
+
+## Python Controller 0.1.15 — 2025-11-24
+### Changed
+- Controller refactor (phase 1c): moved telemetry auto-start/retry logic into `Controller.housekeeping()`; behavior unchanged.
+- Bumped `CONTROLLER_VERSION` to 0.1.15.
+
+## Python Controller 0.1.14 — 2025-11-24
+### Changed
+- Controller refactor (phase 1b): added `Controller` state mirroring for `verbose`, `mirror`, and telemetry timers; no behavior change.
+- Bumped `CONTROLLER_VERSION` to 0.1.14.
+
+## Python Controller 0.1.13 — 2025-11-24
+### Optimized
+- Font caching: cache PIL truetype fonts to avoid reloading each frame (reduces per-loop overhead in UpdateDisplay and logo rendering).
+### Changed
+- Bumped `CONTROLLER_VERSION` to 0.1.13.
+
+## Python Controller 0.1.12 — 2025-11-24
+### Added
+- Teensy reconnect loop: detects repeated read failures, drops port after 3 errors, rescans with 1.5s backoff, and resets telemetry auto-start state.
+### Changed
+- Bumped `CONTROLLER_VERSION` to 0.1.12.
+
+## Python Controller 0.1.11 — 2025-11-24
+### Added
+- Telemetry stall retry: after auto-start, if still no S1/S2, resend `Y 1` once after a 2s backoff.
+### Fixed
+- Bumped `CONTROLLER_VERSION` to 0.1.11.
+
+## Python Controller 0.1.10 — 2025-11-24
+### Fixed
+- Corrected newline normalization in `readTeensy`: now replaces CRLF/CR to LF instead of the incorrect `/r/n` literal.
+- Bumped `CONTROLLER_VERSION` to 0.1.10.
+
+## Python Controller 0.1.9 — 2025-11-24
+### Changed
+- 'q' key now performs full shutdown sequence: idle ('I'), then `LEG ALL DISABLE`, then master `DISABLE` to ensure leg torque drop before global disable.
+- Bumped `CONTROLLER_VERSION` to 0.1.9.
+
+## Python Controller 0.1.8 — 2025-11-24
+### Changed
+- Unified command emission as bytes; `send_cmd` now normalizes str/bytes safely and prevents prior mixed-type suppression issues.
+- Posture helper (`apply_posture`) now enforces bytes posture tokens and fixes comparison bug from mixed str/bytes.
+- Bumped `CONTROLLER_VERSION` to 0.1.8.
+
+## Python Controller 0.1.7 — 2025-11-23
+### Added
+- send_cmd debug instrumentation: prints suppressed and sent commands (throttle reasons) when verbose and for gait/motion commands, or globally with 'g' toggle.
+- S2 telemetry debug parity ensured (raw + parsed enable flag list) alongside S1.
+### Changed
+- Bumped `CONTROLLER_VERSION` to 0.1.7.
+
+## Python Controller 0.1.6 — 2025-11-23
+### Added
+- S2 telemetry debug: raw S2 segment and parsed enable flag list printed alongside S1 when debug ('d') toggle active.
+### Changed
+- Bumped `CONTROLLER_VERSION` to 0.1.6.
+
+## Python Controller 0.1.5 — 2025-11-23
+### Added / Changed
+- Posture abstraction helper (`apply_posture`) consolidating TUCK/STAND enable + auto-disable flow.
+- Centralized send path (`send_cmd`) with throttling and local enable tracking.
+- Telemetry schema validation: strict length checks for S1/S2/S3/S4; short packets skipped, long truncated with warning.
+- Telemetry auto-start after 750 ms grace using spaced command `Y 1`; stop with `Y 0` on exit.
+- Corrected telemetry command spacing (firmware expects `Y 1` / `Y 0`).
+- Raw + parsed S1 debug view (`d` key toggles) to aid bring-up of controller-side parsing.
+### Notes
+- Controller version introduced as `CONTROLLER_VERSION` in `controller.py` for disciplined patch bumps.
+- Earlier (2025-11-22) host-side protocol normalizations (LF only, posture keys, A button enable toggle) captured in `controller.py` inline change log; consolidated here for repository history.
+
 ## [0.2.13] - 2025-11-14
 ### Added
 - Virtual impedance layer (`MarsImpedance`) with joint-space and simple Cartesian (Z-axis focused) modes. Applied on top of PID/base commands with bounded centidegree corrections per joint.
@@ -6,8 +240,33 @@
 - STATUS now includes an `[IMP]` section summarizing impedance enabled flag, mode, joint-space gains, and Cartesian gains (x/y/z) to support on-robot tuning.
 
 ## 0.2.23 — 2025-11-19
+## 0.2.24 — 2025-11-21
+
+- Telemetry: Refactored S1 (aggregate state) and S2 (per-leg vin/temp/enable) streaming into helpers `telemetryPrintS1`/`telemetryPrintS2` in `functions.ino`. No format change; behavior unchanged. Internal maintainability improvement only.
+
+## 0.2.25 — 2025-11-21
+
+- Telemetry: S2 now emits one line per tick with all 18 servos in canonical order (LF,LM,LR,RF,RM,RR × C,F,T). Removed per-line leg tag; each triple is `vinV, tempC, en`. The `en` flag is now `legEnabled AND jointEnabled` to reflect effective availability in the UI. S1 format unchanged.
+
+## 0.2.26 — 2025-11-21
+
+- Telemetry: Split S2/S3 responsibilities. S2 now carries only enable flags for all 18 servos: `S2:<en0>,...,<en17>` where each is `(legEnabled AND jointEnabled)`. New S3 streams volt/temperature for all 18: `S3:<v0>,<t0>,...,<v17>,<t17>` with voltage as `X.Y` (V) and temperature in °C.
+
 
 - UX: Reformatted startup splash so firmware version/build, build metadata+loop_hz, and UART/config summary each print on their own line for better readability, keeping content and timing behavior unchanged.
+
+## 0.2.27 — 2025-11-21
+
+- Telemetry: Added single-letter `Y` command as a master toggle for the compact streams: `Y1`/`Y0` turns S1/S2/S3 on/off without changing FK mask. Streams default to ON for backward compatibility.
+- Telemetry: Re-enabled legacy `RR_FK` body-frame and leg-frame stream for the current RR leg, gated by the existing `FK <LEG|ALL> <ON|OFF>` mask. Format unchanged.
+
+## 0.2.28 — 2025-11-21
+
+- Telemetry: Decoupled compact telemetry from FK gating. S1/S2/S3 now emit based solely on `Y` (on/off) and serial availability; `FK` mask no longer affects them. `RR_FK` remains controlled by the `FK` mask only.
+
+## 0.2.29 — 2025-11-21
+
+- Telemetry: Updated S3 format to match controller expectations — now outputs all 18 voltages followed by all 18 temperatures: `S3:<v0>,...,<v17>,<t0>,...,<t17>` (canonical leg/joint order). Previous interleaved `v,t` pairs format deprecated.
 
 ## 0.2.22 — 2025-11-18
 

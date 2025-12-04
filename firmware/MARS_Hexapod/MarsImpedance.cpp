@@ -62,13 +62,13 @@ void MarsImpedance::setCartDamp(int axisOrAll, uint16_t c_milli)
 }
 
 void MarsImpedance::computeLegCorrection(
-    uint8_t leg,
-    const int16_t est_cd[3],
-    const int16_t cmd_cd[3],
-    float dt_s,
-    const float* bodyFoot,
-    const float* bodyRef,
-    int16_t out_corr_cd[3])
+  uint8_t leg,
+  const int16_t est_cd[3],
+  const int16_t cmd_cd[3],
+  float dt_s,
+  const float* bodyFoot,
+  const float* bodyRef,
+  int16_t out_corr_cd[3])
 {
   (void)leg;
   if (!out_corr_cd) return;
@@ -121,7 +121,7 @@ void MarsImpedance::computeLegCorrection(
 
     // Optional Cartesian deadband on displacement magnitude.
     if (cfg_.cart_deadband_mm > 0.0f) {
-      float mag2 = ex*ex + ey*ey + ez*ez;
+      float mag2 = ex * ex + ey * ey + ez * ez;
       float db2  = cfg_.cart_deadband_mm * cfg_.cart_deadband_mm;
       if (mag2 < db2) {
         return; // within deadband: no Cartesian correction for this leg
@@ -129,7 +129,7 @@ void MarsImpedance::computeLegCorrection(
     }
 
     FootState& fs = foot_state_[(leg < 6) ? leg : 0];
-  float vx = 0.0f, vy = 0.0f, vz = 0.0f;
+    float vx = 0.0f, vy = 0.0f, vz = 0.0f;
     if (fs.valid) {
       vx = (bodyFoot[0] - fs.last_x_mm) / dt_s;
       vy = (bodyFoot[1] - fs.last_y_mm) / dt_s;

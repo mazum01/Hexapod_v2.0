@@ -116,7 +116,7 @@ extern volatile uint8_t  g_log_mode;
 extern volatile bool     g_log_header;
 #endif
 
-  // Forward declaration for loop Hz apply helper in main sketch
+// Forward declaration for loop Hz apply helper in main sketch
 void configApplyLoopHz(uint16_t hz);
 
 // Local helpers
@@ -143,6 +143,97 @@ static inline void rtrim(char* s)
   }
 }
 
+// -----------------------------------------------------------------------------
+// Telemetry formatting helpers
+// -----------------------------------------------------------------------------
+// Prints compact S1 segment:
+//   S1:LEG,<leg>,EN,<en>,MODE,<mode>,LOCK,<lock>,GAIT,<gait>,FLOAT,<float>
+// Gait and float currently placeholders (0) to keep Pi-side parser stable.
+// All values passed in to avoid accessing static-scope globals (e.g. g_mode).
+// Updated S1 format to reflect expanded state vector used by Python side.
+// Fields:
+//  0: loop tick duration (microseconds)
+//  1: center x (placeholder 0)
+//  2: center y (placeholder 0)
+//  3: motor enabled (lockout flag here; preserves existing semantic in UI)
+//  4: last gait (placeholder 0)
+//  5: new gait (placeholder derived from lockout for now)
+//  6: current gait (mode-coded: TEST->0, other->7 placeholder)
+//  7: phase (tripod phase when TEST, else 0)
+//  8: current servo index (round-robin)
+//  9: motor float (1 if disabled)
+// Note: leg argument retained if future per-leg S1 variants are required; currently unused.
+void telemetryPrintS1(uint8_t leg, uint16_t loop_us, uint8_t lockout, uint8_t mode, uint8_t test_phase, uint8_t rr_index, uint8_t enabled)
+{
+  (void)leg; // unused in current aggregate S1 line
+  if (!Serial) return;
+  Serial.print(F("S1:"));
+  Serial.print((int)loop_us);
+  Serial.print(F(",0"));
+  Serial.print(F(",0,"));
+  Serial.print((int)lockout);
+  Serial.print(F(",0,"));
+  Serial.print(lockout ? 1 : 0);
+  Serial.print(F(",")); Serial.print(mode == 1 ? 0 : 7); Serial.print(F(","));
+  Serial.print(mode == 1 ? (int)test_phase : 0);
+  Serial.print(F(",")); Serial.print((int)rr_index); Serial.print(F(","));
+  Serial.print(enabled); // float flag (1 if disabled)
+  Serial.print('\n');
+}
+
+// Prints compact S2 segment for ALL 18 servos each time (enable flags only).
+// Format:
+//   S2:<en0>,<en1>,...,<en17>
+// Order: legs 0..5 (LF,LM,LR,RF,RM,RR) × joints 0..2 (C,F,T).
+// en = legEnabled AND jointEnabled.
+extern bool jointEnabled(uint8_t leg, uint8_t joint); // provided by main sketch
+extern bool legEnabled(uint8_t leg);                   // provided by main sketch
+void telemetryPrintS2()
+{
+  if (!Serial) return;
+  Serial.print(F("S2:"));
+  bool first = true;
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    uint8_t leg_en = legEnabled(leg) ? 1 : 0;
+    for (uint8_t j = 0; j < 3; ++j) {
+      if (!first) Serial.print(',');
+      first = false;
+      uint8_t en = (leg_en && (jointEnabled(leg, j) ? 1 : 0)) ? 1 : 0;
+      Serial.print((int)en);
+    }
+  }
+  Serial.print('\n');
+}
+
+// Prints compact S3 segment for ALL 18 servos each time.
+// New Format (aligned with Python controller processTelemS3 expectation):
+//   S3:<v0>,<v1>,...,<v17>,<t0>,<t1>,...,<t17>
+// Where ordering for indices 0..17 is legs LF,LM,LR,RF,RM,RR × joints COXA,FEMUR,TIBIA.
+// Voltage rendered as X.Y (integer + tenths) from millivolts; temperature whole deg C.
+// NOTE: This supersedes prior interleaved v,t pairs format (FW <0.2.29).
+void telemetryPrintS3()
+{
+  if (!Serial) return;
+  Serial.print(F("S3:"));
+  // Emit voltages first
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    for (uint8_t j = 0; j < 3; ++j) {
+      uint16_t vin_mV = g_meas_vin_mV[leg][j];
+      Serial.print((float)vin_mV / 1000.0, 2);
+      if (!(leg == 5 && j == 2)) Serial.print(',');
+    }
+  }
+  Serial.print(F(","));
+  // Emit temperatures
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    for (uint8_t j = 0; j < 3; ++j) {
+      Serial.print((int)g_meas_temp_C[leg][j]);
+      if (!(leg == 5 && j == 2)) Serial.print(',');
+    }
+  }
+  Serial.print('\n');
+}
+
 static inline char* ltrim(char* s)
 {
   if (!s) return s;
@@ -160,41 +251,19 @@ static inline char* ltrim(char* s)
 static inline bool parse_bool(const char* v) {
   if (!v) return false;
   // Skip leading spaces
-  while (*v==' '||*v=='\t') ++v;
+  while (*v == ' ' || *v == '\t') ++v;
   char c0 = (char)tolower(*v);
-  if (c0=='1') return true;
-  if (c0=='0') return false;
+  if (c0 == '1') return true;
+  if (c0 == '0') return false;
   // Case-insensitive literal checks without strncasecmp (Arduino-safe)
   // true
-  if ((tolower(v[0])=='t') && (tolower(v[1])=='r') && (tolower(v[2])=='u') && (tolower(v[3])=='e')) return true;
+  if ((tolower(v[0]) == 't') && (tolower(v[1]) == 'r') && (tolower(v[2]) == 'u') && (tolower(v[3]) == 'e')) return true;
   // on
-  if ((tolower(v[0])=='o') && (tolower(v[1])=='n') && (v[2]==0 || v[2]=='\n' || v[2]=='\r')) return true;
+  if ((tolower(v[0]) == 'o') && (tolower(v[1]) == 'n') && (v[2] == 0 || v[2] == '\n' || v[2] == '\r')) return true;
   // false
-  if ((tolower(v[0])=='f') && (tolower(v[1])=='a') && (tolower(v[2])=='l') && (tolower(v[3])=='s') && (tolower(v[4])=='e')) return false;
+  if ((tolower(v[0]) == 'f') && (tolower(v[1]) == 'a') && (tolower(v[2]) == 'l') && (tolower(v[3]) == 's') && (tolower(v[4]) == 'e')) return false;
   // off
-  if ((tolower(v[0])=='o') && (tolower(v[1])=='f') && (tolower(v[2])=='f')) return false;
-  // Fallback: non-zero numeric
-  long n = atol(v);
-  return n != 0;
-}
-
-// Parse common boolean forms: true/false, on/off, 1/0 (case-insensitive)
-static inline bool parse_bool(const char* v) {
-  if (!v) return false;
-  // Skip leading spaces
-  while (*v==' '||*v=='\t') ++v;
-  char c0 = (char)tolower(*v);
-  if (c0=='1') return true;
-  if (c0=='0') return false;
-  // Case-insensitive literal checks without strncasecmp (Arduino-safe)
-  // true
-  if ((tolower(v[0])=='t') && (tolower(v[1])=='r') && (tolower(v[2])=='u') && (tolower(v[3])=='e')) return true;
-  // on
-  if ((tolower(v[0])=='o') && (tolower(v[1])=='n') && (v[2]==0 || v[2]=='\n' || v[2]=='\r')) return true;
-  // false
-  if ((tolower(v[0])=='f') && (tolower(v[1])=='a') && (tolower(v[2])=='l') && (tolower(v[3])=='s') && (tolower(v[4])=='e')) return false;
-  // off
-  if ((tolower(v[0])=='o') && (tolower(v[1])=='f') && (tolower(v[2])=='f')) return false;
+  if ((tolower(v[0]) == 'o') && (tolower(v[1]) == 'f') && (tolower(v[2]) == 'f')) return false;
   // Fallback: non-zero numeric
   long n = atol(v);
   return n != 0;
@@ -314,44 +383,47 @@ extern int nextToken(const char* s, int start, int len, int* tokStart, int* tokL
 // commandprocessor.ino are linked together.
 void printERR(uint8_t code, const char* msg);
 extern CommandType parseCommandType(const char* cmd);
-extern void processCmdHELP(const char* line,int s,int len);
-extern void processCmdSTATUS(const char* line,int s,int len);
-extern void processCmdREBOOT(const char* line,int s,int len);
-extern void processCmdENABLE(const char* line,int s,int len);
-extern void processCmdDISABLE(const char* line,int s,int len);
-extern void processCmdFK(const char* line,int s,int len);
-extern void processCmdLEGS(const char* line,int s,int len);
-extern void processCmdSERVOS(const char* line,int s,int len);
-extern void processCmdLEG(const char* line,int s,int len);
-extern void processCmdSERVO(const char* line,int s,int len);
-extern void processCmdRAW(const char* line,int s,int len);
-extern void processCmdRAW3(const char* line,int s,int len);
-extern void processCmdFOOT(const char* line,int s,int len);
-extern void processCmdFEET(const char* line,int s,int len);
-extern void processCmdMODE(const char* line,int s,int len);
-extern void processCmdI(const char* line,int s,int len);
-extern void processCmdT(const char* line,int s,int len);
-extern void processCmdTEST(const char* line,int s,int len);
-extern void processCmdSTAND(const char* line,int s,int len);
-extern void processCmdTUCK(const char* line,int s,int len);
-extern void processCmdSAFETY(const char* line,int s,int len);
-extern void processCmdHOME(const char* line,int s,int len);
-extern void processCmdSAVEHOME(const char* line,int s,int len);
-extern void processCmdOFFSET(const char* line,int s,int len);
-extern void processCmdLOG(const char* line,int s,int len);
-extern void processCmdPID(const char* line,int s,int len);
-extern void processCmdIMP(const char* line,int s,int len);
-extern void processCmdCOMP(const char* line,int s,int len);
-extern void processCmdEST(const char* line,int s,int len);
-extern void processCmdLOOP(const char* line,int s,int len);
-extern void processCmdLIMITS(const char* line,int s,int len);
-extern void processCmdCONFIG(const char* line,int s,int len);
+extern void processCmdHELP(const char* line, int s, int len);
+extern void processCmdSTATUS(const char* line, int s, int len);
+extern void processCmdREBOOT(const char* line, int s, int len);
+extern void processCmdENABLE(const char* line, int s, int len);
+extern void processCmdDISABLE(const char* line, int s, int len);
+extern void processCmdFK(const char* line, int s, int len);
+extern void processCmdLEGS(const char* line, int s, int len);
+extern void processCmdSERVOS(const char* line, int s, int len);
+extern void processCmdLEG(const char* line, int s, int len);
+extern void processCmdSERVO(const char* line, int s, int len);
+extern void processCmdRAW(const char* line, int s, int len);
+extern void processCmdRAW3(const char* line, int s, int len);
+extern void processCmdFOOT(const char* line, int s, int len);
+extern void processCmdFEET(const char* line, int s, int len);
+extern void processCmdMODE(const char* line, int s, int len);
+extern void processCmdI(const char* line, int s, int len);
+extern void processCmdT(const char* line, int s, int len);
+extern void processCmdY(const char* line, int s, int len);
+extern void processCmdTEST(const char* line, int s, int len);
+extern void processCmdSTAND(const char* line, int s, int len);
+extern void processCmdTUCK(const char* line, int s, int len);
+extern void processCmdSAFETY(const char* line, int s, int len);
+extern void processCmdHOME(const char* line, int s, int len);
+extern void processCmdSAVEHOME(const char* line, int s, int len);
+extern void processCmdOFFSET(const char* line, int s, int len);
+extern void processCmdLOG(const char* line, int s, int len);
+extern void processCmdPID(const char* line, int s, int len);
+extern void processCmdIMP(const char* line, int s, int len);
+extern void processCmdCOMP(const char* line, int s, int len);
+extern void processCmdEST(const char* line, int s, int len);
+extern void processCmdLOOP(const char* line, int s, int len);
+extern void processCmdLIMITS(const char* line, int s, int len);
+extern void processCmdCONFIG(const char* line, int s, int len);
 
 extern char    lineBuf[160];
 extern uint8_t lineLen;
 // Centralized OK/ERR printing lives below with unified dispatch.
 
-void printOK() { Serial.print(F("OK")); }
+void printOK() {
+  Serial.print(F("OK"));
+}
 
 void printERR(uint8_t code, const char* msg) {
   g_last_err = code;
@@ -371,7 +443,7 @@ void handleLine(const char* line) {
   if (tl <= 0) return; // empty line
 
   char cmd[16];
-  int n = (tl < (int)sizeof(cmd)-1) ? tl : (int)sizeof(cmd)-1;
+  int n = (tl < (int)sizeof(cmd) - 1) ? tl : (int)sizeof(cmd) - 1;
   memcpy(cmd, line + ts, n); cmd[n] = 0;
   for (int i = 0; cmd[i]; ++i) cmd[i] = (char)toupper(cmd[i]);
 
@@ -396,25 +468,28 @@ void handleLine(const char* line) {
     case CMD_MODE:      processCmdMODE(line, s, len); break;
     case CMD_I:         processCmdI(line, s, len); break;
     case CMD_T:         processCmdT(line, s, len); break;
+    case CMD_Y:         processCmdY(line, s, len); break;
     case CMD_TEST:      processCmdTEST(line, s, len); break;
     case CMD_STAND:     processCmdSTAND(line, s, len); break;
-  case CMD_TUCK:      processCmdTUCK(line, s, len); break;
+    case CMD_TUCK:      processCmdTUCK(line, s, len); break;
     case CMD_SAFETY:    processCmdSAFETY(line, s, len); break;
     case CMD_HOME:      processCmdHOME(line, s, len); break;
     case CMD_SAVEHOME:  processCmdSAVEHOME(line, s, len); break;
     case CMD_OFFSET:    processCmdOFFSET(line, s, len); break;
-  case CMD_LOG:       processCmdLOG(line, s, len); break;
-  case CMD_LOOP:      processCmdLOOP(line, s, len); break;
-  case CMD_PID:       processCmdPID(line, s, len); break;
-  case CMD_IMP:       processCmdIMP(line, s, len); break;
-  case CMD_COMP:      processCmdCOMP(line, s, len); break;
-  case CMD_EST:       processCmdEST(line, s, len); break;
-  case CMD_LIMITS:    processCmdLIMITS(line, s, len); break;
-  case CMD_CONFIG:    processCmdCONFIG(line, s, len); break;
+    case CMD_LOG:       processCmdLOG(line, s, len); break;
+    case CMD_LOOP:      processCmdLOOP(line, s, len); break;
+    case CMD_PID:       processCmdPID(line, s, len); break;
+    case CMD_IMP:       processCmdIMP(line, s, len); break;
+    case CMD_COMP:      processCmdCOMP(line, s, len); break;
+    case CMD_EST:       processCmdEST(line, s, len); break;
+    case CMD_LIMITS:    processCmdLIMITS(line, s, len); break;
+    case CMD_CONFIG:    processCmdCONFIG(line, s, len); break;
     default:            printERR(1, "UNKNOWN_CMD"); break;
   }
 
-  if (g_last_err == 0) { printOK(); }
+  if (g_last_err == 0) {
+    printOK();
+  }
 
   // Echo original line (after response for consistency with prior behavior)
   Serial.print(F(" \u003e "));
@@ -527,7 +602,7 @@ static void configParseKV(char* key, char* val)
       g_uart_cfg_present = true;
       g_uart_cfg_seen_mask |= (uint8_t)(1u << leg);
       // Expected compile-time mapping names
-      const char* expected[6] = {"Serial8","Serial3","Serial5","Serial7","Serial6","Serial2"};
+      const char* expected[6] = {"Serial8", "Serial3", "Serial5", "Serial7", "Serial6", "Serial2"};
       if (val && *val) {
         if (strcmp(val, expected[leg]) != 0) {
           g_uart_cfg_match = false;
@@ -556,7 +631,7 @@ static void configParseKV(char* key, char* val)
       g_uart_cfg_present = true;
       g_uart_cfg_seen_mask |= (uint8_t)(1u << leg);
       // Expected compile-time mapping names
-      const char* expected[6] = {"Serial8","Serial3","Serial5","Serial7","Serial6","Serial2"};
+      const char* expected[6] = {"Serial8", "Serial3", "Serial5", "Serial7", "Serial6", "Serial2"};
       if (val && *val) {
         if (strcmp(val, expected[leg]) != 0) {
           g_uart_cfg_match = false;
@@ -1318,12 +1393,53 @@ static void configParseKV(char* key, char* val)
 #endif
 
   // --- TUCK parameters ---
-  if (!strcmp(key, "tuck.tibia_cd")) { long v = atol(val); if (v<0) v=0; if (v>24000) v=24000; g_tuck_tibia_cd = (int16_t)v; ++g_config_keys_applied; return; }
-  if (!strcmp(key, "tuck.femur_cd")) { long v = atol(val); if (v<0) v=0; if (v>24000) v=24000; g_tuck_femur_cd = (int16_t)v; ++g_config_keys_applied; return; }
-  if (!strcmp(key, "tuck.coxa_cd"))  { long v = atol(val); if (v!=12000) v=12000; g_tuck_coxa_cd = (int16_t)v; ++g_config_keys_applied; return; }
-  if (!strcmp(key, "tuck.tol_tibia_cd")) { long v = atol(val); if (v<10) v=10; if (v>5000) v=5000; g_tuck_tol_tibia_cd = (int16_t)v; ++g_config_keys_applied; return; }
-  if (!strcmp(key, "tuck.tol_other_cd")) { long v = atol(val); if (v<10) v=10; if (v>5000) v=5000; g_tuck_tol_other_cd = (int16_t)v; ++g_config_keys_applied; return; }
-  if (!strcmp(key, "tuck.timeout_ms")) { long v = atol(val); if (v<250) v=250; if (v>10000) v=10000; g_tuck_timeout_ms = (uint16_t)v; ++g_config_keys_applied; return; }
+  if (!strcmp(key, "tuck.tibia_cd")) {
+    long v = atol(val);
+    if (v < 0) v = 0;
+    if (v > 24000) v = 24000;
+    g_tuck_tibia_cd = (int16_t)v;
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "tuck.femur_cd")) {
+    long v = atol(val);
+    if (v < 0) v = 0;
+    if (v > 24000) v = 24000;
+    g_tuck_femur_cd = (int16_t)v;
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "tuck.coxa_cd"))  {
+    long v = atol(val);
+    if (v != 12000) v = 12000;
+    g_tuck_coxa_cd = (int16_t)v;
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "tuck.tol_tibia_cd")) {
+    long v = atol(val);
+    if (v < 10) v = 10;
+    if (v > 5000) v = 5000;
+    g_tuck_tol_tibia_cd = (int16_t)v;
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "tuck.tol_other_cd")) {
+    long v = atol(val);
+    if (v < 10) v = 10;
+    if (v > 5000) v = 5000;
+    g_tuck_tol_other_cd = (int16_t)v;
+    ++g_config_keys_applied;
+    return;
+  }
+  if (!strcmp(key, "tuck.timeout_ms")) {
+    long v = atol(val);
+    if (v < 250) v = 250;
+    if (v > 10000) v = 10000;
+    g_tuck_timeout_ms = (uint16_t)v;
+    ++g_config_keys_applied;
+    return;
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -1407,25 +1523,6 @@ void configLoad()
 #endif
 }
 
-// -----------------------------------------------------------------------------
-// Refresh hardware angle offsets into g_offset_cd at startup
-// Reads each in-service servo's stored angle offset (cd) and populates g_offset_cd.
-// Safe on host: fake lx16a-servo stubs return 0.
-// -----------------------------------------------------------------------------
-void refreshOffsetsAtStartup() {
-  for (uint8_t L = 0; L < 6; ++L) {
-    for (uint8_t J = 0; J < 3; ++J) {
-      int16_t cd = 0;
-      uint8_t id = servoId(L, J);
-      if (id >= 1 && id <= 253) {
-        cd = (int16_t)angle_offset_read(L, id);
-      }
-      g_offset_cd[L][J] = cd;
-    }
-  }
-}
-
-// -----------------------------------------------------------------------------
 // Refresh hardware angle offsets into g_offset_cd at startup
 // Reads each in-service servo's stored angle offset (cd) and populates g_offset_cd.
 // Safe on host: fake lx16a-servo stubs return 0.
@@ -1492,17 +1589,17 @@ void printSTATUS()
     Serial.print((unsigned long)secs);  Serial.print(F("s"));
     Serial.print((unsigned long)ms);    Serial.print(F("ms\r\n"));
     Serial.print(F("  enabled=")); Serial.print(g_enabled ? 1 : 0); Serial.print(F("\r\n"));
-  // Firmware version and build (monotonic)
-  Serial.print(F("  fw="));
+    // Firmware version and build (monotonic)
+    Serial.print(F("  fw="));
 #ifdef FW_VERSION
-  Serial.print(FW_VERSION);
+    Serial.print(FW_VERSION);
 #else
-  Serial.print(F("unknown"));
+    Serial.print(F("unknown"));
 #endif
 #ifdef FW_BUILD
-  Serial.print(F(" b=")); Serial.print((unsigned long)FW_BUILD);
+    Serial.print(F(" b=")); Serial.print((unsigned long)FW_BUILD);
 #endif
-  Serial.print(F("\r\n"));
+    Serial.print(F("\r\n"));
     Serial.print(F("  loop_hz=")); Serial.print(g_loop_hz); Serial.print(F("\r\n"));
     Serial.print(F("  rr_idx=")); Serial.print(g_rr_index); Serial.print(F("\r\n"));
     Serial.print(F("  overruns=")); Serial.print((unsigned long)g_overrun_count); Serial.print(F("\r\n"));
@@ -1518,14 +1615,16 @@ void printSTATUS()
   Serial.print(F("[ENABLES]\r\n"));
   {
     Serial.print(F("  legs="));
-    for (int i = 0; i < 6; ++i) { Serial.print(leg_enabled_mask_get((uint8_t)i) ? '1' : '0'); }
+    for (int i = 0; i < 6; ++i) {
+      Serial.print(leg_enabled_mask_get((uint8_t)i) ? '1' : '0');
+    }
     Serial.print(F("\r\n"));
-    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    const char* names[6] = {"LF", "LM", "LR", "RF", "RM", "RR"};
     Serial.print(F("  jmask="));
     for (int i = 0; i < 6; ++i) {
       if (i) Serial.print(F(","));
       Serial.print(names[i]); Serial.print(F(":"));
-      for (int j = 0; j < 3; ++j) Serial.print(joint_enabled_mask_get((uint8_t)i,(uint8_t)j)?1:0);
+      for (int j = 0; j < 3; ++j) Serial.print(joint_enabled_mask_get((uint8_t)i, (uint8_t)j) ? 1 : 0);
     }
     Serial.print(F("\r\n"));
   }
@@ -1533,7 +1632,7 @@ void printSTATUS()
   // [TELEMETRY]
   Serial.print(F("[TELEMETRY]\r\n"));
   {
-    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    const char* names[6] = {"LF", "LM", "LR", "RF", "RM", "RR"};
     Serial.print(F("  vin_V="));
     for (int i = 0; i < 6; ++i) {
       if (i) Serial.print(F(","));
@@ -1549,14 +1648,20 @@ void printSTATUS()
     for (int i = 0; i < 6; ++i) {
       if (i) Serial.print(F(","));
       Serial.print(names[i]); Serial.print(F(":"));
-      for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print((int)g_meas_temp_C[i][j]); }
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print((int)g_meas_temp_C[i][j]);
+      }
     }
     Serial.print(F("\r\n"));
     Serial.print(F("  pos_cd="));
     for (int i = 0; i < 6; ++i) {
       if (i) Serial.print(F(","));
       Serial.print(names[i]); Serial.print(F(":"));
-      for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print((int)g_meas_pos_cd[i][j]); }
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print((int)g_meas_pos_cd[i][j]);
+      }
     }
     Serial.print(F("\r\n"));
   }
@@ -1566,7 +1671,7 @@ void printSTATUS()
   {
     // PID summary
     Serial.print(F("  pid.enabled=")); Serial.print(g_pid_enabled ? 1 : 0);
-    Serial.print(F(" mode=")); Serial.print((g_pid_mode==0)?F("active"):F("shadow"));
+    Serial.print(F(" mode=")); Serial.print((g_pid_mode == 0) ? F("active") : F("shadow"));
     Serial.print(F(" kp_milli="));
     Serial.print((unsigned)g_pid_kp_milli[0]); Serial.print('/');
     Serial.print((unsigned)g_pid_kp_milli[1]); Serial.print('/');
@@ -1636,17 +1741,23 @@ void printSTATUS()
   // [HOME]
   Serial.print(F("[HOME]\r\n"));
   {
-    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    const char* names[6] = {"LF", "LM", "LR", "RF", "RM", "RR"};
     Serial.print(F("  home_cd="));
     for (int i = 0; i < 6; ++i) {
       if (i) Serial.print(F(",")); Serial.print(names[i]); Serial.print(F(":"));
-      for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print((int)g_home_cd[i][j]); }
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print((int)g_home_cd[i][j]);
+      }
     }
     Serial.print(F("\r\n"));
     Serial.print(F("  offset_cd="));
     for (int i = 0; i < 6; ++i) {
       if (i) Serial.print(F(",")); Serial.print(names[i]); Serial.print(F(":"));
-      for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print((int)g_offset_cd[i][j]); }
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print((int)g_offset_cd[i][j]);
+      }
     }
     Serial.print(F("\r\n"));
   }
@@ -1682,12 +1793,12 @@ void printSTATUS()
     // Send-path profiling summary (since boot)
     unsigned long pcnt = (unsigned long)g_prof_send_call_count;
     unsigned long tcnt = (unsigned long)g_prof_send_tick_count;
-    unsigned int pmin = (g_prof_send_call_us_min==0xFFFFu)?0u:(unsigned int)g_prof_send_call_us_min;
+    unsigned int pmin = (g_prof_send_call_us_min == 0xFFFFu) ? 0u : (unsigned int)g_prof_send_call_us_min;
     unsigned int pmax = (unsigned int)g_prof_send_call_us_max;
-    unsigned int pavg = (pcnt>0)?(unsigned int)(g_prof_send_call_us_sum / pcnt):0u;
-    unsigned int tmin = (g_prof_send_tick_us_min==0xFFFFu)?0u:(unsigned int)g_prof_send_tick_us_min;
+    unsigned int pavg = (pcnt > 0) ? (unsigned int)(g_prof_send_call_us_sum / pcnt) : 0u;
+    unsigned int tmin = (g_prof_send_tick_us_min == 0xFFFFu) ? 0u : (unsigned int)g_prof_send_tick_us_min;
     unsigned int tmax = (unsigned int)g_prof_send_tick_us_max;
-    unsigned int tavg = (tcnt>0)?(unsigned int)(g_prof_send_tick_us_sum / tcnt):0u;
+    unsigned int tavg = (tcnt > 0) ? (unsigned int)(g_prof_send_tick_us_sum / tcnt) : 0u;
     Serial.print(F("  send_profile.per_call_us=min/avg/max="));
     Serial.print(pmin); Serial.print(F("/")); Serial.print(pavg); Serial.print(F("/")); Serial.print(pmax);
     Serial.print(F(" calls=")); Serial.print(pcnt); Serial.print(F("\r\n"));
@@ -1696,75 +1807,108 @@ void printSTATUS()
     Serial.print(F(" ticks=")); Serial.print(tcnt); Serial.print(F("\r\n"));
 #endif
 
-  // [PID]
-  Serial.print(F("[PID]\r\n"));
-  {
-    Serial.print(F("  enabled=")); Serial.print(g_pid_enabled ? 1 : 0); Serial.print(F("\r\n"));
-    Serial.print(F("  mode=")); Serial.print(g_pid_mode==0?F("active"):F("shadow")); Serial.print(F("\r\n"));
-    const char* jn[3] = {"coxa","femur","tibia"};
-    Serial.print(F("  kp_milli="));
-    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kp_milli[j]); }
-    Serial.print(F("\r\n"));
-    Serial.print(F("  ki_milli="));
-    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_ki_milli[j]); }
-    Serial.print(F("\r\n"));
-    Serial.print(F("  kd_milli="));
-    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kd_milli[j]); }
-    Serial.print(F("\r\n"));
-    Serial.print(F("  kd_alpha_milli="));
-    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)g_pid_kd_alpha_milli[j]); }
-    Serial.print(F("\r\n"));
-    Serial.print(F("  shadow_report_hz=")); Serial.print((unsigned int)g_pid_shadow_report_hz); Serial.print(F("\r\n"));
-  }
-
-  // [EST]
-  Serial.print(F("[EST]\r\n"));
-  {
-    Serial.print(F("  cmd_alpha_milli=")); Serial.print((unsigned int)g_est_cmd_alpha_milli); Serial.print(F("\r\n"));
-    Serial.print(F("  meas_alpha_milli=")); Serial.print((unsigned int)g_est_meas_alpha_milli); Serial.print(F("\r\n"));
-    Serial.print(F("  meas_vel_alpha_milli=")); Serial.print((unsigned int)g_est_meas_vel_alpha_milli); Serial.print(F("\r\n"));
-  }
-  
-  // [IMP]
-  Serial.print(F("[IMP]\r\n"));
-  {
-    const ImpedanceConfig& cfg = g_impedance.config();
-    Serial.print(F("  enabled=")); Serial.print(cfg.enabled ? 1 : 0); Serial.print(F("\r\n"));
-    Serial.print(F("  mode="));
-    switch (cfg.mode) {
-      case IMP_MODE_JOINT: Serial.print(F("joint")); break;
-      case IMP_MODE_CART:  Serial.print(F("cart"));  break;
-      default:             Serial.print(F("off"));   break;
+    // [PID]
+    Serial.print(F("[PID]\r\n"));
+    {
+      Serial.print(F("  enabled=")); Serial.print(g_pid_enabled ? 1 : 0); Serial.print(F("\r\n"));
+      Serial.print(F("  mode=")); Serial.print(g_pid_mode == 0 ? F("active") : F("shadow")); Serial.print(F("\r\n"));
+      const char* jn[3] = {"coxa", "femur", "tibia"};
+      Serial.print(F("  kp_milli="));
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print(jn[j]);
+        Serial.print(F("="));
+        Serial.print((unsigned int)g_pid_kp_milli[j]);
+      }
+      Serial.print(F("\r\n"));
+      Serial.print(F("  ki_milli="));
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print(jn[j]);
+        Serial.print(F("="));
+        Serial.print((unsigned int)g_pid_ki_milli[j]);
+      }
+      Serial.print(F("\r\n"));
+      Serial.print(F("  kd_milli="));
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print(jn[j]);
+        Serial.print(F("="));
+        Serial.print((unsigned int)g_pid_kd_milli[j]);
+      }
+      Serial.print(F("\r\n"));
+      Serial.print(F("  kd_alpha_milli="));
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print(jn[j]);
+        Serial.print(F("="));
+        Serial.print((unsigned int)g_pid_kd_alpha_milli[j]);
+      }
+      Serial.print(F("\r\n"));
+      Serial.print(F("  shadow_report_hz=")); Serial.print((unsigned int)g_pid_shadow_report_hz); Serial.print(F("\r\n"));
     }
-    Serial.print(F("\r\n"));
-    const char* jn[3] = {"coxa","femur","tibia"};
-    Serial.print(F("  joint_k_spring_milli="));
-    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)cfg.joint.k_spring_milli[j]); }
-    Serial.print(F("\r\n"));
-    Serial.print(F("  joint_k_damp_milli="));
-    for (int j = 0; j < 3; ++j) { if (j) Serial.print(F("/")); Serial.print(jn[j]); Serial.print(F("=")); Serial.print((unsigned int)cfg.joint.k_damp_milli[j]); }
-    Serial.print(F("\r\n"));
-    Serial.print(F("  cart_k_spring_milli="));
-    Serial.print(F("x=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[0]); Serial.print(F("/"));
-    Serial.print(F("y=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[1]); Serial.print(F("/"));
-    Serial.print(F("z=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[2]); Serial.print(F("\r\n"));
-    Serial.print(F("  cart_k_damp_milli="));
-    Serial.print(F("x=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[0]); Serial.print(F("/"));
-    Serial.print(F("y=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[1]); Serial.print(F("/"));
-    Serial.print(F("z=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[2]); Serial.print(F("\r\n"));
-  }
+
+    // [EST]
+    Serial.print(F("[EST]\r\n"));
+    {
+      Serial.print(F("  cmd_alpha_milli=")); Serial.print((unsigned int)g_est_cmd_alpha_milli); Serial.print(F("\r\n"));
+      Serial.print(F("  meas_alpha_milli=")); Serial.print((unsigned int)g_est_meas_alpha_milli); Serial.print(F("\r\n"));
+      Serial.print(F("  meas_vel_alpha_milli=")); Serial.print((unsigned int)g_est_meas_vel_alpha_milli); Serial.print(F("\r\n"));
+    }
+
+    // [IMP]
+    Serial.print(F("[IMP]\r\n"));
+    {
+      const ImpedanceConfig& cfg = g_impedance.config();
+      Serial.print(F("  enabled=")); Serial.print(cfg.enabled ? 1 : 0); Serial.print(F("\r\n"));
+      Serial.print(F("  mode="));
+      switch (cfg.mode) {
+        case IMP_MODE_JOINT: Serial.print(F("joint")); break;
+        case IMP_MODE_CART:  Serial.print(F("cart"));  break;
+        default:             Serial.print(F("off"));   break;
+      }
+      Serial.print(F("\r\n"));
+      const char* jn[3] = {"coxa", "femur", "tibia"};
+      Serial.print(F("  joint_k_spring_milli="));
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print(jn[j]);
+        Serial.print(F("="));
+        Serial.print((unsigned int)cfg.joint.k_spring_milli[j]);
+      }
+      Serial.print(F("\r\n"));
+      Serial.print(F("  joint_k_damp_milli="));
+      for (int j = 0; j < 3; ++j) {
+        if (j) Serial.print(F("/"));
+        Serial.print(jn[j]);
+        Serial.print(F("="));
+        Serial.print((unsigned int)cfg.joint.k_damp_milli[j]);
+      }
+      Serial.print(F("\r\n"));
+      Serial.print(F("  cart_k_spring_milli="));
+      Serial.print(F("x=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[0]); Serial.print(F("/"));
+      Serial.print(F("y=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[1]); Serial.print(F("/"));
+      Serial.print(F("z=")); Serial.print((unsigned int)cfg.cart.k_spring_milli[2]); Serial.print(F("\r\n"));
+      Serial.print(F("  cart_k_damp_milli="));
+      Serial.print(F("x=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[0]); Serial.print(F("/"));
+      Serial.print(F("y=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[1]); Serial.print(F("/"));
+      Serial.print(F("z=")); Serial.print((unsigned int)cfg.cart.k_damp_milli[2]); Serial.print(F("\r\n"));
+    }
   }
 #endif
 
   // [OOS]
   Serial.print(F("[OOS]\r\n"));
   {
-    const char* names[6] = {"LF","LM","LR","RF","RM","RR"};
+    const char* names[6] = {"LF", "LM", "LR", "RF", "RM", "RR"};
     Serial.print(F("  mask="));
     for (int i = 0; i < 6; ++i) {
       if (i) Serial.print(F(","));
       Serial.print(names[i]); Serial.print(F(":"));
-      for (int j = 0; j < 3; ++j) { int idx = i*3+j; Serial.print(((g_servo_oos_mask>>idx)&1u)?1:0); }
+      for (int j = 0; j < 3; ++j) {
+        int idx = i * 3 + j;
+        Serial.print(((g_servo_oos_mask >> idx) & 1u) ? 1 : 0);
+      }
     }
     Serial.print(F("\r\n"));
   }
@@ -1788,6 +1932,7 @@ void printHELP() {
   Serial.print(F("  REBOOT                    Reboot controller\r\n"));
   Serial.print(F("  CONFIG                    Dump /config.txt contents (when SD present)\r\n"));
   Serial.print(F("  LOOP <hz>                 Set control loop frequency (50..500 Hz, persists loop_hz when SD enabled)\r\n"));
+  Serial.print(F("  Y <1|0>                   Master toggle for compact telemetry streams (S1/S2/S3)\r\n"));
 
   // Enable / disable
   Serial.print(F("[ENABLE]\r\n"));
@@ -1811,7 +1956,7 @@ void printHELP() {
 
   // Geometry / calibration
   Serial.print(F("[GEOMETRY]\r\n"));
-  Serial.print(F("  FK <LEG|ALL> <ON|OFF>     Toggle FK body-frame stream per leg\r\n"));
+  Serial.print(F("  FK <LEG|ALL> <ON|OFF>     Toggle FK body-frame stream per leg (RR_FK lines)\r\n"));
   Serial.print(F("  HOME                      Move enabled in-service servos to home_cd\r\n"));
   Serial.print(F("  SAVEHOME                  Capture current positions as new home_cd (enabled/in-service)\r\n"));
   Serial.print(F("  OFFSET LIST               List hardware angle offsets (centideg)\r\n"));
@@ -1896,7 +2041,9 @@ void rebootNow() {
   volatile uint32_t* AIRCR = (volatile uint32_t*)0xE000ED0C;
   const uint32_t VECTKEY = 0x5FA << 16;
   *AIRCR = VECTKEY | (1u << 2); // SYSRESETREQ bit
-  while (1) { /* wait for reset */ }
+  while (1) {
+    /* wait for reset */
+  }
 }
 
 // Hardware angle offset wrappers — convert between centidegrees and LX-16A "tick" units
@@ -1917,7 +2064,10 @@ int angle_offset_read(uint8_t leg, uint8_t id) {
   LX16AServo* s = nullptr;
   for (uint8_t J = 0; J < 3; ++J) {
     LX16AServo* cur = g_servo[leg][J];
-    if (cur && cur->_id == id) { s = cur; break; }
+    if (cur && cur->_id == id) {
+      s = cur;
+      break;
+    }
   }
   if (!s) return 0;
   // Library returns offset in units (ticks); convert to centidegrees
@@ -1933,7 +2083,10 @@ bool angle_offset_adjust(uint8_t leg, uint8_t id, int16_t offset_cd) {
   LX16AServo* s = nullptr;
   for (uint8_t J = 0; J < 3; ++J) {
     LX16AServo* cur = g_servo[leg][J];
-    if (cur && cur->_id == id) { s = cur; break; }
+    if (cur && cur->_id == id) {
+      s = cur;
+      break;
+    }
   }
   if (!s) return false;
   // Convert centidegrees to units (ticks) and clamp to ±125
@@ -1948,10 +2101,12 @@ bool angle_offset_write(uint8_t leg, uint8_t id) {
   LX16AServo* s = nullptr;
   for (uint8_t J = 0; J < 3; ++J) {
     LX16AServo* cur = g_servo[leg][J];
-    if (cur && cur->_id == id) { s = cur; break; }
+    if (cur && cur->_id == id) {
+      s = cur;
+      break;
+    }
   }
   if (!s) return false;
   s->angle_offset_save();
   return true;
 }
-

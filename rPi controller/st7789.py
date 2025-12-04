@@ -46,6 +46,15 @@ class st7789():
         if self.SPI!=None :
             self.SPI.writebytes(data)
     
+    def spi_writebytes_fast(self, data):
+        """Write raw bytes to SPI using writebytes2 for better performance.
+        
+        writebytes2 can handle larger buffers and releases the GIL during
+        the actual SPI transfer. Accepts bytes or bytearray directly.
+        """
+        if self.SPI is not None:
+            self.SPI.writebytes2(data)
+    
     def command(self, cmd):
         self.digital_write(self.GPIO_DC_PIN, False)
         self.spi_writebyte([cmd])   
@@ -234,6 +243,57 @@ class st7789():
             self.digital_write(self.GPIO_DC_PIN,True)
         for i in range(0, len(pix), 4096):
             self.spi_writebyte(pix[i: i+4096])
+        self.command(0x36)
+        self.data(0x48)
+
+    def show_image_fast(self, Image):
+        """Optimized display update that minimizes GIL contention.
+        
+        Key optimizations vs show_image():
+        1. Uses numpy.tobytes() instead of .flatten().tolist() - stays in C
+        2. Uses writebytes2() which handles large buffers and releases GIL
+        3. Single SPI transfer instead of loop with 4096-byte chunks
+        
+        This significantly reduces the time Python bytecode holds the GIL,
+        allowing other threads (like the gait loop) to run more smoothly.
+        """
+        imwidth, imheight = Image.size
+        
+        if imwidth == self.height and imheight == self.width:
+            # Landscape mode (320x170)
+            img = self.np.asarray(Image)
+            
+            # RGB888 >> RGB565 conversion in-place
+            # Pack into uint8 buffer with correct byte order
+            pix = self.np.empty((self.width, self.height, 2), dtype=self.np.uint8)
+            pix[..., 0] = (img[..., 0] & 0xF8) | (img[..., 1] >> 5)
+            pix[..., 1] = ((img[..., 1] << 3) & 0xE0) | (img[..., 2] >> 3)
+            
+            # Convert to bytes (stays in C, very fast)
+            pix_bytes = pix.tobytes()
+            
+            self.command(0x36)
+            self.data(0x08)
+            self.set_windows(0, 0, self.height, self.width, 1)
+            self.digital_write(self.GPIO_DC_PIN, True)
+            
+            # Single transfer - writebytes2 handles large buffers and releases GIL
+            self.spi_writebytes_fast(pix_bytes)
+        else:
+            # Portrait mode
+            img = self.np.asarray(Image)
+            pix = self.np.empty((imheight, imwidth, 2), dtype=self.np.uint8)
+            pix[..., 0] = (img[..., 0] & 0xF8) | (img[..., 1] >> 5)
+            pix[..., 1] = ((img[..., 1] << 3) & 0xE0) | (img[..., 2] >> 3)
+            
+            pix_bytes = pix.tobytes()
+            
+            self.command(0x36)
+            self.data(0x48)
+            self.set_windows(0, 0, self.width, self.height, 0)
+            self.digital_write(self.GPIO_DC_PIN, True)
+            self.spi_writebytes_fast(pix_bytes)
+        
         self.command(0x36)
         self.data(0x48)
 
