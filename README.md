@@ -41,11 +41,12 @@ Optional: Arduino CLI/Teensy CLI can be used in CI later.
 - `TEST CYCLE|HEIGHT|BASEX|STEPLEN|LIFT|OVERLAP <val>`
 - `HOME`, `SAVEHOME` (persist home_cd to `/config.txt` for enabled, in‑service servos)
 - `STATUS`, `HELP`
+- `LOOP <hz>` — set control loop frequency at runtime (50..500 Hz) and persist `loop_hz` to `/config.txt` when SD is enabled
 
 See `docs/PROJECT_SPEC.md` for the full protocol and behavior.
 
 ## Configuration: `/config.txt`
-- `loop_hz=166`
+- `loop_hz=166` (default; can also be changed live via `LOOP <hz>`)
 - `servo_id.<LEG>.<coxa|femur|tibia>=<1..253>`
 - `home_cd.<LEG>.<coxa|femur|tibia>=<0..24000>`
 - `joint_limits.<LEG>.<joint>.min_deg|max_deg=<deg around home>`

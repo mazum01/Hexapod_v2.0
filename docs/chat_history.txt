@@ -1,0 +1,95 @@
+
+I’ll inspect the Pi controller entrypoints to see what the display expects, and map that to the Teensy’s existing telemetry so we can design a minimal data stream.
+
+Read [](file:///home/starter/OneDrive/Projects/Robots/Hexapod_v2.0/rPi%20controller/main.py#1-1), lines 1 to 260
+
+Read [](file:///home/starter/OneDrive/Projects/Robots/Hexapod_v2.0/rPi%20controller/controller.py#1-1), lines 1 to 260
+
+Read [](file:///home/starter/OneDrive/Projects/Robots/Hexapod_v2.0/rPi%20controller/arachnotron.py#1-1), lines 1 to 260
+
+Read [](file:///home/starter/OneDrive/Projects/Robots/Hexapod_v2.0/rPi%20controller/GUIMenu.py)
+
+Good plan. For a first step, we only need to stream enough telemetry from the Teensy to drive the Pi’s display; we can leave motion control and higher-level coordination for later.
+
+From the Pi code you shared, a few key points:
+
+- controller.py already has:
+  - `find_teensy()` and `readTeensy()` using `pyserial`.
+  - A display updater `UpdateDisplay(...)` that expects:
+    - `state`: an array where `state[6]` is a gait index and `state[9]` is a float flag (they treat `state[9] == 1` as “FLOAT” mode).
+    - `servo`: a list of `(voltage, temperature, enable)` triplets for each servo (18 entries).
+    - `legs`: per-leg enable masks.
+    - `_menuState == "data"` to show live telemetry blocks.
+
+- main.py’s old `draw_screen()` function takes `data` as a list of text “segments”, each like `HEADER:val1,val2,...`. It iterates lines and splits on `:` and `,`. That matches what we can easily emit from the Teensy over USB serial.
+
+Given that, the smallest integration step is:
+
+- Define a lightweight, Teensy-emitted telemetry line format that matches what the Pi can parse.
+- On the Pi:
+  - Continuously read from the Teensy serial port with `readTeensy()`.
+  - Split incoming text into segments and feed them into your existing `draw_screen()` or a small adapter that calls `UpdateDisplay()`.
+
+To keep scope tight, I suggest:
+
+1. **Teensy telemetry frame design (over USB serial)**
+
+   Add a single multi-line frame every N ticks when telemetry is enabled, for example:
+
+   - `S1:<leg_enables>,<servo_enables>,<mode>,<gait>,<lockout>,<safety_collision>,<safety_soft_limits>,<override_mask>`
+   - `S2:<v0>,<t0>,<e0>,<v1>,<t1>,<e1>,...,<v17>,<t17>,<e17>`  
+     - Voltage in V (one decimal) or mV; temperature in °C; enable flag 0/1.
+   - Optional future lines for FK foot positions, mode, etc.
+
+   This is easy to generate from MARS_Hexapod.ino where we already have:
+
+   - `g_leg_enabled_mask`, `g_joint_enabled_mask`.
+   - `g_meas_vin_mV`, `g_meas_temp_C`, and OOS / enable bits.
+   - `g_mode`, `g_lockout`, safety flags, `g_fk_stream_mask` if we need positions.
+
+   We don’t need to wire this in yet; you said you want to grow changes incrementally and verify 100%, so I’ll hold off editing the firmware until we agree the exact line formats.
+
+2. **Pi-side adapter: read Teensy text → display-friendly structures**
+
+   We can add a small parser function in controller.py (or a new module) that:
+
+   - Calls `readTeensy(teensy)` to get any pending text.
+   - Splits by `\n` into lines.
+   - For each line starting with `S1:` or `S2:`, parses into structured objects:
+     - `state` array as your display expects (e.g., place gait index and float flag at indices 6 and 9 so `UpdateDisplay()` works without modification).
+     - `servo` list of 18 `(voltage, temperature, enable)` tuples.
+     - `legs` list of 6 enable bits from `g_leg_enabled_mask`.
+
+   Then your main control loop on the Pi can do something like:
+
+   ```python
+   raw = readTeensy(teensy)
+   if raw:
+       for line in raw.split("\n"):
+           state, servo, legs = parse_teensy_telem(line, state, servo, legs)
+           if state and servo and legs:
+               UpdateDisplay(disp, base_image, menu_image, servo=servo, legs=legs, state=state, mirror=False)
+   ```
+
+3. **Minimal first milestone**
+
+   For the “100% working” first step you described, I’d suggest:
+
+   - Teensy:
+     - Implement only `S1` and `S2` frames at a modest rate (e.g., 5–10 Hz) gated by a new config/command like `DISPLAY TELEM ON|OFF` (or reusing an existing telemetry flag).
+   - Pi:
+     - Implement `parse_teensy_telem()` to turn `S1`/`S2` into `state`, `servo`, `legs`.
+     - Wire it into main.py/controller.py to call `UpdateDisplay()` in your main loop.
+
+If you’re good with that direction, the next step is to lock in the exact `S1` / `S2` field list so both sides agree. For example:
+
+- `S1:leg_mask,joint_mask,mode,lockout,safety_collision,safety_soft_limits,override_mask,gait_idx,float_flag`
+- `S2:v0,t0,e0,v1,t1,e1,...,v17,t17,e17` with:
+  - `v*` in volts (e.g., `12.3`).
+  - `t*` in °C (integer).
+  - `e*` 0/1 for “enabled & not OOS”.
+
+Confirm if that field layout works for you, and I’ll then:
+
+- Patch MARS_Hexapod.ino to emit those lines.
+- Add a small telemetry parser in controller.py and show how to call `UpdateDisplay()` so we get real Teensy data on the Pi screen.

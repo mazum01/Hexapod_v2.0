@@ -3,6 +3,26 @@
   Hexapod v2.0 Controller (Teensy 4.1)
 
   Change log (top N entries)
+  DIRECTIVE: Every code change (any file) must update BOTH this header list (add a concise dated bullet with FW version) AND `CHANGELOG.md`, bump `FW_VERSION` (patch) and `FW_BUILD`.
+  - 2025-11-21: Telemetry S3 format change: S3 now lists 18 voltages then 18 temperatures (v0..v17,t0..t17) to align with Python controller expectation. FW 0.2.29. (author: copilot)
+  - 2025-11-21: Telemetry decoupled from FK: S1/S2/S3 output now controlled solely by `Y` (on/off) and no longer gated by the FK mask. RR_FK remains gated by `FK` mask. FW 0.2.28. (author: copilot)
+  - 2025-11-21: Telemetry toggle + RR_FK: Added single-letter `Y` command (`Y1`/`Y0`) to enable/disable S1/S2/S3 streams; re-enabled legacy `RR_FK` body/leg-frame prints gated by `FK` mask. FW 0.2.27. (author: copilot)
+  - 2025-11-21: Telemetry S2/S3 split: S2 now streams only enable flags for all 18 servos; new S3 carries volt/temp for all 18. Order remains LF,LM,LR,RF,RM,RR × C,F,T. FW 0.2.26. (author: copilot)
+  - 2025-11-21: Telemetry S2 format: Now a single line includes all 18 servos (LF,LM,LR,RF,RM,RR × C,F,T) as `vinV,tempC,en` triplets; removed leg tag. `en` is the logical AND of leg and joint enables. FW 0.2.25. (author: copilot)
+  - 2025-11-21: Telemetry refactor: Moved S1/S2 streaming into helpers `telemetryPrintS1`/`telemetryPrintS2` (functions.ino) preserving format; internal maintainability improvement. FW 0.2.24. (author: copilot)
+  - 2025-11-17: LOOP command: Added `LOOP <hz>` console command to set control loop frequency at runtime (50..500 Hz), applying via configApplyLoopHz and persisting `loop_hz` to `/config.txt` when SD is enabled. HELP/NOTES updated to document LOOP and interaction with logging.rate_hz. FW 0.2.14. (author: copilot)
+  - 2025-11-13: PID dt-aware: PID now accounts for variable loop timing. D-term uses (de/dt) with dt from LoopTimer; I-term integrates e*dt (cd·ms) with appropriate scaling. Keeps derivative smoothing. FW 0.2.11. (author: copilot)
+  - 2025-11-13: PID shadow telemetry: Enriched PID_SHADOW lines to include per-leg joint error (err_cd=des-est), read/estimate (est_cd), and base target (tgt_cd) alongside diffs (pid-base). FW 0.2.10. (author: copilot)
+  - 2025-11-13: PID shadow mode: Added parallel (non-driving) PID computation mode `pid.mode=shadow` that computes hypothetical PID-corrected targets without applying them, streams per-leg diffs at `pid.shadow_report_hz` (default 2 Hz) via `PID_SHADOW` lines. Active mode remains `pid.mode=active` (default). FW 0.2.9. (author: copilot)
+  - 2025-11-13: Estimator + filtered D: Added simple position estimator (exp. smoothing toward last command with measurement correction on RR updates) and low-pass filtered derivative to reduce noise spikes. New config keys: est.cmd_alpha_milli, est.meas_alpha_milli, pid.kd_alpha_milli.<joint>. FW 0.2.8. (author: copilot)
+  - 2025-11-13: Joint PID integration (sparse-feedback): compute P/PI/PD correction per joint (default disabled). Added /config.txt keys pid.enabled and pid.{kp,ki,kd}_milli.<joint>. STATUS shows [PID] section. FW 0.2.7. (author: copilot)
+  - 2025-11-13: Wire-in optimizations: Fast send and staggered feedback are now always enabled (flags removed). Loop rate remains elastic via adaptive logic. FW 0.2.5. (author: copilot)
+  - 2025-11-13: Feedback IO: Added MARS_FB_STAGGER (default ON). Always read position; alternate vin and temp per RR visit to the same servo. Preserves OOS rule (any valid vin OR temp resets). Reduces fb_us per tick. FW 0.2.4. (author: copilot)
+  - 2025-11-13: Fast send path (Option A): Added MARS_FAST_SEND (default OFF). Batched per-leg MOVE_TIME frames with single OE window; flush/deassert on RR leg before feedback. Observed send_us≈1.7 ms in TEST; fb_us now dominant. FW 0.2.3. (author: copilot)
+  - 2025-11-13: Versioning policy: Added SemVer + FW_BUILD policy to docs/PROJECT_SPEC.md (major/minor require explicit confirmation; patch/build may auto-increment). FW 0.2.2. (author: copilot)
+  - 2025-11-18: Agent policy: For any assistant-made code change, bump FW_VERSION patch + FW_BUILD and add concise entries to BOTH this header and CHANGELOG.md summarizing behavior/config changes. (author: copilot)
+  - 2025-11-13: Build metadata: Introduced FW_BUILD (monotonic build number) and print in splash/STATUS. Minor bump to 0.2.1 to surface this UI change. FW 0.2.1. (author: copilot)
+  - 2025-11-13: Phase 2 kickoff: Minor version bump to 0.2.0. Added send-path profiling (MARS_PROFILE_SEND) capturing per-call and per-tick send durations for lx16a writes; no behavior changes. Adopt Phase 2 workflow policies: defer commits until instructed; auto-bump FW patch on assistant edits (CHANGELOG only on TODO completion/behavior change). FW 0.2.0. (author: copilot)
   - 2025-11-12: Loop timing validation: Jitter instrumentation (min/avg/max) confirms <10% timing error at 166 Hz under idle and tripod test gait (no sustained overruns). Acceptance criterion met; no functional changes beyond earlier probes. FW 0.1.116. (author: copilot)
   - 2025-11-12: Safety config on boot: Config loader now parses safety.* keys (soft_limits, collision, temp_lockout_c, clearance_mm) at startup to restore persisted settings. Added tiny parse_bool helper. STATUS [TIMING] now includes jitter_us min/avg/max. FW 0.1.115. (author: copilot)
   - 2025-11-12: Config keys + offsets: Added boot-time refresh of hardware angle offsets into g_offset_cd and parsing of offset_cd.<LEG>.<joint> from /config.txt (seed, hardware wins). Expanded config keys to load tripod gait params at boot: test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. HELP notes new keys; PROJECT_SPEC updated. FW 0.1.114. (author: copilot)
@@ -125,6 +145,11 @@
 #ifndef MARS_TIMING_PROBES
 #define MARS_TIMING_PROBES 1
 #endif
+// Enable fine-grained send-path profiling (per-call and per-tick totals)
+#ifndef MARS_PROFILE_SEND
+#define MARS_PROFILE_SEND 1
+#endif
+// Optimizations (fast send + staggered feedback) are now permanently enabled; no flags.
 
 // -----------------------------------------------------------------------------
 // Top-level includes (order matters for SD feature guard)
@@ -134,6 +159,12 @@
 #include "LoopTimer.hpp"
 #include "command_types.h"
 #include "command_helpers.h"
+#include "MarsImpedance.hpp"
+
+// Telemetry helpers (defined in functions.ino)
+void telemetryPrintS1(uint8_t leg, uint16_t loop_us, uint8_t lockout, uint8_t mode, uint8_t test_phase, uint8_t rr_index, uint8_t enabled);
+void telemetryPrintS2();
+void telemetryPrintS3();
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
 #include <FS.h>
 #include <SD.h>
@@ -143,8 +174,15 @@
 // -----------------------------------------------------------------------------
 // Firmware version (surfaced in splash/STATUS and logs)
 // -----------------------------------------------------------------------------
+// NOTE: Per Phase 2 policy, bump PATCH and FW_BUILD on each assistant edit that
+// changes behavior or completes a TODO item. Keep MAJOR/MINOR stable unless
+// explicitly requested.
 #ifndef FW_VERSION
-#define FW_VERSION "0.1.116"
+#define FW_VERSION "0.2.29"
+#endif
+// Monotonic build number (never resets across minor/major). Increment every code edit.
+#ifndef FW_BUILD
+#define FW_BUILD 145
 #endif
 
 // -----------------------------------------------------------------------------
@@ -153,6 +191,7 @@
 void splash();
 void processSerial();
 bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t out_cd[3]);
+void refreshOffsetsAtStartup();
 void refreshOffsetsAtStartup();
 // -----------------------------------------------------------------------------
 // -----------------------------------------------------------------------------
@@ -194,6 +233,9 @@ extern bool    fk_leg_body(uint8_t leg, int16_t coxa_cd, int16_t femur_cd, int16
 extern bool    fk_leg_both(uint8_t leg, int16_t coxa_cd, int16_t femur_cd, int16_t tibia_cd,
                            float* out_body_x_mm, float* out_body_y_mm, float* out_body_z_mm,
                            float* out_leg_x_mm,  float* out_leg_y_mm,  float* out_leg_z_mm);
+
+// Impedance controller instance (joint-space and simple Cartesian modes)
+static MarsImpedance g_impedance;
 
 // Loop timing
 static const uint16_t LOOP_HZ_DEFAULT = 166; // spec target; adaptive logic can step down if overruns occur
@@ -279,6 +321,8 @@ uint16_t g_config_loop_hz = 166;
 // FK stream control: 6-bit mask (LF..RR). Default to LM only to preserve prior behavior.
 // FK stream mask (bit per leg LF..RR). Disabled at startup; can be enabled via FK command.
 volatile uint8_t g_fk_stream_mask = 0u;
+// Telemetry master toggle for S1/S2/S3 streams (default ON for backward compatibility)
+volatile uint8_t g_telem_enabled = 1;
 
 // Timing probes (compile-time optional)
 #if MARS_TIMING_PROBES
@@ -292,6 +336,20 @@ static volatile uint16_t g_jitter_min_us   = 0xFFFF;  // min abs error in curren
 static volatile uint16_t g_jitter_max_us   = 0;       // max abs error in current window
 static volatile uint32_t g_jitter_sum_us   = 0;       // sum for avg in current window
 static volatile uint16_t g_jitter_count    = 0;       // samples in current window
+#endif
+
+// Optional send-path profiling (aggregated stats; gated at compile-time)
+#if MARS_PROFILE_SEND
+// Per-call (single servo command) duration stats
+static volatile uint32_t g_prof_send_call_us_sum = 0;  // sum of per-call durations (us)
+static volatile uint16_t g_prof_send_call_us_min = 0xFFFF; // min duration observed (us)
+static volatile uint16_t g_prof_send_call_us_max = 0;      // max duration observed (us)
+static volatile uint32_t g_prof_send_call_count  = 0;      // number of calls measured
+// Per-tick total send duration stats
+static volatile uint32_t g_prof_send_tick_us_sum = 0;   // sum of per-tick total send durations (us)
+static volatile uint16_t g_prof_send_tick_us_min = 0xFFFF; // min total per-tick send time (us)
+static volatile uint16_t g_prof_send_tick_us_max = 0;      // max total per-tick send time (us)
+static volatile uint32_t g_prof_send_tick_count  = 0;      // number of ticks with sends measured
 #endif
 // Startup time (for OOS grace window)
 static uint32_t g_boot_ms = 0;
@@ -341,6 +399,14 @@ float g_foot_body_z_mm[NUM_LEGS] = {0};
 
 // Commanded joint targets (centidegrees) per leg/joint. IK/commands will write here.
 static volatile int16_t g_cmd_cd[NUM_LEGS][3] = { {0} };
+// Joint compliance: per-leg/joint offset applied around g_cmd_cd to form an effective
+// setpoint. This is adapted using a simple P-like controller around the estimated
+// joint position to provide "soft" behavior while keeping the planner target as a
+// moving reference.
+static int16_t g_comp_offset_cd[NUM_LEGS][LEG_SERVOS] = { {0} };
+// Effective joint command after compliance; this is what downstream PID/impedance
+// and safety logic will see as the base target each tick.
+static int16_t g_eff_cmd_cd[NUM_LEGS][LEG_SERVOS] = { {0} };
 // Home positions (centidegrees) per leg/joint; loaded from SD config; default 12000
 volatile int16_t g_home_cd[NUM_LEGS][LEG_SERVOS] = {
   {12000, 12000, 12000}, {12000, 12000, 12000}, {12000, 12000, 12000},
@@ -394,6 +460,74 @@ uint8_t  g_meas_temp_C[NUM_LEGS][LEG_SERVOS] = { {0} }; // temperature in whole 
 int16_t  g_meas_pos_cd[NUM_LEGS][LEG_SERVOS] = { {0} }; // 0..24000 centidegrees
 // Position validity flags: true when the last RR read for that joint succeeded
 volatile uint8_t g_meas_pos_valid[NUM_LEGS][LEG_SERVOS] = { {0} };
+// Feedback staggering toggle per servo: 0 -> read vin this visit; 1 -> read temp this visit
+static uint8_t g_fb_rr_toggle[NUM_LEGS][LEG_SERVOS] = { {0} };
+
+// -----------------------------------------------------------------------------
+// Position & velocity estimator (per joint)
+//
+// We maintain a tiny motion model per joint with position (cd) and velocity
+// (cd/s). Each tick we:
+//   1) Predict: pos += vel * dt_s, vel decays slightly toward 0.
+//   2) Nudge pos toward the effective command (compliance-adjusted) using a
+//      small command gain (keeps estimate from drifting too far off plan when
+//      feedback is sparse).
+//   3) On RR measurement for that joint we apply a simple correction:
+//        pos += Kx * (meas - pos)
+//        vel += Kv * (meas - pos) / dt
+// Gains are expressed in milli-units (0..1000) for cheap integer math.
+// -----------------------------------------------------------------------------
+struct JointEstimator {
+  int16_t pos_cd;   // estimated position (centideg)
+  int16_t vel_cds;  // estimated velocity (centideg per second)
+};
+
+static JointEstimator g_est_state[NUM_LEGS][LEG_SERVOS] = { { {0, 0} } };
+
+// Estimator tuning (milli-gains shared across joints for now)
+// - g_est_cmd_alpha_milli: small pull toward effective command each tick.
+// - g_est_meas_alpha_milli: how hard we snap position toward measurement on RR.
+// - g_est_meas_vel_alpha_milli: how aggressively we update velocity from residual.
+volatile uint16_t g_est_cmd_alpha_milli      = 150; // 0.15 toward command per tick
+volatile uint16_t g_est_meas_alpha_milli     = 700; // 0.70 toward measurement on RR update
+volatile uint16_t g_est_meas_vel_alpha_milli = 400; // 0.40 of (residual/dt) blended into vel
+
+// -----------------------------------------------------------------------------
+// Joint compliance — simple P-like setpoint adaptation around estimated position
+// per joint group. This layer adjusts g_comp_offset_cd[leg][joint] such that the
+// effective command g_eff_cmd_cd = g_cmd_cd + offset can move within a limited
+// window toward the actual joint angle when external forces are applied.
+// Defaults are conservative; configuration and commands will be layered on later.
+// -----------------------------------------------------------------------------
+bool     g_comp_enabled = false; // runtime toggle; initially off
+// Per joint group (coxa/femur/tibia) gains and bounds
+uint16_t g_comp_kp_milli[LEG_SERVOS]    = {100, 100, 100};    // 0.1 * err_cd per tick
+uint16_t g_comp_range_cd[LEG_SERVOS]    = {1000, 1500, 1500}; // +/-10..15 deg
+uint16_t g_comp_deadband_cd[LEG_SERVOS] = {50, 50, 50};       // 0.5 deg deadband
+uint16_t g_comp_leak_milli = 50;                               // leak toward 0 when quiet
+
+// -----------------------------------------------------------------------------
+// Joint PID (sparse-feedback) — P/PI/PD scaffolding (defaults to disabled)
+// Gains are in milli-units; correction in centidegrees: corr_cd = (Kp_milli * err_cd)/1000 + ...
+// Defaults: pid.enabled=false; only P-term applied when enabled and Kp>0.
+// -----------------------------------------------------------------------------
+volatile bool     g_pid_enabled = true;
+volatile uint16_t g_pid_kp_milli[LEG_SERVOS] = {0, 0, 0}; // per joint group (coxa/femur/tibia)
+volatile uint16_t g_pid_ki_milli[LEG_SERVOS] = {0, 0, 0};
+volatile uint16_t g_pid_kd_milli[LEG_SERVOS] = {0, 0, 0};
+// State per joint
+static int32_t    g_pid_i_accum[NUM_LEGS][LEG_SERVOS] = { {0} }; // integral accumulator in cd·ms (centideg-milliseconds)
+static int16_t    g_pid_prev_err[NUM_LEGS][LEG_SERVOS] = { {0} };
+// Filtered derivative state per joint
+static int16_t    g_pid_d_filt[NUM_LEGS][LEG_SERVOS] = { {0} };
+// Derivative smoothing factor (0..1000 milli) per joint group
+volatile uint16_t g_pid_kd_alpha_milli[LEG_SERVOS] = {200, 200, 200};
+// Clamp for correction contribution to avoid extreme nudges
+static const int16_t PID_CORR_CLAMP_CD = 2000; // ±20.00°
+// PID mode: 0=active (corrections applied), 1=shadow (compute only, do not drive; stream diffs)
+volatile uint8_t  g_pid_mode = 1; // default shadow
+volatile uint16_t g_pid_shadow_report_hz = 2; // streaming frequency for PID_SHADOW lines (Hz)
+static uint32_t   g_pid_shadow_last_report_ms = 0;
 // Forward kinematics: derive BODY-frame foot position from absolute joint centidegrees
 // ----------------------------------------------------------------------------
 // Forward kinematics (FK): Compute BODY-frame foot position (x,y,z) from joint angles
@@ -495,6 +629,9 @@ static inline void servoMarkOOS(uint8_t leg, uint8_t joint) {
   uint8_t idx = servoFlatIndex(leg, joint);
   g_servo_oos_mask |= (1UL << idx);
 }
+
+// Forward declaration so collision helpers can invoke a common STAND+DISABLE path
+void safetyCollisionStandDisable();
 
 // Hardware pin mappings moved to robot_config.h (Robot::SERIAL_TX_PINS_CAN, Robot::BUFFER_ENABLE_PINS)
 
@@ -611,21 +748,38 @@ static inline void safetyLockoutTemp(uint8_t leg, uint8_t joint, int16_t temp_c1
   }
 }
 
-// Collision lockout helper: enters LOCKOUT, disables enable, torques off all servos
-static inline void safetyLockoutCollision(uint8_t legA, uint8_t legB) {
-  (void)legA; (void)legB; // reserved for future reporting
-  if (g_lockout) return; // already locked out
+// Collision safety helper: transition to STAND pose then enter lockout/disable.
+// This is used by all collision-style violations (joint workspace, foot keep-out, etc.).
+void safetyCollisionStandDisable() {
+  if (g_lockout) return;
+
+  // Request neutral stance first if we are not already locked out; this keeps
+  // behavior consistent for all collision classes and avoids leaving legs in
+  // extreme poses. MODE is forced to IDLE inside processCmdSTAND.
+  extern void processCmdSTAND(const char* line, int s, int len);
+  const char* cmd = "STAND";
+  processCmdSTAND(cmd, 5, 5);
+
   g_lockout = true;
   g_enabled = false;
   g_last_err = E_LOCKOUT;
   g_mode = MODE_LOCKOUT;
   g_lockout_causes |= LOCKOUT_CAUSE_COLLISION;
-  // Immediately torque off all servos
-  for (uint8_t L = 0; L < NUM_LEGS; ++L) {
-    for (uint8_t J = 0; J < LEG_SERVOS; ++J) {
-      setServoTorqueNow(L, J, false);
+
+  // Immediately torque off all servos after commanding STAND
+  for (uint8_t L2 = 0; L2 < NUM_LEGS; ++L2) {
+    for (uint8_t J2 = 0; J2 < LEG_SERVOS; ++J2) {
+      setServoTorqueNow(L2, J2, false);
     }
   }
+}
+
+// Collision lockout helper for legacy callers (e.g., foot-to-foot keep-out).
+// Now delegates to the common STAND+DISABLE collision path.
+static inline void safetyLockoutCollision(uint8_t legA, uint8_t legB) {
+  (void)legA;
+  (void)legB;
+  safetyCollisionStandDisable();
 }
 
 // Placeholder: integrate lx16a-servo library here to send this leg's 3 joint targets
@@ -684,6 +838,60 @@ static inline void busMoveTimeWrite(uint8_t leg, uint8_t joint, int16_t cd, uint
   (void)g_bus[leg].write(LX16A_SERVO_MOVE_TIME_WRITE, params, 4, id);
 }
 
+// --- FAST SEND SUPPORT (Option A) ---
+static inline void oeSetTX(uint8_t leg, bool tx) {
+  if (leg >= NUM_LEGS) return;
+  int pin = Robot::BUFFER_ENABLE_PINS[leg];
+  digitalWrite(pin, tx ? HIGH : LOW); // HIGH -> TX drive, LOW -> RX/high-Z
+}
+
+// Build a LewanSoul LX-16A MOVE_TIME frame into out[]; returns frame length (always 10)
+static inline uint8_t build_move_time_frame(uint8_t id, uint16_t pos_units, uint16_t time_ms, uint8_t out[10]) {
+  // Protocol: 0x55 0x55 ID LEN CMD P_L P_H T_L T_H CHECKSUM
+  // LEN = number of bytes after LEN (CMD+PARAMS+CHECKSUM) => 7 for MOVE_TIME (4 params)
+  // CHECKSUM = ~(ID + LEN + CMD + P_L + P_H + T_L + T_H) & 0xFF
+  uint8_t idx = 0;
+  out[idx++] = 0x55; out[idx++] = 0x55;
+  out[idx++] = id;
+  out[idx++] = 7;
+  out[idx++] = LX16A_SERVO_MOVE_TIME_WRITE;
+  out[idx++] = (uint8_t)(pos_units & 0xFF);
+  out[idx++] = (uint8_t)(pos_units >> 8);
+  out[idx++] = (uint8_t)(time_ms & 0xFF);
+  out[idx++] = (uint8_t)(time_ms >> 8);
+  uint16_t sum = (uint16_t)id + 7 + LX16A_SERVO_MOVE_TIME_WRITE + (pos_units & 0xFF) + (pos_units >> 8) + (time_ms & 0xFF) + (time_ms >> 8);
+  out[idx++] = (uint8_t)(~(sum & 0xFF));
+  return idx;
+}
+
+// Send up to 3 frames for a leg in a single OE window; optionally wait/return to RX for rr_leg
+static inline void fastSendLeg(uint8_t leg, const int16_t out_cd[3], const bool joint_ok[3], uint16_t move_time_ms, bool is_rr_leg) {
+  if (leg >= NUM_LEGS || !SERVO_BUS[leg]) return;
+  // Assert TX enable once
+  oeSetTX(leg, true);
+
+  // Build and write frames back-to-back; skip disabled/OOS joints
+  uint8_t frame[10];
+  for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+    if (!joint_ok[j]) continue;
+    uint8_t id = servoId(leg, j);
+    if (id == 0 || id == 0xFF) continue;
+    uint16_t units = cd_to_lx_units(out_cd[j]);
+    uint8_t n = build_move_time_frame(id, units, move_time_ms, frame);
+    // Teensy HardwareSerial::write supports buffer writes
+    SERVO_BUS[leg]->write(frame, n);
+    delayMicroseconds(25); // inter-frame gap; adjust as needed for bus timing
+  }
+
+  // Only on the RR leg we wait for TX complete and drop to RX, so reads are safe
+  if (is_rr_leg) {
+    SERVO_BUS[leg]->flush(); // wait for transmit complete
+    oeSetTX(leg, false);     // return to RX
+  }
+  // For non-RR legs, we leave OE asserted; we'll drop to RX when that leg becomes RR
+}
+// end fast send helpers
+
 // Forward decls (only those local to this TU)
 static void loopTick();
 // Config (implemented in functions.ino)
@@ -725,13 +933,15 @@ int16_t readServoPosCdSync(uint8_t leg, uint8_t joint) {
 
 void setup() {
   // Optional brief settle to avoid early contention before USB enumeration and IO setup
-  delay(500);
+  delay(2000);
 
   Serial.begin(115200);
   delay(1000); // allow time for Serial to initialize
 
   // Load config (SD) before splash so status reflects applied values
   configLoad();
+  delay(1000); // allow time for config load
+
   // Do not wait for Serial; print if available
   splash();
 
@@ -744,6 +954,8 @@ void setup() {
     {
       g_cmd_cd[L][J] = g_home_cd[L][J];
       g_last_sent_cd[L][J] = g_home_cd[L][J];
+      g_est_state[L][J].pos_cd = g_home_cd[L][J];
+      g_est_state[L][J].vel_cds = 0;
     }
   }
   // Initialize foot estimates from home positions to avoid false startup collisions
@@ -1048,14 +1260,14 @@ static void loopTick() {
         if (jointEnabled(L, 0) && !servoIsOOS(L, 0)) g_cmd_cd[L][0] = coxa_target;
         if (jointEnabled(L, 1) && !servoIsOOS(L, 1)) g_cmd_cd[L][1] = femur_target;
         // Check their convergence
-  int16_t f_meas = g_meas_pos_cd[L][1];
+        int16_t f_meas = g_meas_pos_cd[L][1];
         int16_t f_eff  = g_meas_pos_valid[L][1] ? f_meas : g_last_sent_cd[L][1];
-        int16_t f_err  = (int16_t)(femur_target - f_eff); if (f_err < 0) f_err = (int16_t)-f_err;
-        if (!(servoIsOOS(L,1) || !jointEnabled(L,1))) fem_coxa_ok &= (f_err <= TOL_OTHER_CD);
-  int16_t c_meas = g_meas_pos_cd[L][0];
+        int16_t f_err  = (int16_t)(femur_target - f_eff); if (f_err < 0) f_err = (int16_t) - f_err;
+        if (!(servoIsOOS(L, 1) || !jointEnabled(L, 1))) fem_coxa_ok &= (f_err <= TOL_OTHER_CD);
+        int16_t c_meas = g_meas_pos_cd[L][0];
         int16_t c_eff  = g_meas_pos_valid[L][0] ? c_meas : g_last_sent_cd[L][0];
-        int16_t c_err  = (int16_t)(coxa_target - c_eff); if (c_err < 0) c_err = (int16_t)-c_err;
-        if (!(servoIsOOS(L,0) || !jointEnabled(L,0))) fem_coxa_ok &= (c_err <= TOL_OTHER_CD);
+        int16_t c_err  = (int16_t)(coxa_target - c_eff); if (c_err < 0) c_err = (int16_t) - c_err;
+        if (!(servoIsOOS(L, 0) || !jointEnabled(L, 0))) fem_coxa_ok &= (c_err <= TOL_OTHER_CD);
         if (tibia_ok && fem_coxa_ok && ((g_tuck_done_mask >> L) & 1u) == 0) {
           g_tuck_done_mask |= (1u << L);
         }
@@ -1120,48 +1332,388 @@ static void loopTick() {
 
         max_delta_cd = (int32_t)cd_per_tick;
       }
-      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg)
-
+      // Update estimator prediction for all servos (position + velocity) toward
+      // the last effective command (before PID). Effective command includes
+      // compliance offsets so the estimator tracks what the joints are actually
+      // being asked to do. Measurement correction is applied later in the RR
+      // feedback block when fresh data is available.
       {
-        if (!legEnabled(leg)) continue; // per-leg gating
-
-        for (uint8_t j = 0; j < LEG_SERVOS; ++j)
-        {
-          if (!jointEnabled(leg, j)) continue; // per-joint gating
-
-          if (servoIsOOS(leg, j)) continue; // skip OOS servos
-
-          //if (j == 0) g_bus[leg].debug(TRNG_DEFAULT_FREQUENCY_MINIMUM);
-          // 1) Soft-limit clamp (absolute cd bounds from config) — gated by safety toggle
-          int32_t target_cd = g_cmd_cd[leg][j];
-          if (g_safety_soft_limits_enabled) {
-            int16_t min_cd = g_limit_min_cd[leg][j];
-            int16_t max_cd = g_limit_max_cd[leg][j];
-            if (target_cd < min_cd) target_cd = min_cd;
-            if (target_cd > max_cd) target_cd = max_cd;
+        uint16_t a_cmd = g_est_cmd_alpha_milli; if (a_cmd > 1000) a_cmd = 1000;
+        float dt_s = g_loopTimer.DeltaTseconds();
+        if (!(dt_s > 0.0f) || dt_s > 0.100f) {
+          dt_s = (g_loop_hz > 0) ? (1.0f / (float)g_loop_hz) : 0.006f;
+        }
+        for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+          for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+            JointEstimator &st = g_est_state[leg][j];
+            // 1) Predict using current velocity
+            int32_t pos = st.pos_cd + (int32_t)(st.vel_cds * dt_s);
+            if (pos < 0) pos = 0; else if (pos > 24000) pos = 24000;
+            // 2) Small pull toward effective command to keep estimate near plan
+            int32_t cmd = (int32_t)g_eff_cmd_cd[leg][j];
+            int32_t diff_cmd = cmd - pos;
+            pos += (a_cmd * diff_cmd) / 1000;
+            if (pos < 0) pos = 0; else if (pos > 24000) pos = 24000;
+            // 3) Simple velocity decay toward 0 to avoid drift when idle
+            st.vel_cds = (int16_t)((int32_t)st.vel_cds * 9 / 10); // ~0.9 per tick
+            st.pos_cd = (int16_t)pos;
           }
-
-          // 2) Rate limit per tick around last sent value
-          int32_t prev_cd = g_last_sent_cd[leg][j];
-          int32_t delta = target_cd - prev_cd;
-          if (max_delta_cd > 0)
-          {
-            if (delta > max_delta_cd) delta = max_delta_cd;
-
-            else if (delta < -max_delta_cd) delta = -max_delta_cd;
-
-          }
-          int16_t out_cd = (int16_t)(prev_cd + delta);
-          g_last_sent_cd[leg][j] = out_cd;
-          //Serial << "<" << leg << "," << j << "> " << out_cd << " -> " << target_cd << " (" << move_time_ms << " ms)\r\n";
-          g_servo[leg][j]->move_time(out_cd, 0);
-          //busMoveTimeWrite(leg, j, target_cd, 0 ); //move_time_ms);
-          //if (j == 0) g_bus[leg].debug(false);
         }
       }
+
+      // Build both base (no PID) and PID-corrected desired targets; apply only PID in active mode.
+      int16_t base_target_cd[NUM_LEGS][LEG_SERVOS];
+      int16_t pid_target_cd[NUM_LEGS][LEG_SERVOS];
+      // dt-aware PID: derive elapsed time since last tick
+      float dt_s = g_loopTimer.DeltaTseconds();
+      if (!(dt_s > 0.0f) || dt_s > 0.100f) {
+        // Fallback to nominal period if dt is invalid or absurdly large (>100 ms)
+        dt_s = (g_loop_hz > 0) ? (1.0f / (float)g_loop_hz) : 0.006f;
+      }
+      // Convert to milliseconds for fixed-point arithmetic in I/D terms
+      uint16_t dt_ms = (uint16_t)(dt_s * 1000.0f + 0.5f);
+      if (dt_ms < 1) dt_ms = 1;
+
+      // Joint compliance update: adapt per-leg/joint offsets around estimated position.
+      // This uses the previous tick's effective command as the reference for error.
+      if (g_comp_enabled) {
+        for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+          for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+            // Skip joints that are disabled or out-of-service
+            if (!jointEnabled(leg, j) || servoIsOOS(leg, j)) {
+              // Passive decay toward zero when compliance is enabled but joint not active
+              int16_t off = g_comp_offset_cd[leg][j];
+              if (off != 0) {
+                int32_t leak = ((int32_t)g_comp_leak_milli * (int32_t)off) / 1000;
+                off -= (int16_t)leak;
+                g_comp_offset_cd[leg][j] = off;
+              }
+              continue;
+            }
+
+            int16_t eff_prev = g_eff_cmd_cd[leg][j];
+            int16_t est      = g_est_state[leg][j].pos_cd;
+            int32_t e_cd     = (int32_t)est - (int32_t)eff_prev;
+
+            // Deadband around zero error
+            int32_t db = (int32_t)g_comp_deadband_cd[j];
+            if (e_cd > -db && e_cd < db) {
+              // Leak compliance offset toward zero when quiet
+              int16_t off = g_comp_offset_cd[leg][j];
+              if (off != 0) {
+                int32_t leak = ((int32_t)g_comp_leak_milli * (int32_t)off) / 1000;
+                off -= (int16_t)leak;
+                g_comp_offset_cd[leg][j] = off;
+              }
+              continue;
+            }
+
+            // P-like update on compliance offset
+            int32_t off = g_comp_offset_cd[leg][j];
+            int32_t kp  = (int32_t)g_comp_kp_milli[j];
+            off += (kp * e_cd) / 1000;
+
+            // Clamp offset to configured range
+            int32_t r = (int32_t)g_comp_range_cd[j];
+            if (off >  r) off =  r;
+            if (off < -r) off = -r;
+            if (off >  32767) off =  32767;
+            if (off < -32768) off = -32768;
+            g_comp_offset_cd[leg][j] = (int16_t)off;
+          }
+        }
+      } else {
+        // Ensure offsets are neutral when compliance is globally disabled
+        for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+          for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+            g_comp_offset_cd[leg][j] = 0;
+          }
+        }
+      }
+
+      // Build effective commands from planner outputs plus compliance offsets.
+      // When collision safety is enabled, also enforce the configured joint
+      // workspace (joint_limits.*). If an effective command attempts to leave
+      // this workspace, treat it as a collision: trigger a STAND+DISABLE
+      // sequence via safetyCollisionStandDisable().
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+          int16_t base = g_cmd_cd[leg][j];
+          int16_t off  = g_comp_offset_cd[leg][j];
+          int32_t eff  = (int32_t)base + (int32_t)off;
+
+          // Servo hardware range clamp
+          if (eff < 0) eff = 0;
+          if (eff > 24000) eff = 24000;
+
+          // Joint workspace enforcement when collision safety is enabled.
+          if (g_safety_collision_enabled && !g_lockout) {
+            int16_t min_cd = g_limit_min_cd[leg][j];
+            int16_t max_cd = g_limit_max_cd[leg][j];
+            if (min_cd < 0) min_cd = 0;
+            if (max_cd > 24000) max_cd = 24000;
+            if (min_cd > max_cd) {
+              int16_t tmp = min_cd;
+              min_cd = max_cd;
+              max_cd = tmp;
+            }
+            if (eff < (int32_t)min_cd || eff > (int32_t)max_cd) {
+              // Record collision-style error and transition to STAND+DISABLE.
+              g_last_err = E_COLLISION;
+              safetyCollisionStandDisable();
+              // After lockout, stop updating further effective commands this tick.
+              return;
+            }
+          }
+
+          g_eff_cmd_cd[leg][j] = (int16_t)eff;
+        }
+      }
+
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+          int16_t des = g_eff_cmd_cd[leg][j];
+          base_target_cd[leg][j] = des; // raw desired before PID (after compliance)
+          // Compute PID corrected target if enabled
+          if (g_pid_enabled) {
+            int16_t meas = g_est_state[leg][j].pos_cd;
+            int16_t err = (int16_t)(des - meas);
+            int32_t p = ((int32_t)g_pid_kp_milli[j] * (int32_t)err) / 1000;
+            int32_t i = 0;
+            if (g_pid_ki_milli[j] != 0) {
+              // integrate error in cd·ms to be robust to variable dt
+              int32_t acc = g_pid_i_accum[leg][j] + (int32_t)((int32_t)err * (int32_t)dt_ms);
+              // clamp integral accumulator (cd·ms)
+              if (acc > 2000000L) acc = 2000000L; else if (acc < -2000000L) acc = -2000000L;
+              g_pid_i_accum[leg][j] = acc;
+              // Ki[milli] * (cd·ms) / (1000[milli]*1000[ms/s]) -> cd
+              int64_t i64 = ((int64_t)g_pid_ki_milli[j] * (int64_t)acc);
+              i = (int32_t)(i64 / 1000000LL);
+            }
+            int32_t d = 0;
+            if (g_pid_kd_milli[j] != 0) {
+              int16_t prev = g_pid_prev_err[leg][j];
+              int16_t derr = (int16_t)(err - prev);
+              g_pid_prev_err[leg][j] = err;
+              // Convert per-tick error delta to per-second using dt (fixed-point: *1000/dt_ms)
+              int32_t der_per_s = (int32_t)((int32_t)derr * 1000) / (int32_t)dt_ms; // cd/s
+              int32_t df = g_pid_d_filt[leg][j];
+              uint16_t a = g_pid_kd_alpha_milli[j]; if (a > 1000) a = 1000;
+              // Low-pass filter the derivative signal toward der_per_s
+              df = df + (int32_t)((a * (der_per_s - df)) / 1000);
+              if (df > 32767)
+                df = 32767;
+              else if (df < -32768)
+                df = -32768;
+              g_pid_d_filt[leg][j] = (int16_t)df;
+              d = ((int32_t)g_pid_kd_milli[j] * (int32_t)g_pid_d_filt[leg][j]) / 1000;
+            }
+            int32_t corr = p + i + d;
+            if (corr > PID_CORR_CLAMP_CD)
+              corr = PID_CORR_CLAMP_CD;
+            else if (corr < -PID_CORR_CLAMP_CD)
+              corr = -PID_CORR_CLAMP_CD;
+            int32_t des_corr = (int32_t)des + corr;
+            if (des_corr < 0)
+              des_corr = 0;
+            else if (des_corr > 24000)
+              des_corr = 24000;
+            pid_target_cd[leg][j] = (int16_t)des_corr;
+          } else {
+            pid_target_cd[leg][j] = des; // same as base when PID disabled
+          }
+        }
+      }
+
+      // Apply safety + rate limit separately for base and pid targets (shadow comparison uses both)
+      int16_t out_base_cd[NUM_LEGS][LEG_SERVOS];
+      int16_t out_pid_cd[NUM_LEGS][LEG_SERVOS];
+      bool    ok_grid[NUM_LEGS][LEG_SERVOS];
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        bool leg_on = legEnabled(leg);
+        for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+          bool ok = leg_on && jointEnabled(leg, j) && !servoIsOOS(leg, j);
+          ok_grid[leg][j] = ok;
+          int16_t prev_cd = g_last_sent_cd[leg][j];
+          int32_t base_t = base_target_cd[leg][j];
+          int32_t pid_t  = pid_target_cd[leg][j];
+          if (ok) {
+            if (g_safety_soft_limits_enabled) {
+              int16_t min_cd = g_limit_min_cd[leg][j];
+              int16_t max_cd = g_limit_max_cd[leg][j];
+              if (base_t < min_cd) base_t = min_cd; if (base_t > max_cd) base_t = max_cd;
+              if (pid_t  < min_cd) pid_t  = min_cd;  if (pid_t  > max_cd) pid_t  = max_cd;
+            }
+            int32_t base_delta = base_t - prev_cd;
+            int32_t pid_delta  = pid_t  - prev_cd;
+            if (max_delta_cd > 0) {
+              if (base_delta > max_delta_cd) base_delta = max_delta_cd; else if (base_delta < -max_delta_cd) base_delta = -max_delta_cd;
+              if (pid_delta  > max_delta_cd) pid_delta  = max_delta_cd;  else if (pid_delta  < -max_delta_cd)  pid_delta  = -max_delta_cd;
+            }
+            out_base_cd[leg][j] = (int16_t)(prev_cd + base_delta);
+            out_pid_cd[leg][j]  = (int16_t)(prev_cd + pid_delta);
+          } else {
+            out_base_cd[leg][j] = prev_cd;
+            out_pid_cd[leg][j]  = prev_cd;
+          }
+        }
+      }
+
+      // Select which outputs to actually send based on PID mode, then apply optional impedance
+      int16_t out_drive_cd[NUM_LEGS][LEG_SERVOS];
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+          out_drive_cd[leg][j] = (g_pid_enabled && g_pid_mode == 0) ? out_pid_cd[leg][j] : out_base_cd[leg][j];
+        }
+      }
+
+      // TEMP: LF coxa debug stream — command, PID, last measurement, estimator (centideg), CSV per tick
+      // Guarded by MARS_DEBUG_LF_COXA_EST so it can be compiled out for normal runs.
+#ifdef MARS_DEBUG_LF_COXA_EST
+      {
+        const uint8_t leg = 0;      // LF
+        const uint8_t joint = 0;    // COXA
+        int16_t base_cmd = base_target_cd[leg][joint];
+        int16_t pid_cmd  = out_pid_cd[leg][joint];
+        int16_t est_cd   = g_est_state[leg][joint].pos_cd;
+        int16_t meas_cd  = g_meas_pos_valid[leg][joint] ? g_meas_pos_cd[leg][joint] : -1;
+        // Format (no labels): base_cmd_cd,pid_cmd_cd,meas_cd,est_cd
+        Serial.print(base_cmd);
+        Serial.print(',');
+        Serial.print(pid_cmd);
+        Serial.print(',');
+        Serial.print(meas_cd);
+        Serial.print(',');
+        Serial.print(est_cd);
+        Serial.print('\n');
+      }
+#endif
+
+      // Impedance layer: compute per-leg corrections and blend into out_drive_cd
+      if (g_impedance.config().enabled && g_impedance.config().mode != IMP_MODE_OFF) {
+        for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+          // Skip legs with no active joints
+          bool has_any = ok_grid[leg][0] || ok_grid[leg][1] || ok_grid[leg][2];
+          if (!has_any) continue;
+
+          int16_t est_cd[3];
+          int16_t cmd_cd[3];
+          for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+            est_cd[j] = g_est_state[leg][j].pos_cd;
+            cmd_cd[j] = out_drive_cd[leg][j];
+          }
+
+          float bodyFoot[3];
+          float bodyRef[3];
+          const float* pFoot = nullptr;
+          const float* pRef  = nullptr;
+          if (g_impedance.config().mode == IMP_MODE_CART) {
+            // Use BODY-frame FK estimate as current foot position
+            bodyFoot[0] = g_foot_body_x_mm[leg];
+            bodyFoot[1] = g_foot_body_y_mm[leg];
+            bodyFoot[2] = g_foot_body_z_mm[leg];
+            // Use last commanded foot target in X/Z and current BASE_Y as reference
+            bodyRef[0] = g_foot_target_x_mm[leg];
+            bodyRef[1] = g_test_base_y_mm;
+            bodyRef[2] = g_foot_target_z_mm[leg];
+            pFoot = bodyFoot;
+            pRef  = bodyRef;
+          }
+
+          int16_t corr_cd[3] = {0, 0, 0};
+          g_impedance.computeLegCorrection(leg, est_cd, cmd_cd, dt_s, pFoot, pRef, corr_cd);
+
+          for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+            if (!ok_grid[leg][j]) continue;
+            int32_t v = (int32_t)out_drive_cd[leg][j] + (int32_t)corr_cd[j];
+            if (v < 0) v = 0; else if (v > 24000) v = 24000;
+            out_drive_cd[leg][j] = (int16_t)v;
+          }
+        }
+      }
+
+      // Update last_sent to what we will drive (estimator & rate-limit reference)
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        for (uint8_t j = 0; j < LEG_SERVOS; ++j) {
+          g_last_sent_cd[leg][j] = out_drive_cd[leg][j];
+        }
+      }
+
+      // Parallelize across UARTs by batching per leg and avoiding per-frame waits
+      uint8_t rr_leg = g_rr_index / LEG_SERVOS;
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        bool has_any = ok_grid[leg][0] || ok_grid[leg][1] || ok_grid[leg][2];
+        if (!has_any) continue;
+        bool is_rr = (leg == rr_leg);
+        // Use a small non-zero move time so each incremental step is treated
+        // as a short ramp by the servo. Approximate one control tick.
+        uint16_t move_ms = (g_loop_hz > 0) ? (uint16_t)(1000U / g_loop_hz) : 0U;
+        if (move_ms == 0) move_ms = 1; // floor to 1 ms when loop_hz is high or zero
+        fastSendLeg(leg, out_drive_cd[leg], ok_grid[leg], move_ms, is_rr);
+      }
+      // Shadow mode streaming: periodically print per-leg summary without driving PID corrections.
+      // Also surface estimator details (actual vs estimate vs velocity) for debugging.
+      if (g_pid_enabled && g_pid_mode == 1 && g_pid_shadow_report_hz > 0) {
+        uint32_t now_ms = millis();
+        uint32_t interval_ms = (uint32_t)(1000UL / (uint32_t)g_pid_shadow_report_hz);
+        if (interval_ms == 0) interval_ms = 1;
+        if (now_ms - g_pid_shadow_last_report_ms >= interval_ms) {
+          g_pid_shadow_last_report_ms = now_ms;
+          if (Serial) {
+            const char* legNames[6]  = {"LF", "LM", "LR", "RF", "RM", "RR"};
+            Serial.print(F("PID_SHADOW t_ms=")); Serial.print((unsigned long)now_ms);
+            for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+              Serial.print(F(" ")); Serial.print(legNames[leg]); Serial.print(F(":"));
+              // diffs (pid - base) in centidegrees per joint
+              int16_t d_c = (int16_t)(out_pid_cd[leg][0] - out_base_cd[leg][0]);
+              int16_t d_f = (int16_t)(out_pid_cd[leg][1] - out_base_cd[leg][1]);
+              int16_t d_t = (int16_t)(out_pid_cd[leg][2] - out_base_cd[leg][2]);
+              // error used by PID (des - est), using estimate (meas-corrected on RR)
+              int16_t e_c = (int16_t)(base_target_cd[leg][0] - g_est_state[leg][0].pos_cd);
+              int16_t e_f = (int16_t)(base_target_cd[leg][1] - g_est_state[leg][1].pos_cd);
+              int16_t e_t = (int16_t)(base_target_cd[leg][2] - g_est_state[leg][2].pos_cd);
+              // estimate/read (centidegrees)
+              int16_t m_c = g_est_state[leg][0].pos_cd;
+              int16_t m_f = g_est_state[leg][1].pos_cd;
+              int16_t m_t = g_est_state[leg][2].pos_cd;
+              // Measured positions (last RR read, may be stale) for comparison
+              int16_t z_c = g_meas_pos_valid[leg][0] ? g_meas_pos_cd[leg][0] : -1;
+              int16_t z_f = g_meas_pos_valid[leg][1] ? g_meas_pos_cd[leg][1] : -1;
+              int16_t z_t = g_meas_pos_valid[leg][2] ? g_meas_pos_cd[leg][2] : -1;
+              // Estimated velocities (cd/s)
+              int16_t v_c = g_est_state[leg][0].vel_cds;
+              int16_t v_f = g_est_state[leg][1].vel_cds;
+              int16_t v_t = g_est_state[leg][2].vel_cds;
+              // base target (pre-PID) in centidegrees
+              int16_t t_c = base_target_cd[leg][0];
+              int16_t t_f = base_target_cd[leg][1];
+              int16_t t_t = base_target_cd[leg][2];
+              Serial.print(F(" diff_cd=")); Serial.print((int)d_c); Serial.print(F("/")); Serial.print((int)d_f); Serial.print(F("/")); Serial.print((int)d_t);
+              Serial.print(F(" err_cd="));  Serial.print((int)e_c); Serial.print(F("/")); Serial.print((int)e_f); Serial.print(F("/")); Serial.print((int)e_t);
+              Serial.print(F(" est_cd="));  Serial.print((int)m_c); Serial.print(F("/")); Serial.print((int)m_f); Serial.print(F("/")); Serial.print((int)m_t);
+              Serial.print(F(" meas_cd=")); Serial.print((int)z_c); Serial.print(F("/")); Serial.print((int)z_f); Serial.print(F("/")); Serial.print((int)z_t);
+              Serial.print(F(" est_vel_cds=")); Serial.print((int)v_c); Serial.print(F("/")); Serial.print((int)v_f); Serial.print(F("/")); Serial.print((int)v_t);
+              Serial.print(F(" tgt_cd="));  Serial.print((int)t_c); Serial.print(F("/")); Serial.print((int)t_f); Serial.print(F("/")); Serial.print((int)t_t);
+            }
+            Serial.print(F("\r\n"));
+          }
+        }
+      }
+      // Ensure RR leg is in RX before feedback even if it had nothing to send this tick
+      SERVO_BUS[rr_leg]->flush();
+      oeSetTX(rr_leg, false);
+      // end fast send path
     }
 #if MARS_TIMING_PROBES
     g_probe_send_us = (uint16_t)send_us;
+#endif
+#if MARS_PROFILE_SEND
+    // Update per-tick aggregation when any sends potentially occurred
+    uint16_t __tick_send = (uint16_t)send_us;
+    g_prof_send_tick_us_sum += (uint32_t)__tick_send;
+    if (__tick_send < g_prof_send_tick_us_min) g_prof_send_tick_us_min = __tick_send;
+    if (__tick_send > g_prof_send_tick_us_max) g_prof_send_tick_us_max = __tick_send;
+    ++g_prof_send_tick_count;
 #endif
   }
 
@@ -1183,19 +1735,47 @@ static void loopTick() {
             if (pos_cd > 24000) pos_cd = 24000;
             g_meas_pos_cd[leg][joint] = (int16_t)pos_cd;
             g_meas_pos_valid[leg][joint] = 1;
+            // Measurement correction for estimator: update position and velocity
+            {
+              JointEstimator &st = g_est_state[leg][joint];
+              int32_t pos = st.pos_cd;
+              int32_t meas = g_meas_pos_cd[leg][joint];
+              uint16_t a_pos = g_est_meas_alpha_milli; if (a_pos > 1000) a_pos = 1000;
+              // Position update toward measurement
+              int32_t resid = meas - pos;
+              pos = pos + (int32_t)((a_pos * resid) / 1000);
+              if (pos < 0) pos = 0; else if (pos > 24000) pos = 24000;
+              st.pos_cd = (int16_t)pos;
+              // Velocity update based on residual / dt
+              float dt_s = g_loopTimer.DeltaTseconds();
+              if (!(dt_s > 0.0f) || dt_s > 0.100f) {
+                dt_s = (g_loop_hz > 0) ? (1.0f / (float)g_loop_hz) : 0.006f;
+              }
+              if (dt_s > 0.0f) {
+                int32_t dv = (int32_t)((g_est_meas_vel_alpha_milli * (resid / dt_s)) / 1000);
+                int32_t vel_est = (int32_t)st.vel_cds + dv;
+                if (vel_est < -240000) vel_est = -240000; else if (vel_est > 240000) vel_est = 240000;
+                st.vel_cds = (int16_t)vel_est;
+              }
+            }
           } else {
             g_meas_pos_valid[leg][joint] = 0;
           }
 
           // vin/temp read drive OOS detection
-          uint16_t vin_mV = s->vin();
-          uint8_t  temp_C = s->temp();
-          g_meas_vin_mV[leg][joint] = vin_mV;
-          g_meas_temp_C[leg][joint] = temp_C;
+          // Alternate vin and temp across visits; always retain last known values
+          uint8_t tog = (g_fb_rr_toggle[leg][joint] ^= 1); // flip 0<->1
+          if (tog == 0) {
+            uint16_t vin_mV = s->vin();
+            g_meas_vin_mV[leg][joint] = vin_mV;
+          } else {
+            uint8_t temp_C = s->temp();
+            g_meas_temp_C[leg][joint] = temp_C;
+          }
 
-          // Validity: accept either reading being sane as a 'success'
-          bool validVin  = (vin_mV > 0); // lenient: any non-zero
-          bool validTemp = (temp_C > 0 && temp_C < 400); // 1..119 C
+          // Validity: accept either stored reading being sane as a 'success'
+          bool validVin  = (g_meas_vin_mV[leg][joint] > 0); // lenient: any non-zero
+          bool validTemp = (g_meas_temp_C[leg][joint] > 0 && g_meas_temp_C[leg][joint] < 400); // 1..119 C
 
           // Startup grace window: don't count failures too early after boot
           const uint16_t OOS_GRACE_MS = 750; // ignore failures for first 0.75s after setup
@@ -1222,15 +1802,16 @@ static void loopTick() {
         }
       }
 
-      // Print FK for the leg served in this round-robin tick
+      // Print FK and S1/S2-style telemetry for the leg served this tick
       {
-  int16_t c = g_meas_pos_valid[leg][0] ? g_meas_pos_cd[leg][0] : g_last_sent_cd[leg][0];
-  int16_t f = g_meas_pos_valid[leg][1] ? g_meas_pos_cd[leg][1] : g_last_sent_cd[leg][1];
-  int16_t t = g_meas_pos_valid[leg][2] ? g_meas_pos_cd[leg][2] : g_last_sent_cd[leg][2];
+        int16_t c = g_meas_pos_valid[leg][0] ? g_meas_pos_cd[leg][0] : g_last_sent_cd[leg][0];
+        int16_t f = g_meas_pos_valid[leg][1] ? g_meas_pos_cd[leg][1] : g_last_sent_cd[leg][1];
+        int16_t t = g_meas_pos_valid[leg][2] ? g_meas_pos_cd[leg][2] : g_last_sent_cd[leg][2];
         float bx, by, bz, lx, ly, lz;
         if (fk_leg_both(leg, c, f, t, &bx, &by, &bz, &lx, &ly, &lz)) {
           if (Serial && ((g_fk_stream_mask >> leg) & 1u)) {
             const char* legNames[6]  = {"LF", "LM", "LR", "RF", "RM", "RR"};
+            // Existing RR_FK stream (unchanged format)
             Serial.print(F("RR_FK "));
             Serial.print(legNames[leg]);
             Serial.print(F(" x=")); Serial.print(bx, 1);
@@ -1247,6 +1828,22 @@ static void loopTick() {
         }
       }
     }
+#if 1
+    // New compact segments for Pi display pipeline — independent of FK mask
+    if (Serial && g_telem_enabled) {
+      telemetryPrintS1((uint8_t)leg,
+                       (uint16_t)g_probe_tick_us,
+                       g_lockout ? 1 : 0,
+                       (uint8_t)(g_mode == MODE_TEST ? 1 : 0),
+                       (uint8_t)(g_mode == MODE_TEST ? test_phase : 0),
+                       g_rr_index,
+                       g_enabled ? 1 : 0);
+
+      // S2: enable flags (all 18); S3: voltage/temperature (all 18)
+      telemetryPrintS2();
+      telemetryPrintS3();
+    }
+#endif
 #if MARS_TIMING_PROBES
     g_probe_fb_us = (uint16_t)(micros() - fb_start_us);
 #endif
@@ -1261,26 +1858,35 @@ static void loopTick() {
     float clr = g_safety_clearance_mm;
     if (g_safety_collision_enabled && clr > 0.0f) {
       float r2 = clr * clr;
-      for (uint8_t i = 0; i < NUM_LEGS && !g_lockout; ++i) {
-        for (uint8_t j = (uint8_t)(i + 1); j < NUM_LEGS; ++j) {
-          float dx = g_foot_body_x_mm[i] - g_foot_body_x_mm[j];
-          float dz = g_foot_body_z_mm[i] - g_foot_body_z_mm[j];
-          float d2 = dx * dx + dz * dz;
-          if (d2 < r2) {
-            if (Serial) {
-              const char* legNames[6]  = {"LF", "LM", "LR", "RF", "RM", "RR"};
-              Serial.print(F("COLLISION "));
-              Serial.print(legNames[i]); Serial.print(F("-")); Serial.print(legNames[j]);
-              Serial.print(F(" d_mm=")); Serial.print(sqrtf(d2), 1);
-              Serial.print(F(" < clr=")); Serial.print(clr, 1);
-              Serial.print(F("\r\n"));
-            }
-            bool coll_overridden = (g_override_mask & LOCKOUT_CAUSE_COLLISION) != 0;
-            if (!coll_overridden) {
-              safetyLockoutCollision(i, j);
-            }
-            break;
+      const uint8_t pairs[][2] = {
+        // Same-side adjacent pairs
+        {LEG_LF, LEG_LM}, {LEG_LM, LEG_LR},
+        {LEG_RF, LEG_RM}, {LEG_RM, LEG_RR},
+        // Opposite-side facing pairs
+        {LEG_LF, LEG_RF}, {LEG_LM, LEG_RM}, {LEG_LR, LEG_RR}
+      };
+      const char* legNames[6]  = {"LF", "LM", "LR", "RF", "RM", "RR"};
+
+      const uint8_t numPairs = (uint8_t)(sizeof(pairs) / sizeof(pairs[0]));
+      for (uint8_t idx = 0; idx < numPairs && !g_lockout; ++idx) {
+        uint8_t i = pairs[idx][0];
+        uint8_t j = pairs[idx][1];
+        float dx = g_foot_body_x_mm[i] - g_foot_body_x_mm[j];
+        float dz = g_foot_body_z_mm[i] - g_foot_body_z_mm[j];
+        float d2 = dx * dx + dz * dz;
+        if (d2 < r2) {
+          if (Serial) {
+            Serial.print(F("COLLISION "));
+            Serial.print(legNames[i]); Serial.print(F("-")); Serial.print(legNames[j]);
+            Serial.print(F(" d_mm=")); Serial.print(sqrtf(d2), 1);
+            Serial.print(F(" < clr=")); Serial.print(clr, 1);
+            Serial.print(F("\r\n"));
           }
+          bool coll_overridden = (g_override_mask & LOCKOUT_CAUSE_COLLISION) != 0;
+          if (!coll_overridden) {
+            safetyLockoutCollision(i, j);
+          }
+          break;
         }
       }
     }
@@ -1310,7 +1916,10 @@ static void loopTick() {
   uint32_t period_us = (g_loop_hz > 0) ? (1000000UL / (uint32_t)g_loop_hz) : 0;
   uint32_t tick_elapsed_us = micros() - tick_start_us;
   bool overrun = (period_us > 0 && tick_elapsed_us > period_us);
-  if (overrun) { g_last_err = E_OVERRUN; ++g_overrun_count; }
+  if (overrun) {
+    g_last_err = E_OVERRUN;
+    ++g_overrun_count;
+  }
   // Windowed adaptive logic over 128 ticks:
   // - Zero overruns: increase loop_hz by 1 toward ceiling.
   // - >=8 overruns: decrease loop_hz by 1 (floor 30 Hz).
@@ -1319,9 +1928,15 @@ static void loopTick() {
     uint16_t ceiling = g_config_loop_hz ? g_config_loop_hz : 166; if (ceiling > 500) ceiling = 500;
     const uint8_t DOWN_THRESHOLD = 8;
     if (g_tick_window_overruns == 0) {
-      if (g_loop_hz < ceiling) { ++g_loop_hz; g_loopTimer.SetFrequency(g_loop_hz); }
+      if (g_loop_hz < ceiling) {
+        ++g_loop_hz;
+        g_loopTimer.SetFrequency(g_loop_hz);
+      }
     } else if (g_tick_window_overruns >= DOWN_THRESHOLD) {
-      if (g_loop_hz > 30) { --g_loop_hz; g_loopTimer.SetFrequency(g_loop_hz); }
+      if (g_loop_hz > 30) {
+        --g_loop_hz;
+        g_loopTimer.SetFrequency(g_loop_hz);
+      }
     }
     g_tick_window_count = 0; g_tick_window_overruns = 0;
     g_ok_since_adjust = 0; g_overrun_since_adjust = 0; // reset legacy counters
@@ -1340,9 +1955,21 @@ static void loopTick() {
       g_jitter_min_us = 0xFFFFu; g_jitter_max_us = 0; g_jitter_sum_us = 0; g_jitter_count = 0;
     }
   }
+  // Update jitter metrics (absolute timing error)
+  if (period_us > 0) {
+    uint32_t diff = (tick_elapsed_us > period_us) ? (tick_elapsed_us - period_us) : (period_us - tick_elapsed_us);
+    uint16_t jd = (diff > 0xFFFFu) ? 0xFFFFu : (uint16_t)diff;
+    if (g_jitter_min_us == 0xFFFFu || jd < g_jitter_min_us) g_jitter_min_us = jd;
+    if (jd > g_jitter_max_us) g_jitter_max_us = jd;
+    g_jitter_sum_us += (uint32_t)jd;
+    if (++g_jitter_count >= 128) {
+      // Reset window each 128 samples; STATUS will read current snapshot
+      g_jitter_min_us = 0xFFFFu; g_jitter_max_us = 0; g_jitter_sum_us = 0; g_jitter_count = 0;
+    }
+  }
 #endif
 
-//#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+  //#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
   // --- Buffered CSV logging (compact/full modes) ---
   if (g_log_enabled) {
@@ -1410,10 +2037,16 @@ static void loopTick() {
                            (int)cmd1, (int)meas1, vin1_whole, vin1_tenth, (unsigned int)temp1C, (unsigned int)oos1,
                            (int)cmd2, (int)meas2, vin2_whole, vin2_tenth, (unsigned int)temp2C, (unsigned int)oos2,
                            (unsigned int)err);
-          if (n > 0 && (g_log_buf_used + (uint16_t)n) < sizeof(g_log_buf)) { memcpy(g_log_buf + g_log_buf_used, row, (size_t)n); g_log_buf_used += (uint16_t)n; }
+          if (n > 0 && (g_log_buf_used + (uint16_t)n) < sizeof(g_log_buf)) {
+            memcpy(g_log_buf + g_log_buf_used, row, (size_t)n);
+            g_log_buf_used += (uint16_t)n;
+          }
           else {
             g_log_file.write(g_log_buf, g_log_buf_used); g_log_file_bytes += g_log_buf_used; g_log_total_bytes += g_log_buf_used; g_log_buf_used = 0;
-            if (n > 0 && (uint16_t)n < sizeof(g_log_buf)) { memcpy(g_log_buf, row, (size_t)n); g_log_buf_used = (uint16_t)n; }
+            if (n > 0 && (uint16_t)n < sizeof(g_log_buf)) {
+              memcpy(g_log_buf, row, (size_t)n);
+              g_log_buf_used = (uint16_t)n;
+            }
           }
         } else {
           for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
@@ -1442,10 +2075,16 @@ static void loopTick() {
                              (int)cmd1, (int)meas1, vin1_whole, vin1_tenth, (unsigned int)temp1C, (unsigned int)oos1,
                              (int)cmd2, (int)meas2, vin2_whole, vin2_tenth, (unsigned int)temp2C, (unsigned int)oos2,
                              (unsigned int)err);
-            if (n > 0 && (g_log_buf_used + (uint16_t)n) < sizeof(g_log_buf)) { memcpy(g_log_buf + g_log_buf_used, row, (size_t)n); g_log_buf_used += (uint16_t)n; }
+            if (n > 0 && (g_log_buf_used + (uint16_t)n) < sizeof(g_log_buf)) {
+              memcpy(g_log_buf + g_log_buf_used, row, (size_t)n);
+              g_log_buf_used += (uint16_t)n;
+            }
             else {
               g_log_file.write(g_log_buf, g_log_buf_used); g_log_file_bytes += g_log_buf_used; g_log_total_bytes += g_log_buf_used; g_log_buf_used = 0;
-              if (n > 0 && (uint16_t)n < sizeof(g_log_buf)) { memcpy(g_log_buf, row, (size_t)n); g_log_buf_used = (uint16_t)n; }
+              if (n > 0 && (uint16_t)n < sizeof(g_log_buf)) {
+                memcpy(g_log_buf, row, (size_t)n);
+                g_log_buf_used = (uint16_t)n;
+              }
             }
           }
         }
@@ -1493,21 +2132,21 @@ static void loopTick() {
           }
         }
         // End of logging operations for this sampled tick: capture duration
-        #if MARS_TIMING_PROBES
+#if MARS_TIMING_PROBES
         g_probe_log_us = (uint16_t)(micros() - log_start_us);
-        #endif
+#endif
       }
     } else {
-      #if MARS_TIMING_PROBES
+#if MARS_TIMING_PROBES
       g_probe_log_us = 0;
-      #endif
+#endif
     }
   }
   else {
-    #if MARS_TIMING_PROBES
+#if MARS_TIMING_PROBES
     // When logging is disabled entirely, ensure probe reads 0 each tick.
     g_probe_log_us = 0;
-    #endif
+#endif
   }
 #endif
 }

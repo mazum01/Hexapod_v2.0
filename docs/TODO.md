@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-12 (phase 1 completion branch start)
+Last updated: 2025-11-14 (Impedance + IMP commands FW 0.2.13)
 Owner: Hexapod v2.0 firmware (MARS)
 
 Conventions
@@ -10,13 +10,11 @@ Conventions
 
 ## Open tasks
 
-- [ ] Optimize servo send path — moved to Phase 2 backlog
-  - Reduce per-command latency (<300 µs at 115200). Investigate prebuilt frames, batching per leg, minimize copies, evaluate higher baud or DMA/queue. [Deferred]
-- [ ] Stabilize loop at 166 Hz
-  - Tune and verify adaptive hysteresis to maintain 166 Hz under typical load; measure with timing probes; ensure no sustained overruns.
  
  - [x] CSV logging to SD (2025-11-09 → 2025-11-10)
   - Phase 1 + FULL mode implemented; size rotation; tail/clear; leg-aggregated rows; per-servo OOS; settings persistence (RATE/MODE/HEADER/ROTATE/MAXKB) excluding enabled. Remaining future (deferred): Bresenham sampling, column mask/filter, compression/binary format.
+ - [x] Expand config keys (2025-11-12)
+  - Added logging.rotate, logging.max_kb, test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. Joint limits parser already supports all legs.
  - [x] Expand config keys (2025-11-12)
   - Added logging.rotate, logging.max_kb, test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. Joint limits parser already supports all legs.
  - [x] Tripod test mode (2025-11-09)
@@ -24,14 +22,14 @@ Conventions
  
  - [x] Configurable move_time (2025-11-09)
   - Implemented via dynamic derivation from loop rate each tick; future persistence optional.
-- [ ] STATUS readability
+- [x] STATUS readability
   - [x] Reformat STATUS output for better readability (grouped sections, aligned grids, compact summary lines). (2025-11-12 — section headers like HELP; one key per line)
 
-  - [~] Complete servo home offset update
+  - [x] Complete servo home offset update
     - [x] Wire hardware angle offset I/O via lx16a-servo helpers (remove RAM stubs; Teensy uses real device I/O; host uses fake include).
     - [x] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
+    - [x] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
     - [x] SAVEHOME cd-only clear→read→compute flow; persist both home_cd.* and offset_cd.* (0.1.98).
-    - [ ] Reboot validation: ensure startup loads offset_cd (future key parser update) or recomputes g_offset_cd from hardware so STATUS matches after power cycle.
 
   - Re-implemented multi-line grouped STATUS (system/config, test, safety, enables, offsets, oos, fk mask). (2025-11-08)
   - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
@@ -43,10 +41,51 @@ Conventions
  - [x] Phase1: TUCK stage debug instrumentation (FW 0.1.113)
 
 ## Phase 2 backlog (deferred)
-- [ ] Phase2: optimize send path (<300us)
-  - Reduce per-command latency (<300 µs at 115200). Investigate prebuilt frames, batching per leg, minimize copies, evaluate higher baud or DMA/queue; consider DMA/queue only if footprint remains small.
+- [x] Phase2: optimize send path (<300us)
+  - Implemented Option A: fast per-leg batched send (MARS_FAST_SEND, default OFF). Batches 3 frames per leg with single OE window and waits only on the RR feedback leg. STATUS shows send_us ≈ 1.7 ms in TEST mode; objective met. Further work: feedback path dominates (fb_us ≈ 4.9 ms) — consider staggering vin/temp reads.
+ - [x] Phase2: stagger feedback reads
+  - Added MARS_FB_STAGGER (default ON). Always read position; alternate vin and temp across RR visits; maintain OOS semantics using stored values. Expect fb_us reduction by ~2–3×.
+ - [x] Phase2: joint PID controller (FW 0.2.11)
+  - Integrated dt-aware PID compute into loop (between estimator and send) with P/PI/PD, anti-windup clamp, and filtered derivative. Default disabled with zero gains. Config keys `pid.enabled` and `pid.{kp,ki,kd}_milli.<coxa|femur|tibia>` parsed at boot; STATUS [PID] shows enabled flag, mode, gains, kd_alpha, and shadow report rate. Shadow mode (`pid.mode=shadow`) computes PID without driving servos and streams enriched `PID_SHADOW` lines (diff_cd, err_cd, est_cd, tgt_cd) at `pid.shadow_report_hz`.
+ - [x] Phase2: virtual impedance (spring-damper)
+   - Implemented modular `MarsImpedance` class with joint-space and simple Cartesian modes; integrated into loopTick as an optional layer on top of PID/base commands. Config keys `imp.*` parsed at boot; IMP command family (`IMP LIST|ENABLE|DISABLE|MODE|JSPRING|JDAMP|CSPRING|CDAMP`) tunes and persists gains/mode. STATUS exposes an `[IMP]` section. FW 0.2.13.
+ - [x] Phase2: estimator upgrade (2025-11-18, FW 0.2.15)
+   - Implemented and tuned simple exponential smoothing toward last command with measurement correction on RR updates; PID uses the estimate between sparse reads. Alphas validated on hardware for tripod stance and small motions (current recommended defaults: est.cmd_alpha_milli≈100, est.meas_alpha_milli≈150, est.meas_vel_alpha_milli≈100).
+ - [~] Phase2: collision model refinement
+   - Layered approach in progress. Current work: joint workspace enforcement using existing joint_limits.* plus shared LIMITS command; future: foot workspace box, refined foot-foot clearance, and tracking-error based safety.
+ - [ ] Phase2: foot 3D workspace bounds (backlog)
+   - Define a shared body-frame foot workspace box (x/y/z mm) used as a coarse sanity check on IK targets and estimated foot poses; when safety.collision is enabled, out-of-box feet should trigger the existing STAND+DISABLE collision path.
+ - [ ] Phase2: FK/IK test harness
+   - Add `IKTEST` / `FKTEST` serial commands for quick validation; emit diff vs expected; optional stats accumulation.
+ - [ ] Phase2: config live reload
+   - Implement `CONFIG RELOAD` (safe mid-run parse) with timing guard; only apply non-critical keys (limits, gait, safety, logging); reject loop_hz if would cause instability.
+ - [ ] Phase2: pin wiring documentation
+   - Document SerialX TX/RX/enable pins & power wiring; mirror in `robot_config.h`; splash sanity print of pin set completeness.
+ - [ ] Phase2: logging enhancements
+   - Add `logging.mode=profile` (per-tick timing, rr index, overruns); jitter histogram snapshot command; optional servo read distribution metrics.
+ - [x] Phase2: eye updates during gait (Python controller) (2025-12-04)
+   - Implemented DisplayThread running at configurable Hz (default 15, tested at 30Hz). Eyes update in background thread with joystick-driven look direction. Optimized st7789.py with show_image_fast() using numpy.tobytes() and writebytes2() to minimize GIL contention - eliminates leg jitter during blinks entirely.
+ - [ ] Phase2: homeAngles calibration workflow
+   - Add `CALIBRATE <LEG|ALL>` automation; unify offset/home persistence strategy; clearly separate hardware offset vs logical home.
+ - [ ] Phase2: loop_hz strategy review
+   - Re-assess adaptive up/down hysteresis; consider fixed 166 Hz with overrun counter & downgrade warning only.
+ - [ ] Phase2: memory/footprint audit
+   - Generate RAM/flash map; identify large symbols (float printf, lx16a unused); plan trims before adding PID/impedance.
+
+## Workflow policies (Phase 2)
+
+- [~] Defer commits until instructed
+  - Keep changes in the working tree; do not commit or push without an explicit request. Provide git status/diff on demand.
+- [~] Auto-bump FW_VERSION per edit
+  - Increment FW_VERSION patch with every assistant-made code change. Update main .ino header and CHANGELOG entries when a TODO is completed or behavior changes; skip verbose changelog spam for pure profiling/formatting edits.
+ - [~] Confirm major/minor version bumps
+   - Major/minor version increments require explicit user confirmation. Patch and FW_BUILD monotonic can auto-increment with edits.
 
 ## Completed
+ - [x] Keep STATUS slim (2025-11-12)
+  - Verified STATUS remains compact with grouped sections; no `[TUCK]` debug block or verbose fields present.
+ - [x] Startup offset refresh (2025-11-12)
+  - On boot, read hardware angle offsets and populate g_offset_cd before first STATUS. Also parse offset_cd.<LEG>.<joint> from config (seed only; hardware read overwrites).
  - [x] Keep STATUS slim (2025-11-12)
   - Verified STATUS remains compact with grouped sections; no `[TUCK]` debug block or verbose fields present.
  - [x] Startup offset refresh (2025-11-12)
@@ -58,6 +97,9 @@ Conventions
  - [x] STATUS [TUCK] debug removal (2025-11-12)
   - Removed temporary STATUS `[TUCK]` debug section (active/masks/params and tibia meas/eff). Keeps STATUS leaner and reduces print cost; TUCK controller remains unchanged. (FW 0.1.110)
  - [x] Position validity & TUCK tibia convergence (2025-11-12)
+ - [x] Loop timing validation (2025-11-12)
+  - Jitter metrics added (FW 0.1.115) and observed min/avg/max within <10% of 6.024 ms budget under idle + test gait; no sustained overruns.
+ - Confirms Phase 1 timing acceptance criteria.
  - [x] Loop timing validation (2025-11-12)
   - Jitter metrics added (FW 0.1.115) and observed min/avg/max within <10% of 6.024 ms budget under idle + test gait; no sustained overruns.
  - Confirms Phase 1 timing acceptance criteria.
@@ -92,6 +134,9 @@ Conventions
   - Added `TEST OVERLAP <pct>` to adjust overlap at runtime (0..25). Value is persisted to `/config.txt` as `test.trigait.overlap_pct`. STATUS includes `overlap_pct`.
 - [x] STATUS safety details (2025-11-03)
   - STATUS now includes `safety=<state> cause=0x.. override=0x..`. Added `SAFETY LIST` and `SAFETY OVERRIDE` commands.
+
+  - [x] Defer commits until instructed (2025-11-12)
+    - Phase 1 policy enforced (batched edits, explicit user-driven commit points). Closed after merge/tag of Phase 1 completion.
 
   - [x] Defer commits until instructed (2025-11-12)
     - Phase 1 policy enforced (batched edits, explicit user-driven commit points). Closed after merge/tag of Phase 1 completion.
