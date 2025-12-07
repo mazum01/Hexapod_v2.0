@@ -91,14 +91,60 @@
 # 2025-12-04  v0.4.5 b70: Bugfix: blink frame skip was checking wrong states (WAITING instead of CLOSED), causing eyes to not return to full height after blink.
 # 2025-12-04  v0.4.6 b71: Controller disconnect overlay: displays red 'NO CONTROLLER' watermark (stacks with NO TEENSY if both missing).
 # 2025-12-04  v0.4.7 b72: Enhanced status overlays: added 'NO TELEMETRY' (orange) when connected but no data, 'DISABLED' (yellow) when robot disabled. Immediate render on status change.
+# 2025-12-04  v0.4.8 b73: Code review completed (TODO #1): documented duplication, cohesion, error handling, timing. See TODO.md "Code Review Recommendations" section.
+# 2025-12-04  v0.4.9 b74: Code review fixes: Added ensure_enabled() helper, IDX_* telemetry constants, narrowed exception handlers to specific types with logging.
+# 2025-12-04  v0.4.10 b75: Display optimization (TODO #19/#20): frame change detection via hash skips unchanged frames; combined rotation+RGB565 in show_image_rotated().
+# 2025-12-04  v0.4.11 b77: Added WaveGait and RippleGait classes; RB cycles through Tripod→Wave→Ripple→Stationary. Removed STRAFE_DEBUG_LOG.
+# 2025-12-04  v0.4.12 b78: Phase-locked gait transitions: RB now waits for phase boundary, then blends between gaits over 500ms for smooth switching.
+# 2025-12-04  v0.4.13 b79: Walking turn: right stick Y controls yaw rate (±60 deg/s), differential stride per leg enables arc motion.
+# 2025-12-06  v0.4.14 b80: Eye shape cycle: 'e' key cycles through all eye shapes; DPAD up/down also cycles shapes.
+# 2025-12-06  v0.4.15 b81: Human eye improvements: percentage-based spacing (human_eye_spacing_pct config), randomized iris radial fibers for realism.
+# 2025-12-06  v0.4.16 b82: Eye shape persistence: selected eye shape saved to controller.ini and restored on startup.
+# 2025-12-06  v0.4.17 b83: Human eye blink fix: eyelid-style blink (polygon overlay) matching other eye types; honors eyelid_angle and eyelid_percent for joystick intensity control.
+# 2025-12-06  v0.4.18 b84: Human eye intensity fix: corrected eyelid angle direction, intensity eyelid shows without blink.
+# 2025-12-06  v0.4.19 b85: Human eye colors: 5 color options (blue, green, hazel, brown, dark brown); configurable iris size; pupil fades black→red at 50-100% intensity.
+# 2025-12-06  v0.4.20 b86: Eye color palettes in config: all 6 eye shapes have configurable colors (color_ellipse, color_rectangle, etc.); human eye palette also configurable.
+# 2025-12-06  v0.4.21 b87: UI fixes: DISABLED overlay moved to bottom of screen; fixed eyelid_percent calculation (0.755→75.0); DPAD cycles human eye color when on human eyes.
+# 2025-12-06  v0.4.22 b88: Human eye tweaks: intensity eyelid max reduced to 45% (was ~50%); dark eye colors get lighter limbal ring for visibility against black background.
+# 2025-12-06  v0.4.23 b89: Touch E-STOP: touching screen while robot is in motion stops gait, sends idle + LEG ALL DISABLE + DISABLE for immediate safety shutdown.
+# 2025-12-06  v0.4.24 b90: New eye types: CAT (vertical slit pupils that dilate with intensity), HYPNO (rotating spiral, speed↑ with intensity), ANIME (large kawaii eyes with sparkles).
+# 2025-12-06  v0.4.25 b91: Eye tweaks: CAT pupil starts wider, goes full round at max intensity; stable radial fiber seed. HYPNO uses black/color for deeper contrast.
+# 2025-12-06  v0.4.26 b92: Eye tweaks: CAT pupil max size uses major axis (full tall circle). HYPNO background now subtle dark color (~20% of spiral color) instead of pure black.
+# 2025-12-06  v0.4.27 b93: MARS menu system: new MarsMenu.py replaces legacy GUIMenu. Tabbed interface (Eyes/Gait/Posture/Info/System); DPAD navigates, LB/RB switch tabs, A selects, B closes, Start toggles. Safety gate: menu only opens when robot disabled & not in motion. Touch E-STOP still active.
+# 2025-12-07  v0.4.28 b94: Menu UX: touch debouncing (single value change per touch), visual scroll bar for multi-page menus, larger fonts/touch targets, fixed touch coordinate rotation, immediate display refresh after input.
+# 2025-12-07  v0.4.29 b95: Menu fixes: use _marsMenu.touched() for proper debouncing (was using old menu), wider scroll bar (20px track, 25px min thumb) for fat fingers.
+# 2025-12-07  v0.4.30 b96: Menu touch fix: touched() now returns current state (not debounced), debouncing moved to handle_touch() for value adjustments only. Moved value arrows left to avoid scroll bar overlap.
+# 2025-12-07  v0.4.31 b97: Functional scroll bar: Tap above/below thumb scrolls by page. Widened scroll bar to 30px for easier touch.
+# 2025-12-07  v0.4.32 b98: Added X close button in top-right corner to close menu via touch.
+# 2025-12-07  v0.4.33 b99: LCARS theme: Star Trek inspired menu theme with pill-shaped tabs, orange/peach/lavender palette. Switchable via System > Theme.
+# 2025-12-07  v0.4.34 b100: LCARS improvements: Fixed L-bracket curve direction, smaller tabs to fit screen, 4 color palettes (Classic, Nemesis, LwrDecks, PADD).
+# 2025-12-07  v0.4.35 b101: Menu/eye settings saved to config: Theme, Palette, Eye V Center. Added V Center to Eyes menu for vertical eye position.
+# 2025-12-07  v0.4.36 b102: LCARS design guidelines applied: thick-to-thin frame transitions, proper swept corners, rounded caps, consistent spacing grid, 3 font sizes.
+# 2025-12-07  v0.4.37 b103: LCARS fix: Tabs now start after left frame bar (x=14), vertical bar extends full height for continuous frame.
+# 2025-12-07  v0.4.38 b104: LCARS frame: Added bottom swept corner, vertical bar now spans between top and bottom sweeps only.
+# 2025-12-07  v0.4.39 b105: LCARS touch fix: Tab touch zones now match LCARS tab positions (start_y=32, height=22, gap=3).
+# 2025-12-07  v0.4.40 b106: LCARS color variety: frame elements, tabs, items use distinct palette colors; first tap to wake display is now ignored.
+# 2025-12-07  v0.4.41 b107: First-tap fix: properly tracks finger lift after wake before allowing subsequent touches to be processed.
+# 2025-12-07  v0.4.42 b108: First-tap fix v2: simplified to counter-based approach - ignore touches until finger lifts after wake.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.4.7"
+CONTROLLER_VERSION = "0.4.42"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 72
+CONTROLLER_BUILD = 108
 #----------------------------------------------------------------------------------------------------------------------
-# Debug logging for strafe
-STRAFE_DEBUG_LOG = "/tmp/strafe_debug.log"
+# Telemetry index constants (S1 schema)
+# These named constants prevent magic numbers and make schema changes explicit.
+#----------------------------------------------------------------------------------------------------------------------
+IDX_LOOP_US = 0          # S1[0]: Teensy loop period in microseconds
+IDX_BATTERY_V = 1        # S1[1]: Battery voltage
+IDX_CURRENT_A = 2        # S1[2]: Current draw (amps)
+IDX_PITCH_DEG = 3        # S1[3]: IMU pitch angle
+IDX_ROLL_DEG = 4         # S1[4]: IMU roll angle
+IDX_YAW_DEG = 5          # S1[5]: IMU yaw angle
+IDX_GAIT = 6             # S1[6]: Current gait mode (0-9)
+IDX_MODE = 7             # S1[7]: Operational mode
+IDX_SAFETY = 8           # S1[8]: Safety status flags
+IDX_ROBOT_ENABLED = 9    # S1[9]: Robot enable flag (1.0 = enabled, 0.0 = disabled)
 #----------------------------------------------------------------------------------------------------------------------
 #    Import all required libraries
 #----------------------------------------------------------------------------------------------------------------------
@@ -129,12 +175,18 @@ from SimpleEyes import SimpleEyes as SimpleEyes, EYE_SHAPE, BLINKSTATE
 # import the menu library
 from Menu import TextMenuImage
 from GUIMenu import GUIMenu
+from MarsMenu import MarsMenu, MenuCategory, MenuItem
 
 #import the steering mode enum
 from SteeringMode import SteeringMode
 
 # import the gait engine
-from gait_engine import GaitEngine, TripodGait, StationaryPattern, GaitParams
+from gait_engine import (GaitEngine, TripodGait, WaveGait, RippleGait, 
+                         StationaryPattern, GaitParams, GaitTransition)
+
+# Gait type cycling order (RB button)
+GAIT_TYPES = [TripodGait, WaveGait, RippleGait, StationaryPattern]
+GAIT_NAMES = ["Tripod", "Wave", "Ripple", "Stationary"]
 
 # import the LCD library and related graphics libraries
 # sys.path.append("..")
@@ -162,7 +214,8 @@ def get_font(size: int):
             f = ImageFont.truetype(FONT_PATH, key)
             _font_cache[key] = f
         return f
-    except Exception:
+    except (OSError, IOError):
+        # Font file missing or unreadable - use default
         return ImageFont.load_default()
 
 
@@ -271,8 +324,8 @@ class Controller:
             inst.lastS1MonoTime = _lastS1MonoTime
             inst.telemSyncActive = _telemSyncActive
             return inst
-        except Exception:
-            # Safe fallback; do not disrupt current runtime
+        except (NameError, AttributeError) as e:
+            # Globals not yet defined during early init; fallback to empty
             return cls()
 
     def connect_teensy(self, port_override=None, baud_override=None):
@@ -335,7 +388,7 @@ class Controller:
         try:
             if self.eyes.update() or self.forceDisplayUpdate:
                 telemetry_stale = (self.teensy is not None and self.lastTelemetryTime is None)
-                robot_enabled = (self.state[9] == 1.0) if len(self.state) > 9 else True
+                robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if len(self.state) > IDX_ROBOT_ENABLED else True
                 UpdateDisplay(self.disp, self.eyes.display_image, self.menu._image, 
                             self.servo, self.legs, self.state, self.mirror, self.menuState,
                             teensy_connected=(self.teensy is not None),
@@ -344,8 +397,10 @@ class Controller:
                             robot_enabled=robot_enabled)
                 self.forceDisplayUpdate = False
                 return True
-        except Exception:
-            pass
+        except (AttributeError, TypeError) as e:
+            # Display/eye object not ready or state mismatch - log if verbose
+            if self.verbose:
+                print(f"Display update error: {e}", end="\r\n")
         return False
 
     def poll_teensy(self):
@@ -414,9 +469,10 @@ class Controller:
                         processTelemS4(elements, self.legs)
                         self.lastTelemetryTime = time.time()
                         self.telemetryRetryDeadline = None
-        except Exception:
-            # Non-fatal parsing error; retain robustness
-            pass
+        except (ValueError, IndexError) as e:
+            # Malformed telemetry line - skip but log in verbose mode
+            if self.verbose:
+                print(f"Telemetry parse error: {e}", end="\r\n")
         return teensyData
 
     def _updateGaitHeading(self):
@@ -446,30 +502,36 @@ class Controller:
     def poll_gamepad(self):
         """Process pending gamepad events, updating instance state and issuing commands.
         Returns count of processed events or None if controller absent."""
-        global _gaitActive, _gaitEngine, _autoDisableAt
+        global _gaitActive, _gaitEngine, _autoDisableAt, _gaitTransition
         if self.controller is None:
             return None
         processed = 0
         try:
             events = self.controller.read()
             for event in events:
+                print(event, end="\r\n")  # Debug print of raw event
                 if event.type == 1:  # button
                     if event.code == 158 and event.value == 1:  # mirror toggle
                         if self.verbose:
                             print("\nscreen mirror button pressed", end="\r\n")
                         self.mirror = not self.mirror
                         self.forceDisplayUpdate = True
-                    elif event.code == 315 and event.value == 1:  # menu toggle
+                    elif event.code == 315 and event.value == 1:  # Start button - MARS menu toggle
                         if self.verbose:
-                            print("\nmenu button pressed", end="\r\n")
-                        if self.menuState is None:
-                            self.menuState = "data"
-                        elif self.menuState == "data":
-                            self.menuState = "settings"
-                        elif self.menuState == "settings":
-                            self.menuState = None
-                        self.menuVisible = self.menuState is not None
-                        self.forceDisplayUpdate = True
+                            print("\nStart button pressed (menu)", end="\r\n")
+                        # Only allow menu when robot is disabled and not in motion
+                        robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if len(self.state) > IDX_ROBOT_ENABLED else False
+                        if _marsMenu.visible:
+                            # Always allow closing menu
+                            _marsMenu.hide()
+                            self.forceDisplayUpdate = True
+                        elif not robot_enabled and not _gaitActive:
+                            # Safe to open menu
+                            _marsMenu.show()
+                            self.forceDisplayUpdate = True
+                        else:
+                            if self.verbose:
+                                print("  Menu blocked: disable robot first", end="\r\n")
                     elif event.code == 172 and event.value == 1:  # power
                         if self.verbose:
                             print("\npower button pressed", end="\r\n")
@@ -478,15 +540,25 @@ class Controller:
                         if self.verbose:
                             print(f"\nXbox guide/power button pressed (code {event.code})", end="\r\n")
                         self.requestExit = True
-                    elif event.code == 304 and event.value == 1:  # A stand
+                    elif event.code == 304 and event.value == 1:  # A button
                         if self.verbose:
-                            print("\nA button pressed (Stand)", end="\r\n")
-                        if self.teensy is not None:
+                            print("\nA button pressed", end="\r\n")
+                        if _marsMenu.visible:
+                            # Select/activate current menu item
+                            _marsMenu.select()
+                            self.forceDisplayUpdate = True
+                        elif self.teensy is not None:
+                            # Normal A button behavior: Stand
                             apply_posture(b'STAND', auto_disable_s=4.0)
-                    elif event.code == 305 and event.value == 1:  # B home
+                    elif event.code == 305 and event.value == 1:  # B button
                         if self.verbose:
-                            print("\nB button pressed (Home)", end="\r\n")
-                        if self.teensy is not None:
+                            print("\nB button pressed", end="\r\n")
+                        if _marsMenu.visible:
+                            # Close menu
+                            _marsMenu.hide()
+                            self.forceDisplayUpdate = True
+                        elif self.teensy is not None:
+                            # Normal B button behavior: Home
                             apply_posture(b'HOME', auto_disable_s=4.0)
                     elif event.code == 308 and event.value == 1:  # X toggle test/idle (BTN_WEST)
                         if self.verbose:
@@ -532,17 +604,19 @@ class Controller:
                             else:
                                 if self.verbose:
                                     print(f"\nGait settings applied (save failed): width={self._gaitWidthMm:.0f}mm, lift={self._gaitLiftMm:.0f}mm", end="\r\n")
-                    elif event.code == 310 and event.value == 1:  # LB - toggle gait mode
-                        if not _gaitActive:
+                    elif event.code == 310 and event.value == 1:  # LB - prev tab or toggle gait
+                        if _marsMenu.visible:
+                            _marsMenu.handle_button('LB')
+                            self.forceDisplayUpdate = True
+                        elif not _gaitActive:
                             # Start gait - cancel any pending auto-disable first
                             _autoDisableAt = None
                             self.autoDisableAt = None
                             # Switch Teensy to IDLE mode (stop any built-in gait)
                             send_cmd(b'MODE IDLE', force=True)
                             # Enable robot if needed
-                            if self.state[9] != 1.0:
-                                send_cmd(b'LEG ALL ENABLE', force=True)
-                                send_cmd(b'ENABLE', force=True)
+                            if self.state[IDX_ROBOT_ENABLED] != 1.0:
+                                ensure_enabled()
                             # Create tripod gait with config params - speed starts at 0 (step in place)
                             params = GaitParams(
                                 cycle_ms=_gaitCycleMs,
@@ -578,20 +652,36 @@ class Controller:
                             self.autoDisableAt = _autoDisableAt
                             if self.verbose:
                                 print("\nLB: Gait engine STOPPED", end="\r\n")
-                    elif event.code == 311 and event.value == 1:  # RB - cycle gait type
-                        if _gaitActive and _gaitEngine is not None:
-                            # Cycle between gait types (for now just tripod/stationary)
+                    elif event.code == 311 and event.value == 1:  # RB - next tab or cycle gait
+                        if _marsMenu.visible:
+                            _marsMenu.handle_button('RB')
+                            self.forceDisplayUpdate = True
+                        elif _gaitActive and _gaitEngine is not None and not _gaitTransition.is_active():
+                            # Cycle through gait types: Tripod -> Wave -> Ripple -> Stationary -> Tripod
+                            # Uses phase-locked transition for smooth switching
                             params = _gaitEngine.params
-                            if isinstance(_gaitEngine, TripodGait):
-                                _gaitEngine = StationaryPattern(params, radius_mm=15.0, period_ms=2000)
-                                _gaitEngine.start()
-                                if self.verbose:
-                                    print("\nRB: Switched to stationary pattern", end="\r\n")
+                            current_type = type(_gaitEngine)
+                            try:
+                                current_idx = GAIT_TYPES.index(current_type)
+                            except ValueError:
+                                current_idx = -1
+                            next_idx = (current_idx + 1) % len(GAIT_TYPES)
+                            next_type = GAIT_TYPES[next_idx]
+                            next_name = GAIT_NAMES[next_idx]
+                            
+                            # Create new gait engine (StationaryPattern needs extra args)
+                            if next_type == StationaryPattern:
+                                pending_gait = next_type(params, radius_mm=15.0, period_ms=2000)
                             else:
-                                _gaitEngine = TripodGait(params)
-                                _gaitEngine.start()
+                                pending_gait = next_type(params)
+                            
+                            # Request phase-locked transition
+                            if _gaitTransition.request_transition(_gaitEngine, pending_gait):
                                 if self.verbose:
-                                    print("\nRB: Switched to tripod gait", end="\r\n")
+                                    print(f"\nRB: Transitioning to {next_name} gait (waiting for phase boundary)", end="\r\n")
+                            else:
+                                if self.verbose:
+                                    print(f"\nRB: Transition already in progress", end="\r\n")
                 elif event.type == 3:  # analog
                     # Debug: show all analog events when left stick is held
                     if self._leftStickHeld and self.verbose:
@@ -626,7 +716,7 @@ class Controller:
                         
                         # Eye control (always active, but skip display update during gait to reduce overhead)
                         value = max(0, speed)  # Only positive values (forward/up)
-                        self.eyes.eyelid_percent = int(value * 0.755)
+                        self.eyes.eyelid_percent = value * 75.0  # 0 to 75 range for intensity
                         self.eyes.eyelid_angle = value * 35.0
                         self.eyes.eye_size = (25, 45 - int(value * 10))
                         if not _gaitActive:
@@ -654,8 +744,6 @@ class Controller:
                                 strafe = 0.0
                             # Map to heading angle: -90° (left) to +90° (right), 0° = forward
                             _gaitEngine.params.heading_deg = strafe * 90.0
-                            with open(STRAFE_DEBUG_LOG, 'a') as f:
-                                f.write(f"Code3: val={event.value} strafe={strafe:.2f} heading={_gaitEngine.params.heading_deg:.1f} speed={_gaitEngine.params.speed_scale:.2f}\n")
                         else:
                             # Eye control when gait not active
                             scaledValue = ((32768.0 - float(event.value)) / 32768.0)
@@ -667,8 +755,21 @@ class Controller:
                         if self.verbose:
                             print(f"Right Stick X: {event.value}", end="\r\n")
                     elif event.code == 5:  # right stick Y
-                        # Currently unused; reserved for future functionality
-                        pass
+                        # Only process if value indicates joystick (not trigger which shares code on some controllers)
+                        if event.value > 1023:
+                            # Walking turn control: right stick Y for turn rate
+                            # Joystick range: 0-65535, center=32768, up=0, down=65535
+                            # Normalize to -1.0 (up/CCW) to +1.0 (down/CW)
+                            turn_input = (event.value - 32768.0) / 32768.0
+                            if abs(turn_input) < 0.1:  # 10% deadzone
+                                turn_input = 0.0
+                            
+                            if _gaitActive and _gaitEngine is not None:
+                                # Map to turn rate: ±60 deg/s max turn rate
+                                # Positive = clockwise (right turn), negative = CCW (left turn)
+                                _gaitEngine.params.turn_rate_deg_s = turn_input * 60.0
+                                if self.verbose and abs(turn_input) > 0.1:
+                                    print(f"Turn rate: {turn_input * 60.0:.1f} deg/s", end="\r\n")
                     elif event.code == 10:  # Left trigger (LT)
                         # Trigger range: 0-1023
                         if self._leftStickHeld:
@@ -690,27 +791,36 @@ class Controller:
                             if self.verbose:
                                 print(f"Lift height: {self._gaitLiftMm:.0f}mm", end="\r\n")
                     elif event.code == 16 and event.value == 1:  # dpad right
-                        if self.menuState == "settings":
-                            self.menu.contract(self.menu._selected_path)
-                        else:
-                            self.eyes.crt_mode = not self.eyes.crt_mode
-                            self.eyes.update(force_update=True)
-                            self.forceDisplayUpdate = True
                         if self.verbose:
                             print(f"DPAD RIGHT: {event.value}", end="\r\n")
-                    elif event.code == 16 and event.value == -1:  # dpad left
-                        if self.menuState == "settings":
+                        if _marsMenu.visible:
+                            _marsMenu.nav_right()
+                            self.forceDisplayUpdate = True
+                        elif self.menuState == "settings":
                             self.menu.contract(self.menu._selected_path)
                         else:
                             self.eyes.crt_mode = not self.eyes.crt_mode
                             self.eyes.update(force_update=True)
                             self.forceDisplayUpdate = True
+                    elif event.code == 16 and event.value == -1:  # dpad left
                         if self.verbose:
                             print(f"DPAD LEFT: {event.value}", end="\r\n")
+                        if _marsMenu.visible:
+                            _marsMenu.nav_left()
+                            self.forceDisplayUpdate = True
+                        elif self.menuState == "settings":
+                            self.menu.contract(self.menu._selected_path)
+                        else:
+                            self.eyes.crt_mode = not self.eyes.crt_mode
+                            self.eyes.update(force_update=True)
+                            self.forceDisplayUpdate = True
                     elif event.code == 17 and event.value == -1:  # dpad up
                         if self.verbose:
                             print(f"DPAD UP: {event.value}", end="\r\n")
-                        if self.menuState == "settings":
+                        if _marsMenu.visible:
+                            _marsMenu.nav_up()
+                            self.forceDisplayUpdate = True
+                        elif self.menuState == "settings":
                             self.menu.contract(self.menu._selected_path)
                             self.menu.move_up()
                             self.menu.select()
@@ -718,28 +828,39 @@ class Controller:
                         else:
                             self.eyes.left_shape -= 1
                             if self.eyes.left_shape < EYE_SHAPE.ELLIPSE:
-                                self.eyes.left_shape = EYE_SHAPE.X
+                                self.eyes.left_shape = EYE_SHAPE.ANIME
                             self.eyes.right_shape -= 1
                             if self.eyes.right_shape < EYE_SHAPE.ELLIPSE:
-                                self.eyes.right_shape = EYE_SHAPE.X
+                                self.eyes.right_shape = EYE_SHAPE.ANIME
                             self.eyes.eye_color = _eyeColors[self.eyes.left_shape]
+                            # Cycle human eye color when on human eyes
+                            if self.eyes.left_shape == EYE_SHAPE.HUMAN:
+                                self.eyes.human_eye_color_idx = (self.eyes.human_eye_color_idx - 1) % len(self.eyes.human_eye_colors)
                             self.eyes.update(force_update=True)
                             self.forceDisplayUpdate = True
+                            save_eye_shape(self.eyes.left_shape)
                     elif event.code == 17 and event.value == 1:  # dpad down
                         if self.verbose:
                             print(f"DPAD DOWN: {event.value}", end="\r\n")
-                        if self.menuState == "settings":
+                        if _marsMenu.visible:
+                            _marsMenu.nav_down()
+                            self.forceDisplayUpdate = True
+                        elif self.menuState == "settings":
                             self.menu.contract(self.menu._selected_path)
                         else:
                             self.eyes.left_shape += 1
-                            if self.eyes.left_shape > EYE_SHAPE.X:
+                            if self.eyes.left_shape > EYE_SHAPE.ANIME:
                                 self.eyes.left_shape = EYE_SHAPE.ELLIPSE
                             self.eyes.right_shape += 1
-                            if self.eyes.right_shape > EYE_SHAPE.X:
+                            if self.eyes.right_shape > EYE_SHAPE.ANIME:
                                 self.eyes.right_shape = EYE_SHAPE.ELLIPSE
                             self.eyes.eye_color = _eyeColors[self.eyes.left_shape]
+                            # Cycle human eye color when on human eyes
+                            if self.eyes.left_shape == EYE_SHAPE.HUMAN:
+                                self.eyes.human_eye_color_idx = (self.eyes.human_eye_color_idx + 1) % len(self.eyes.human_eye_colors)
                             self.eyes.update(force_update=True)
                             self.forceDisplayUpdate = True
+                            save_eye_shape(self.eyes.left_shape)
                     else:
                         # Debug: catch all unhandled button/key events
                         if self.verbose and event.type == 1 and event.value == 1:
@@ -780,8 +901,9 @@ class Controller:
                 send_cmd(b'Y 1', force=True)
                 self.telemetryRetryCount = 1
                 self.telemetryRetryDeadline = None
-        except Exception:
-            pass
+        except serial.SerialException as e:
+            if self.verbose:
+                print(f"Housekeeping serial error: {e}", end="\r\n")
         return None
 # find_teensy scnas the available serial ports and looks for a Teensy device.
 # return: serial port device or none if not found
@@ -922,7 +1044,7 @@ def poll_keyboard():
         init_keyboard()
     try:
         return _stdscr.getch()
-    except Exception:
+    except curses.error:
         return -1
 
 # Legacy getkey function (deprecated - use poll_keyboard instead)
@@ -977,11 +1099,15 @@ def drawLogo(disp):
     # Show the image on the display
     UpdateDisplay(disp, image, None)
 
+# Frame change detection for display optimization
+_last_frame_hash = None
+
 def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirror=False, menuState=None, teensy_connected=True, controller_connected=True, telemetry_stale=False, robot_enabled=True):
     """Updates the display with the given image.
     
     Optimizations applied:
-    - Uses numpy transpose (rot90) instead of PIL rotate for ~3x speedup
+    - Frame change detection: skips SPI write if frame unchanged (via hash)
+    - Combined rotation + RGB565: single-pass show_image_rotated()
     - Avoids unnecessary copy when no overlay drawing needed
     
     Args:
@@ -1009,10 +1135,10 @@ def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirr
         overlay_texts.append(("NO TELEMETRY", "ORANGE"))
     if not controller_connected:
         overlay_texts.append(("NO CONTROLLER", "RED"))
-    if not robot_enabled and teensy_connected and not telemetry_stale:
-        # Only show disabled if we have valid connection/telemetry
-        overlay_texts.append(("DISABLED", "YELLOW"))
     
+    # DISABLED is shown separately at bottom
+    show_disabled = not robot_enabled and teensy_connected and not telemetry_stale
+
     if overlay_texts:
         draw = ImageDraw.Draw(imageCopy)
         font = get_font(28)
@@ -1032,6 +1158,18 @@ def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirr
             # Draw text in color
             draw.text((x, y), text, fill=color, font=font)
     
+    # Draw DISABLED at bottom of screen
+    if show_disabled:
+        draw = ImageDraw.Draw(imageCopy)
+        font = get_font(28)
+        text = "DISABLED"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        x = (disp.height - text_width) // 2
+        y = disp.width - 40  # Near bottom
+        draw.text((x + 2, y + 2), text, fill="BLACK", font=font)
+        draw.text((x, y), text, fill="YELLOW", font=font)
+    
     # add in the leg/servo visualization
     if servo is not None:
         # create a draw object to draw on the image
@@ -1040,9 +1178,9 @@ def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirr
         if _menuState == "data":
             # draw the gait text on the image
             if state is not None:
-                gait = getGait(int(state[6]))
-                # S1 index 9: enable flag (1=enabled, 0=disabled)
-                if state[9] == 0:
+                gait = getGait(int(state[IDX_GAIT]))
+                # Check robot enable flag
+                if state[IDX_ROBOT_ENABLED] == 0:
                     gait = "DISABLED"
                 font24 = get_font(24)
                 textSize = draw.textbbox(((disp.height / 2), disp.width - 24), gait, font=font24, anchor="mt")
@@ -1084,6 +1222,11 @@ def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirr
                 draw.rectangle((left,top, left + dir*width, top + height), outline=borderColor, width=1)
         elif _menuState == "settings":
             imageCopy = Image.blend(imageCopy, menu, 0.6)  # blend the menu image onto the display image
+    
+    # MARS menu overlay (takes priority over old menu system)
+    if _marsMenu is not None and _marsMenu.visible:
+        _marsMenu.render()
+        imageCopy = _marsMenu.image.copy()
     if mirror:
         image2 = np.array(imageCopy)                        
         height, width = image2.shape[:2]
@@ -1093,16 +1236,18 @@ def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirr
     else:
         cv.destroyAllWindows()
     
-    # Use numpy rot90 instead of PIL rotate - significantly faster for 90° rotations
-    # rot90 with k=3 is equivalent to rotate(270)
-    img_array = np.array(imageCopy)
-    img_rotated = np.rot90(img_array, k=3)
-    rotated_image = Image.fromarray(img_rotated)
+    # Frame change detection: compute fast hash and skip SPI write if unchanged
+    # Uses tobytes() hash which is very fast for numpy arrays
+    global _last_frame_hash
+    img_array = np.asarray(imageCopy)
+    # Sample every 16th pixel for fast approximate hash (320*170/16 = ~3400 samples)
+    frame_hash = hash(img_array[::4, ::4, :].tobytes())
     
-    # Use optimized show_image_fast() which minimizes GIL contention:
-    # - Uses numpy.tobytes() instead of .tolist() (stays in C, no Python list)
-    # - Uses writebytes2() for single large SPI transfer (releases GIL)
-    disp.show_image_fast(rotated_image)
+    if frame_hash != _last_frame_hash:
+        _last_frame_hash = frame_hash
+        # Use combined rotation + RGB565 conversion for optimal performance
+        # show_image_rotated does rot90 + RGB565 in one pass, avoiding intermediate PIL image
+        disp.show_image_rotated(imageCopy, rotation_k=3)
 
 #----------------------------------------------------------------------------------------------------------------------
 # DisplayThread: Background thread for eye animation and LCD updates
@@ -1282,9 +1427,9 @@ class DisplayThread(threading.Thread):
                                  telemetry_stale=telemetry_stale,
                                  robot_enabled=robot_enabled)
                 
-            except Exception as e:
-                # Don't crash the thread on display errors
-                pass
+            except (AttributeError, TypeError, OSError) as e:
+                # Display/SPI errors - log but don't crash thread
+                pass  # Thread should continue; errors are transient
             
             # Maintain target frame rate
             next_tick += self.period_s
@@ -1397,6 +1542,7 @@ _mirrorDisplay = False # flag to mirror the display to the console
 _forceDisplayUpdate = False # flag to force the display update
 _displayBrightness = 100 # initial brightness of the display
 _menuState = None
+_marsMenu = None  # MARS menu instance (created after display init)
 _steeringMode = SteeringMode.OMNI  # initial steering mode
 _telemetryStartedByScript = False   # whether we issued 'Y 1'
 _lastTelemetryTime = None           # timestamp of last received telemetry segment
@@ -1425,6 +1571,7 @@ _gaitStrafeInput = 0.0  # Left stick X: -1 (left) to +1 (right)
 _gaitSpeedInput = 0.0   # Left stick Y: -1 (back) to +1 (forward)
 _gaitTickCount = 0      # Tick counter for rate limiting FEET sends
 _gaitSendDivisor = 3    # Send FEET every N ticks (2 = 83Hz, 3 = 55Hz)
+_gaitTransition = GaitTransition(blend_ms=500)  # Transition manager for smooth gait switching
 
 # create the Teensy serial object
 _teensy = None
@@ -1474,6 +1621,30 @@ _eyeSizeX = 25
 _eyeSizeY = 45
 _eyeLookRangeX = 20.0  # Pixels of eye offset at max joystick X input
 _eyeLookRangeY = 10.0  # Pixels of eye offset at max joystick Y input
+_humanEyeSpacingPct = 0.25  # Human eye center X as fraction of screen width from each edge
+_humanEyeSize = 33  # Human eye iris radius in pixels
+_humanEyeColorIdx = 0  # Human eye color index (0=blue, 1=green, 2=hazel, 3=brown, 4=dark brown)
+_eyeShape = 2  # Default eye shape (2 = ROUNDRECTANGLE)
+# Eye color palettes (R,G,B tuples) - one color per eye shape
+# Order: ELLIPSE, RECTANGLE, ROUNDRECTANGLE, X, SPIDER, HUMAN, CAT, HYPNO, ANIME
+_eyeColorEllipse = (255, 80, 20)      # Orange
+_eyeColorRectangle = (255, 255, 255)  # White
+_eyeColorRoundRect = (10, 120, 255)   # Blue
+_eyeColorX = (255, 0, 0)              # Red
+_eyeColorSpider = (50, 220, 50)       # Green
+_eyeColorHuman = (70, 130, 180)       # Steel blue (fallback, human uses palette)
+_eyeColorCat = (255, 180, 0)          # Amber (cat eyes)
+_eyeColorHypno = (180, 0, 255)        # Purple (hypno spiral)
+_eyeColorAnime = (100, 180, 255)      # Light blue (anime style)
+# Human eye color palette (5 options)
+_humanEyeColorBlue = (70, 130, 180)       # Blue (steel blue)
+_humanEyeColorGreen = (60, 140, 80)       # Green
+_humanEyeColorHazel = (140, 110, 60)      # Hazel (golden brown-green)
+_humanEyeColorBrown = (100, 60, 30)       # Brown
+_humanEyeColorDarkBrown = (50, 30, 20)    # Dark brown
+# Menu settings (saved to config)
+_menuTheme = 0      # 0=MARS, 1=LCARS
+_menuPalette = 0    # LCARS palette: 0=Classic, 1=Nemesis, 2=LowerDecks, 3=PADD
 # Display thread settings
 _displayThreadEnabled = True
 _displayThreadHz = 15.0
@@ -1503,6 +1674,10 @@ try:
         _displayThreadEnabled = _cfg.getboolean('display', 'thread_enabled', fallback=_displayThreadEnabled)
         _displayThreadHz = _cfg.getfloat('display', 'thread_hz', fallback=_displayThreadHz)
         _blinkFrameDivisor = _cfg.getint('display', 'blink_frame_divisor', fallback=_blinkFrameDivisor)
+    # Load menu settings
+    if 'menu' in _cfg:
+        _menuTheme = _cfg.getint('menu', 'theme', fallback=_menuTheme)
+        _menuPalette = _cfg.getint('menu', 'palette', fallback=_menuPalette)
     # Load saved gait parameters
     _savedGaitWidthMm = 100.0
     _savedGaitLiftMm = 60.0
@@ -1542,7 +1717,37 @@ try:
         _eyeSizeY = _cfg.getint('eyes', 'size_y', fallback=_eyeSizeY)
         _eyeLookRangeX = _cfg.getfloat('eyes', 'look_range_x', fallback=_eyeLookRangeX)
         _eyeLookRangeY = _cfg.getfloat('eyes', 'look_range_y', fallback=_eyeLookRangeY)
-except Exception:
+        _humanEyeSpacingPct = _cfg.getfloat('eyes', 'human_eye_spacing_pct', fallback=_humanEyeSpacingPct)
+        _humanEyeSize = _cfg.getint('eyes', 'human_eye_size', fallback=_humanEyeSize)
+        _humanEyeColorIdx = _cfg.getint('eyes', 'human_eye_color', fallback=_humanEyeColorIdx)
+        _eyeShape = _cfg.getint('eyes', 'shape', fallback=_eyeShape)
+        # Helper to parse R,G,B string to tuple
+        def parse_rgb(s, default):
+            try:
+                parts = [int(x.strip()) for x in s.split(',')]
+                if len(parts) == 3:
+                    return tuple(max(0, min(255, p)) for p in parts)
+            except:
+                pass
+            return default
+        # Load eye color palette
+        _eyeColorEllipse = parse_rgb(_cfg.get('eyes', 'color_ellipse', fallback='255,80,20'), _eyeColorEllipse)
+        _eyeColorRectangle = parse_rgb(_cfg.get('eyes', 'color_rectangle', fallback='255,255,255'), _eyeColorRectangle)
+        _eyeColorRoundRect = parse_rgb(_cfg.get('eyes', 'color_roundrect', fallback='10,120,255'), _eyeColorRoundRect)
+        _eyeColorX = parse_rgb(_cfg.get('eyes', 'color_x', fallback='255,0,0'), _eyeColorX)
+        _eyeColorSpider = parse_rgb(_cfg.get('eyes', 'color_spider', fallback='50,220,50'), _eyeColorSpider)
+        _eyeColorHuman = parse_rgb(_cfg.get('eyes', 'color_human', fallback='70,130,180'), _eyeColorHuman)
+        _eyeColorCat = parse_rgb(_cfg.get('eyes', 'color_cat', fallback='255,180,0'), _eyeColorCat)
+        _eyeColorHypno = parse_rgb(_cfg.get('eyes', 'color_hypno', fallback='180,0,255'), _eyeColorHypno)
+        _eyeColorAnime = parse_rgb(_cfg.get('eyes', 'color_anime', fallback='100,180,255'), _eyeColorAnime)
+        # Load human eye color palette
+        _humanEyeColorBlue = parse_rgb(_cfg.get('eyes', 'human_color_blue', fallback='70,130,180'), _humanEyeColorBlue)
+        _humanEyeColorGreen = parse_rgb(_cfg.get('eyes', 'human_color_green', fallback='60,140,80'), _humanEyeColorGreen)
+        _humanEyeColorHazel = parse_rgb(_cfg.get('eyes', 'human_color_hazel', fallback='140,110,60'), _humanEyeColorHazel)
+        _humanEyeColorBrown = parse_rgb(_cfg.get('eyes', 'human_color_brown', fallback='100,60,30'), _humanEyeColorBrown)
+        _humanEyeColorDarkBrown = parse_rgb(_cfg.get('eyes', 'human_color_darkbrown', fallback='50,30,20'), _humanEyeColorDarkBrown)
+except (configparser.Error, ValueError, KeyError) as e:
+    print(f"Config load error (using defaults): {e}", end="\r\n")
     _savedGaitWidthMm = 100.0
     _savedGaitLiftMm = 60.0
     _gaitWidthMinMm = 50.0
@@ -1563,7 +1768,80 @@ def save_gait_settings(width_mm: float, lift_mm: float) -> bool:
         with open(_cfg_path, 'w') as f:
             _cfg.write(f)
         return True
-    except Exception:
+    except (IOError, OSError, configparser.Error) as e:
+        print(f"Failed to save gait settings: {e}", end="\r\n")
+        return False
+
+def save_eye_shape(shape: int) -> bool:
+    """Save eye shape to controller.ini [eyes] section."""
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'eyes' not in _cfg:
+            _cfg.add_section('eyes')
+        _cfg.set('eyes', 'shape', str(shape))
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error) as e:
+        print(f"Failed to save eye shape: {e}", end="\r\n")
+        return False
+
+def save_human_eye_settings(size: int = None, color_idx: int = None) -> bool:
+    """Save human eye settings to controller.ini [eyes] section."""
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'eyes' not in _cfg:
+            _cfg.add_section('eyes')
+        if size is not None:
+            _cfg.set('eyes', 'human_eye_size', str(size))
+        if color_idx is not None:
+            _cfg.set('eyes', 'human_eye_color', str(color_idx))
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error) as e:
+        print(f"Failed to save human eye settings: {e}", end="\r\n")
+        return False
+
+def save_eye_center_offset(offset: int) -> bool:
+    """Save eye vertical center offset to controller.ini [eyes] section."""
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'eyes' not in _cfg:
+            _cfg.add_section('eyes')
+        _cfg.set('eyes', 'center_offset', str(offset))
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error) as e:
+        print(f"Failed to save eye center offset: {e}", end="\r\n")
+        return False
+
+def save_menu_settings(theme: int = None, palette: int = None) -> bool:
+    """Save menu theme and palette to controller.ini [menu] section."""
+    global _cfg, _cfg_path, _menuTheme, _menuPalette
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'menu' not in _cfg:
+            _cfg.add_section('menu')
+        if theme is not None:
+            _cfg.set('menu', 'theme', str(theme))
+            _menuTheme = theme
+        if palette is not None:
+            _cfg.set('menu', 'palette', str(palette))
+            _menuPalette = palette
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error) as e:
+        print(f"Failed to save menu settings: {e}", end="\r\n")
         return False
 
 # initialize the display and start logging to it
@@ -1589,25 +1867,157 @@ drawLogo(_disp)  # draw the logo on the display
 # initizlizxe the touch screen
 _touch = cst816d.cst816d()
 
-#create the menu object
+#create the menu object (legacy menu, kept for compatibility)
 _menu = GUIMenu(_touch)
+
+# Create new MARS menu system
+_marsMenu = MarsMenu(_touch)
 
 time.sleep(1) # take a short nap
 
 # create and initialize the SimpleEyes object
 _eyes = SimpleEyes((_backGroundImage.height, _backGroundImage.width), eye_color=(10,120,255))
-_eyeColors = [(255,80,20), (255,255,255), (10,120,255), (255,0,0)]
-_eyes.left_shape = EYE_SHAPE.ROUNDRECTANGLE
-_eyes.right_shape = EYE_SHAPE.ROUNDRECTANGLE
-_eyes.eye_color = _eyeColors[_eyes.left_shape]
+# Eye colors from config: ELLIPSE, RECTANGLE, ROUNDRECTANGLE, X, SPIDER, HUMAN, CAT, HYPNO, ANIME
+_eyeColors = [_eyeColorEllipse, _eyeColorRectangle, _eyeColorRoundRect, _eyeColorX, _eyeColorSpider, _eyeColorHuman, _eyeColorCat, _eyeColorHypno, _eyeColorAnime]
+# Human eye color palette from config
+_humanEyeColorPalette = [_humanEyeColorBlue, _humanEyeColorGreen, _humanEyeColorHazel, _humanEyeColorBrown, _humanEyeColorDarkBrown]
+_eyes.left_shape = _eyeShape
+_eyes.right_shape = _eyeShape
+_eyes.eye_color = _eyeColors[_eyes.left_shape] if _eyes.left_shape < len(_eyeColors) else _eyeColors[0]
+_eyes.cat_eye_color = _eyeColorCat
+_eyes.hypno_color = _eyeColorHypno
+_eyes.anime_eye_color = _eyeColorAnime
 _eyes.eye_size = (_eyeSizeX, _eyeSizeY)
 _eyes.rotation = _eyeRotation
 _eyes.eye_spacing_offset = _eyeSpacingOffset
 _eyes.eye_center_offset = _eyeCenterOffset
 _eyes.eyelid_angle = _eyeEyelidAngle
 _eyes.blink_percent_step = _eyeBlinkPercentStep
+_eyes.human_eye_spacing_pct = _humanEyeSpacingPct
+_eyes.human_eye_size = _humanEyeSize
+_eyes.human_eye_color_idx = _humanEyeColorIdx
+_eyes.human_eye_colors = _humanEyeColorPalette  # Pass loaded palette to SimpleEyes
 _eyes.update(force_update=True)  # force the initial update to draw the eyes
 UpdateDisplay(_disp, _eyes.display_image, _menu.image, _servo, _legs, _state, _mirrorDisplay, _menuState)  # display the eyes on the display
+
+# --- Setup MARS menu callbacks and sync initial values ---
+def _setup_mars_menu():
+    """Configure MARS menu callbacks and sync with current state."""
+    global _marsMenu, _eyes, _displayBrightness, _verbose, _mirrorDisplay
+    
+    # === EYES callbacks ===
+    def on_eye_style_change(val):
+        global _eyes, _eyeColors, _forceDisplayUpdate
+        _eyes.left_shape = val
+        _eyes.right_shape = val
+        _eyes.eye_color = _eyeColors[val] if val < len(_eyeColors) else _eyeColors[0]
+        _eyes.update(force_update=True)
+        _forceDisplayUpdate = True
+        save_eye_shape(val)
+    
+    def on_human_color_change(val):
+        global _eyes, _forceDisplayUpdate
+        _eyes.human_eye_color_idx = val
+        _eyes.update(force_update=True)
+        _forceDisplayUpdate = True
+    
+    def on_eye_size_change(val):
+        global _eyes, _forceDisplayUpdate
+        _eyes.human_eye_size = val
+        _eyes.update(force_update=True)
+        _forceDisplayUpdate = True
+    
+    def on_eye_spacing_change(val):
+        global _eyes, _forceDisplayUpdate
+        _eyes.human_eye_spacing_pct = val / 100.0
+        _eyes.update(force_update=True)
+        _forceDisplayUpdate = True
+    
+    def on_crt_change(val):
+        global _eyes, _forceDisplayUpdate
+        _eyes.crt_mode = (val == 1)
+        _eyes.update(force_update=True)
+        _forceDisplayUpdate = True
+    
+    def on_eye_vcenter_change(val):
+        global _eyes, _eyeCenterOffset, _forceDisplayUpdate
+        _eyeCenterOffset = val
+        _eyes.eye_center_offset = val
+        _eyes.update(force_update=True)
+        _forceDisplayUpdate = True
+        save_eye_center_offset(val)
+    
+    _marsMenu.set_callback(MenuCategory.EYES, "Style", "on_change", on_eye_style_change)
+    _marsMenu.set_callback(MenuCategory.EYES, "Human Color", "on_change", on_human_color_change)
+    _marsMenu.set_callback(MenuCategory.EYES, "Size", "on_change", on_eye_size_change)
+    _marsMenu.set_callback(MenuCategory.EYES, "V Center", "on_change", on_eye_vcenter_change)
+    _marsMenu.set_callback(MenuCategory.EYES, "Spacing", "on_change", on_eye_spacing_change)
+    _marsMenu.set_callback(MenuCategory.EYES, "CRT Effect", "on_change", on_crt_change)
+    
+    # === SYSTEM callbacks ===
+    def on_brightness_change(val):
+        global _disp, _displayBrightness
+        _displayBrightness = val
+        _disp.bl_DutyCycle(val)
+    
+    def on_verbose_change(val):
+        global _verbose
+        _verbose = (val == 1)
+    
+    def on_mirror_change(val):
+        global _mirrorDisplay, _forceDisplayUpdate
+        _mirrorDisplay = (val == 1)
+        _forceDisplayUpdate = True
+    
+    def on_theme_change(val):
+        global _marsMenu
+        _marsMenu.theme = val
+        save_menu_settings(theme=val)
+    
+    def on_palette_change(val):
+        global _marsMenu
+        _marsMenu.lcars_palette = val
+        save_menu_settings(palette=val)
+    
+    def on_save_all():
+        # Save current settings to config
+        save_eye_shape(_eyes.left_shape)
+        if _verbose:
+            print("Settings saved", end="\r\n")
+    
+    def on_shutdown():
+        global _run
+        _run = False
+        if _verbose:
+            print("Shutdown requested via menu", end="\r\n")
+    
+    _marsMenu.set_callback(MenuCategory.SYSTEM, "Theme", "on_change", on_theme_change)
+    _marsMenu.set_callback(MenuCategory.SYSTEM, "Palette", "on_change", on_palette_change)
+    _marsMenu.set_callback(MenuCategory.SYSTEM, "Brightness", "on_change", on_brightness_change)
+    _marsMenu.set_callback(MenuCategory.SYSTEM, "Verbose", "on_change", on_verbose_change)
+    _marsMenu.set_callback(MenuCategory.SYSTEM, "Mirror Display", "on_change", on_mirror_change)
+    _marsMenu.set_callback(MenuCategory.SYSTEM, "Save All", "on_select", on_save_all)
+    _marsMenu.set_callback(MenuCategory.SYSTEM, "Shutdown", "on_select", on_shutdown)
+    
+    # === Sync initial values ===
+    _marsMenu.set_value(MenuCategory.EYES, "Style", _eyes.left_shape)
+    _marsMenu.set_value(MenuCategory.EYES, "Human Color", _eyes.human_eye_color_idx)
+    _marsMenu.set_value(MenuCategory.EYES, "Size", _eyes.human_eye_size)
+    _marsMenu.set_value(MenuCategory.EYES, "V Center", _eyeCenterOffset)
+    _marsMenu.set_value(MenuCategory.EYES, "Spacing", int(_eyes.human_eye_spacing_pct * 100))
+    _marsMenu.set_value(MenuCategory.EYES, "CRT Effect", 1 if _eyes.crt_mode else 0)
+    _marsMenu.set_value(MenuCategory.SYSTEM, "Theme", _menuTheme)
+    _marsMenu.set_value(MenuCategory.SYSTEM, "Palette", _menuPalette)
+    _marsMenu.set_value(MenuCategory.SYSTEM, "Brightness", _displayBrightness)
+    _marsMenu.set_value(MenuCategory.SYSTEM, "Verbose", 1 if _verbose else 0)
+    _marsMenu.set_value(MenuCategory.SYSTEM, "Mirror Display", 1 if _mirrorDisplay else 0)
+    _marsMenu.set_value(MenuCategory.INFO, "Ctrl Version", f"{CONTROLLER_VERSION} b{CONTROLLER_BUILD}")
+    
+    # Apply saved theme/palette
+    _marsMenu.theme = _menuTheme
+    _marsMenu.lcars_palette = _menuPalette
+
+_setup_mars_menu()
 
 # Create and start display thread if enabled
 _displayThread = None
@@ -1620,7 +2030,7 @@ if _displayThreadEnabled:
                                 teensy_connected=(_teensy is not None),
                                 controller_connected=(_controller is not None),
                                 telemetry_stale=(_teensy is not None and _lastTelemetryTime is None),
-                                robot_enabled=(_state[9] == 1.0 if len(_state) > 9 else True))
+                                robot_enabled=(_state[IDX_ROBOT_ENABLED] == 1.0 if len(_state) > IDX_ROBOT_ENABLED else True))
     _displayThread.start()
     if _verbose:
         print(f"Display thread started at {_displayThreadHz} Hz (blink divisor: {_blinkFrameDivisor})", end="\r\n")
@@ -1672,9 +2082,30 @@ def send_cmd(cmd, force: bool = False, throttle_ms: float = None):
         print(f"[send_cmd] SENT cmd='{cmd_b}' force={force} throttle_ms={throttle_ms} t={now:.3f}", end="\r\n")
     return True
 
+
+def ensure_enabled() -> bool:
+    """Ensure robot is enabled by sending LEG ALL ENABLE + ENABLE if needed.
+    
+    Checks both local tracking (_enabledLocal) and telemetry state (_state[IDX_ROBOT_ENABLED]).
+    Sends enable sequence only if robot appears disabled.
+    
+    Returns:
+        True if enable commands were sent, False if already enabled or no Teensy.
+    """
+    global _enabledLocal
+    if _teensy is None:
+        return False
+    # Check both local tracking and telemetry state
+    if _enabledLocal and _state[IDX_ROBOT_ENABLED] == 1.0:
+        return False  # Already enabled
+    send_cmd(b'LEG ALL ENABLE', force=True)
+    send_cmd(b'ENABLE', force=True)
+    return True
+
+
 # Tuck auto-disable scheduling
 _autoDisableAt = None  # when not None, time (epoch seconds) at which to send DISABLE after posture command (tuck/stand)
- # Enable flag consumed directly from _state[9]; no SQ telemetry support required.
+ # Enable flag consumed directly from _state[IDX_ROBOT_ENABLED]; no SQ telemetry support required.
 _lastPosture = None  # tracks last posture name sent (for future dynamic messaging)
 
 def apply_posture(name, auto_disable_s: float = None, require_enable: bool = True):
@@ -1699,10 +2130,8 @@ def apply_posture(name, auto_disable_s: float = None, require_enable: bool = Tru
         if _verbose:
             print(f"Unknown posture '{posture}'", end="\r\n")
         return False
-    if require_enable and _state[9] != 1.0:
-        if not _enabledLocal:
-            send_cmd(b'LEG ALL ENABLE', force=True)
-            send_cmd(b'ENABLE', force=True)
+    if require_enable and _state[IDX_ROBOT_ENABLED] != 1.0:
+        ensure_enabled()
     if send_cmd(posture, force=True):
         _lastPosture = posture
         if auto_disable_s > 0:
@@ -1793,8 +2222,8 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
         
         # Determine telemetry staleness (connected but no data yet)
         telemetry_stale = (ctrl.teensy is not None and ctrl.lastTelemetryTime is None)
-        # Robot enabled state from S1 telemetry (index 9)
-        robot_enabled = (ctrl.state[9] == 1.0) if len(ctrl.state) > 9 else True
+        # Robot enabled state from S1 telemetry
+        robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if len(ctrl.state) > IDX_ROBOT_ENABLED else True
         
         # Update thread state - it handles rendering at its own rate
         displayThread.update_state(
@@ -1813,22 +2242,53 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
         ctrl.update_display()
 
 
-def phase_touch_input(menu):
+def phase_touch_input(menu, ctrl):
     """Phase 5: Handle touchscreen input.
     
+    If the robot is in motion (gait active), any touch acts as an emergency stop:
+    stops gait, sends idle + LEG ALL DISABLE + DISABLE.
+    Otherwise, normal menu touch handling.
+    
     Args:
-        menu: Menu instance
+        menu: Menu instance (legacy, kept for compatibility)
+        ctrl: Controller instance (for forceDisplayUpdate)
         
     Returns:
         bool: True if menu was touched and processed
     """
-    global _menuVisible, _forceDisplayUpdate
+    global _menuVisible, _forceDisplayUpdate, _gaitActive, _gaitEngine
     
-    if menu.touched():
-        _menuVisible = True
-        _forceDisplayUpdate = True
-        menu.handle_touch()
-        return True
+    # Use _marsMenu.touched() for debounced touch detection
+    if _marsMenu.touched():
+        # Emergency stop: if robot is in motion, stop everything
+        if _gaitActive:
+            if _gaitEngine is not None:
+                _gaitEngine.stop()
+            _gaitActive = False
+            if _teensy is not None:
+                send_cmd('I', force=True)
+                time.sleep(0.05)
+                send_cmd(b'LEG ALL DISABLE', force=True)
+                time.sleep(0.05)
+                send_cmd(b'DISABLE', force=True)
+            if _verbose:
+                print("\nTouchscreen E-STOP: gait stopped, robot disabled", end="\r\n")
+            ctrl.forceDisplayUpdate = True
+            return True
+        
+        # MARS menu touch handling when menu is visible
+        if _marsMenu.visible:
+            _marsMenu.handle_touch()
+            ctrl.forceDisplayUpdate = True
+            return True
+        
+        # If robot is disabled and not in motion, allow opening menu
+        robot_enabled = (_state[IDX_ROBOT_ENABLED] == 1.0) if len(_state) > IDX_ROBOT_ENABLED else False
+        if not robot_enabled and not _gaitActive:
+            _marsMenu.show()
+            ctrl.forceDisplayUpdate = True
+            return True
+    
     return False
 
 
@@ -1853,25 +2313,22 @@ def phase_keyboard_input(ctrl):
         return False
     
     elif key in (ord('t'), ord('T')):  # Test gait
-        if _state[9] != 1.0:
-            send_cmd(b'LEG ALL ENABLE', force=True)
-            send_cmd(b'ENABLE', force=True)
+        if _state[IDX_ROBOT_ENABLED] != 1.0:
+            ensure_enabled()
         send_cmd(b'T', force=True)
         if _verbose:
             print("\nTest gait command sent to Teensy", end="\r\n")
     
     elif key in (ord('k'), ord('K')):  # Tuck posture
-        if _state[9] != 1.0:
-            send_cmd(b'LEG ALL ENABLE', force=True)
-            send_cmd(b'ENABLE', force=True)
+        if _state[IDX_ROBOT_ENABLED] != 1.0:
+            ensure_enabled()
         send_cmd(b'TUCK', force=True)
         _autoDisableAt = time.time() + _autoDisableS
         ctrl.autoDisableAt = _autoDisableAt
     
     elif key in (ord('s'), ord('S')):  # Stand posture
-        if _state[9] != 1.0:
-            send_cmd(b'LEG ALL ENABLE', force=True)
-            send_cmd(b'ENABLE', force=True)
+        if _state[IDX_ROBOT_ENABLED] != 1.0:
+            ensure_enabled()
         send_cmd(b'STAND', force=True)
         _autoDisableAt = time.time() + _autoDisableS
         ctrl.autoDisableAt = _autoDisableAt
@@ -1912,11 +2369,25 @@ def phase_keyboard_input(ctrl):
         _debugSendAll = not _debugSendAll
         print("send_cmd debug ALL ON" if _debugSendAll else "send_cmd debug ALL OFF", end="\r\n")
     
+    elif key in (ord('e'), ord('E')):  # Cycle eye shape
+        _eyes.left_shape += 1
+        if _eyes.left_shape > EYE_SHAPE.ANIME:
+            _eyes.left_shape = EYE_SHAPE.ELLIPSE
+        _eyes.right_shape = _eyes.left_shape
+        _eyes.eye_color = _eyeColors[_eyes.left_shape]
+        _eyes.update(force_update=True)
+        _forceDisplayUpdate = True
+        if _displayThread is not None:
+            _displayThread.update_state(force_update=True)
+        save_eye_shape(_eyes.left_shape)
+        if _verbose:
+            shape_names = ["ELLIPSE", "RECTANGLE", "ROUNDRECTANGLE", "X", "SPIDER", "HUMAN", "CAT", "HYPNO", "ANIME"]
+            print(f"Eye shape changed to {shape_names[_eyes.left_shape]}", end="\r\n")
+    
     elif key in (ord('w'), ord('W')):  # Start gait (walk)
         if not _gaitActive:
-            if _state[9] != 1.0:
-                send_cmd(b'LEG ALL ENABLE', force=True)
-                send_cmd(b'ENABLE', force=True)
+            if _state[IDX_ROBOT_ENABLED] != 1.0:
+                ensure_enabled()
             params = GaitParams(
                 cycle_ms=2000,
                 base_x_mm=100.0,
@@ -1951,9 +2422,8 @@ def phase_keyboard_input(ctrl):
     
     elif key in (ord('p'), ord('P')):  # Stationary pattern
         if not _gaitActive:
-            if _state[9] != 1.0:
-                send_cmd(b'LEG ALL ENABLE', force=True)
-                send_cmd(b'ENABLE', force=True)
+            if _state[IDX_ROBOT_ENABLED] != 1.0:
+                ensure_enabled()
             params = GaitParams(base_x_mm=100.0, base_y_mm=-120.0)
             _gaitEngine = StationaryPattern(params, radius_mm=15.0, period_ms=2000)
             _gaitEngine.start()
@@ -1987,12 +2457,15 @@ def phase_keyboard_input(ctrl):
 def phase_gait_tick(ctrl, gaitEngine, gaitActive):
     """Phase 7: Execute gait engine tick and send FEET commands.
     
+    Handles both normal gait operation and smooth phase-locked transitions
+    between gait types.
+    
     Args:
         ctrl: Controller instance
         gaitEngine: Current gait engine or None
         gaitActive: Whether gait is currently active
     """
-    global _gaitTickCount
+    global _gaitTickCount, _gaitEngine, _gaitTransition
     
     if not gaitActive or gaitEngine is None or _teensy is None:
         return
@@ -2003,15 +2476,48 @@ def phase_gait_tick(ctrl, gaitEngine, gaitActive):
     else:
         dt_seconds = 6.024 / 1000.0  # 166Hz fallback
     
-    # Advance gait state every tick
-    gaitEngine.tick(dt_seconds)
-    
-    # Send FEET command every N ticks to reduce serial load
-    _gaitTickCount += 1
-    if _gaitTickCount >= _gaitSendDivisor:
-        _gaitTickCount = 0
-        feet_cmd = gaitEngine.get_feet_bytes()
-        send_cmd(feet_cmd, force=True)
+    # Check if transition is active
+    if _gaitTransition.is_active():
+        # Let transition manager handle ticking both gaits and blending
+        feet, is_complete = _gaitTransition.tick(dt_seconds)
+        
+        if is_complete:
+            # Transition finished - switch to new gait
+            new_gait = _gaitTransition.get_target_gait()
+            if new_gait is not None:
+                _gaitEngine = new_gait
+                # Find the new gait name for logging
+                new_type = type(new_gait)
+                try:
+                    new_idx = GAIT_TYPES.index(new_type)
+                    new_name = GAIT_NAMES[new_idx]
+                except ValueError:
+                    new_name = "Unknown"
+                if ctrl.verbose:
+                    print(f"\nGait transition complete: now running {new_name}", end="\r\n")
+            _gaitTransition.reset()
+        
+        # Send blended FEET command
+        if feet is not None:
+            _gaitTickCount += 1
+            if _gaitTickCount >= _gaitSendDivisor:
+                _gaitTickCount = 0
+                # Format feet as FEET command
+                parts = []
+                for foot in feet:
+                    parts.extend([f"{foot[0]:.1f}", f"{foot[1]:.1f}", f"{foot[2]:.1f}"])
+                feet_cmd = ("FEET " + " ".join(parts)).encode('ascii')
+                send_cmd(feet_cmd, force=True)
+    else:
+        # Normal gait operation - tick the single gait engine
+        gaitEngine.tick(dt_seconds)
+        
+        # Send FEET command every N ticks to reduce serial load
+        _gaitTickCount += 1
+        if _gaitTickCount >= _gaitSendDivisor:
+            _gaitTickCount = 0
+            feet_cmd = gaitEngine.get_feet_bytes()
+            send_cmd(feet_cmd, force=True)
 
 
 def phase_auto_disable(ctrl):
@@ -2024,7 +2530,7 @@ def phase_auto_disable(ctrl):
     
     if ctrl.autoDisableAt is not None and time.time() >= ctrl.autoDisableAt:
         if ctrl.teensy is not None:
-            if ctrl.state[9] == 1.0:
+            if ctrl.state[IDX_ROBOT_ENABLED] == 1.0:
                 send_cmd(b'DISABLE', force=True)
             if ctrl.verbose:
                 print("\nAuto DISABLE executed", end="\r\n")
@@ -2180,12 +2686,7 @@ while _run:
                 print(f"PARSED S2 ENABLES: {ctrl.lastParsedS2}", end="\r\n")
 
         #----------------------------------------------------------------------
-        # Phase 4: Display update
-        #----------------------------------------------------------------------
-        phase_display_update(ctrl, _displayThread, _gaitEngine, _gaitActive)
-
-        #----------------------------------------------------------------------
-        # Phase 5: Gamepad polling
+        # Phase 4: Gamepad polling (before display so button presses render immediately)
         #----------------------------------------------------------------------
         ctrl.poll_gamepad()
 
@@ -2197,9 +2698,14 @@ while _run:
             break
 
         #----------------------------------------------------------------------
-        # Phase 6: Touch input
+        # Phase 6: Touch input (before display update so changes show immediately)
         #----------------------------------------------------------------------
-        phase_touch_input(_menu)
+        phase_touch_input(_menu, ctrl)
+
+        #----------------------------------------------------------------------
+        # Phase 6b: Display update (after touch so menu changes render immediately)
+        #----------------------------------------------------------------------
+        phase_display_update(ctrl, _displayThread, _gaitEngine, _gaitActive)
 
         #----------------------------------------------------------------------
         # Phase 7: Keyboard input

@@ -1,3 +1,164 @@
+## Python Controller 0.4.42 (b108) — 2025-12-07
+### Fixed
+- **First-tap ignore v2**: Simplified to counter-based approach
+  - `show()` sets `_ignore_touches = 2`
+  - Counter decrements each time finger is lifted
+  - Touches ignored while counter > 0
+  - More reliable than state-machine approach
+
+## Python Controller 0.4.41 (b107) — 2025-12-07
+### Fixed
+- **First-tap ignore fix**: Now properly tracks finger lift after wake
+  - Uses two-phase state: `_just_woke` and `_wake_finger_lifted`
+  - Wake tap is ignored until finger is lifted AND a new touch occurs
+  - Fixes issue where all taps were being ignored after wake
+
+## Python Controller 0.4.40 (b106) — 2025-12-07
+### Changed
+- **LCARS color variety**: Frame now uses distinct colors for top sweep, bottom sweep, and vertical bar
+  - Each palette defines: `frame_top`, `frame_bottom`, `frame_bar`, `accent_alt`
+  - Tabs use full 5-color palette with more variety
+  - Item values and selection indicators alternate colors for visual interest
+  - Right-edge accent bar uses alternate accent color
+
+### Fixed
+- **First-tap ignore**: Tapping the screen to wake up the menu now ignores that first tap
+  - Prevents accidental menu actions when bringing up the display
+  - Menu shows but first tap is consumed; subsequent taps work normally
+  - Flag clears when finger is lifted, ready for next intentional tap
+
+## Python Controller 0.4.39 (b105) — 2025-12-07
+### Fixed
+- **LCARS tab touch alignment**: Touch zones now match actual LCARS tab positions
+  - Tabs start at y=32 (after top frame sweep)
+  - Each tab is 22px tall with 3px gap
+  - Touch ignores gaps between tabs
+  - MARS theme still uses even height division
+
+## Python Controller 0.4.38 (b104) — 2025-12-07
+### Improved
+- **LCARS frame structure**: Added bottom-left swept corner matching top-left
+- **Vertical bar placement**: Now spans only between the two swept corners (top sweep bottom to bottom sweep top)
+- **Proper L-bracket**: Both corners curve outward with thick-to-thin transitions
+
+## Python Controller 0.4.37 (b103) — 2025-12-07
+### Fixed
+- **LCARS tab/frame overlap**: Tabs now start at x=14 (after 12px frame bar + gap)
+- **Continuous left frame**: Vertical bar extends full height alongside tabs
+- **Bottom bar alignment**: Starts at x=12 to connect with vertical frame bar
+
+## Python Controller 0.4.36 (b102) — 2025-12-07
+### Improved
+- **LCARS design guidelines applied** (based on lcars-terminal.de tutorial):
+  - Thick-to-thin frame transitions at swept corners (never same thickness)
+  - Proper LCARS swept corner element (quarter-circle with inner cutout)
+  - Rounded caps used correctly as terminators and buttons
+  - Consistent spacing grid throughout interface
+  - 3 font sizes only: Main Title, Sub Header, Normal Data
+  - Selection indicator bars instead of filled backgrounds
+  - Improved scroll bar with proper rounded caps
+
+## Python Controller 0.4.35 (b101) — 2025-12-07
+### Added
+- **Eye V Center**: New menu option to adjust vertical eye position (±30px), saved to config
+- **Config persistence**: Menu theme, LCARS palette, and eye V center now saved to `controller.ini`
+- **Save functions**: `save_menu_settings()`, `save_eye_center_offset()` for persistent storage
+
+## Python Controller 0.4.34 (b100) — 2025-12-07
+### Fixed
+- **LCARS L-bracket**: Curve now faces outward (bottom-right) as in authentic LCARS design
+- **Tab sizing**: Reduced to 24px height with 3px gaps to fit all 5 tabs on 170px display
+
+### Added
+- **LCARS color palettes** (from TheLCARS.com):
+  - **Classic**: TNG/DS9 orange, peach, violet, gold
+  - **Nemesis**: Cool blues, ghost, midnight
+  - **LwrDecks**: Warm oranges, harvest gold, butter
+  - **PADD**: Arctic blues, radioactive cyan
+- **Palette selector**: System menu > Palette option to switch between palettes
+
+## Python Controller 0.4.33 (b99) — 2025-12-07
+### Added
+- **LCARS theme**: Star Trek inspired menu visual style with:
+  - Pill-shaped tabs with rounded ends
+  - Orange/peach/lavender/blue color palette on black
+  - L-shaped corner bracket decorations
+  - Selection indicator bars instead of filled backgrounds
+- **Theme selector**: System menu now has Theme option to switch between MARS (default) and LCARS
+
+## Python Controller 0.4.32 (b98) — 2025-12-07
+### Added
+- **Touch close button**: X button in top-right corner of menu to close via touchscreen
+
+## Python Controller 0.4.31 (b97) — 2025-12-07
+### Improved
+- **Functional scroll bar**: Tap above/below the thumb to scroll up/down by one page
+- **Wider scroll bar**: Increased from 20px to 30px track width for easier touch interaction
+- **Arrow placement**: Moved value arrows further left (x=265) to avoid scroll bar overlap
+
+## Python Controller 0.4.30 (b96) — 2025-12-07
+### Fixed
+- **Touch handling reworked**: `touched()` now returns current touch state; debouncing moved inside `handle_touch()` so value adjustments are debounced but touch detection works continuously
+- **Scroll bar overlap**: Moved value arrows and action indicators left (from x=305 to x=285) to avoid overlapping with 20px scroll bar
+
+## Python Controller 0.4.29 (b95) — 2025-12-07
+### Fixed
+- **Touch debouncing**: Now uses `_marsMenu.touched()` for proper debouncing (was incorrectly using legacy menu's touch detection, causing rapid value changes)
+- **Wider scroll bar**: Increased from 5px to 20px track width, 25px minimum thumb height for easier touch interaction
+
+## Python Controller 0.4.28 (b94) — 2025-12-07
+### Improved
+- **Menu UX enhancements**:
+  - Touch debouncing: single value change per touch (must lift finger to change again)
+  - Visual scroll bar for menus with more items than fit on screen
+  - Larger fonts (11→14px) and taller items (22→34px) for easier touch
+  - Fixed touch coordinate rotation for 270° rotated display
+  - Immediate display refresh after any input (moved display update after input phases)
+  - Replaced Unicode arrows with ASCII for font compatibility
+
+## Python Controller 0.4.27 (b93) — 2025-12-06
+### Added
+- **MARS menu system**: Complete rebuild of on-screen menu:
+  - New `MarsMenu.py` replaces legacy GUIMenu with tabbed interface
+  - Categories: Eyes, Gait, Posture, Info, System
+  - Controller support: DPAD navigates items, LB/RB switch tabs, A selects, B closes, Start toggles
+  - Touch support: Tap tabs, tap items, left/right zones adjust values
+  - Safety gate: Menu only opens when robot is disabled and not in motion
+  - Touch E-STOP still active: touch during gait immediately stops robot
+  - Eye settings: Style (9 types), Human Color, Size, Spacing, CRT Effect
+  - System settings: Brightness, Verbose mode, Mirror Display, Save All, Shutdown
+  - Info display: Firmware version, Controller version, Battery, Status
+- New `handle_button()` method in MarsMenu for clean controller integration
+
+## Python Controller 0.4.13 (b79) — 2025-12-04
+### Added
+- **Walking turn**: Yaw while walking for arc motion:
+  - Right stick Y controls turn rate: up = CCW (left turn), down = CW (right turn)
+  - Maximum turn rate: ±60 deg/s (configurable)
+  - Differential stride: legs on outside of turn take longer strides, inside legs shorter
+  - Works with all gait types (Tripod, Wave, Ripple)
+  - Pure rotation (speed=0, turn≠0) rotates in place
+  - Combined with strafe (right stick X) for full omni-directional control
+- Added `LEG_HIP_X` and `LEG_HIP_Z` constants for leg position geometry
+
+## Python Controller 0.4.12 (b78) — 2025-12-04
+### Added
+- **Phase-locked gait transitions**: Smooth switching between gait types:
+  - RB button now triggers phase-locked transition instead of instant switch
+  - Waits for current gait's phase boundary before transitioning
+  - Blends foot positions between old and new gait over 500ms
+  - Cosine interpolation for smooth acceleration/deceleration at blend boundaries
+  - New `GaitTransition` class in gait_engine.py manages the state machine
+  - States: IDLE → WAITING (for phase) → BLENDING → COMPLETE
+
+## Python Controller 0.4.11 (b77) — 2025-12-04
+### Added
+- **Wave and Ripple gaits**: Two new gait patterns for different terrain/speed needs:
+  - WaveGait: One leg swings at a time (6 phases) — maximum stability, slow speed
+  - RippleGait: Two diagonal legs swing together (3 phases) — good speed/stability balance
+  - RB button now cycles: Tripod → Wave → Ripple → Stationary → Tripod
+- Removed STRAFE_DEBUG_LOG file writing
+
 ## Python Controller 0.4.0 (b65) — 2025-12-04
 ### Added
 - **Display thread**: Background thread for eye animation and LCD updates:

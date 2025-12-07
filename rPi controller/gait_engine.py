@@ -10,13 +10,16 @@
 # 2025-12-03  Bezier curves for swing phase: 5-point Bezier arc with smooth lift-off, peak, and touchdown.
 #             Stance phase uses linear motion. Added bezier_point() and binomial_coefficient() utilities.
 # 2025-12-03  Tuned lift: 60mm default, Bezier peak at 150% to compensate for curve attenuation.
+# 2025-12-04  Added WaveGait (1 leg at a time, 6 phases) and RippleGait (2 diagonal legs, 3 phases).
+# 2025-12-04  Added GaitTransition class for smooth phase-locked transitions between gait types.
+# 2025-12-04  Walking turn: differential stride per leg based on hip position and turn rate.
 #----------------------------------------------------------------------------------------------------------------------
 """
 Gait Engine Module for MARS Hexapod Python Controller
 
 Architecture:
     - GaitEngine: Base class providing tick()-based foot target generation
-    - Gait subclasses: TripodGait, WaveGait, RippleGait (future)
+    - Gait subclasses: TripodGait, WaveGait, RippleGait
     - GaitParams: Dataclass for gait configuration (step height, stride, cycle time, etc.)
     - Integration: Called from main loop at 166Hz (synced to Teensy telemetry)
 
@@ -77,6 +80,27 @@ LEG_BASE_ROTATION_DEG = [
 # Precompute sin/cos for each leg's base rotation
 LEG_BASE_SIN = [math.sin(math.radians(r)) for r in LEG_BASE_ROTATION_DEG]
 LEG_BASE_COS = [math.cos(math.radians(r)) for r in LEG_BASE_ROTATION_DEG]
+
+# Leg hip positions in body frame (mm) - for turn radius calculations
+# These define where each leg's hip joint is relative to body center
+# X = lateral (positive = right side of body), Z = forward (positive = front)
+# Values based on typical hexapod geometry; adjust if needed for specific robot
+LEG_HIP_X = [
+    -80.0,   # LEG_LF: left side, front corner
+    -100.0,  # LEG_LM: left side, middle
+    -80.0,   # LEG_LR: left side, rear corner
+    80.0,    # LEG_RF: right side, front corner
+    100.0,   # LEG_RM: right side, middle
+    80.0,    # LEG_RR: right side, rear corner
+]
+LEG_HIP_Z = [
+    100.0,   # LEG_LF: front
+    0.0,     # LEG_LM: middle
+    -100.0,  # LEG_LR: rear
+    100.0,   # LEG_RF: front
+    0.0,     # LEG_RM: middle
+    -100.0,  # LEG_RR: rear
+]
 
 # Legacy constant for reference
 COS_45 = 0.70710678  # cos(45°) = sin(45°)
@@ -357,13 +381,17 @@ class TripodGait(GaitEngine):
         super().__init__(params)
     
     def _compute_foot_targets(self, t_active: float, in_overlap: bool) -> None:
-        """Compute tripod gait foot positions with heading (OMNI/crab walk mode).
+        """Compute tripod gait foot positions with heading and walking turn.
         
         When speed_scale=0: legs cycle (lift/lower) but no translation (step in place).
         When speed_scale>0: legs translate based on heading angle.
+        When turn_rate!=0: legs move differentially for walking turn (arc motion).
         
-        Matches old Hexapod_Simple OMNI mode: walk direction is added to base leg rotation
-        to create combined rotation for the stride vector.
+        Walking Turn Strategy:
+        - turn_rate_deg_s defines how much the body rotates per second
+        - Each leg's stride is adjusted based on its arc around the turn center
+        - Legs on outside of turn take longer strides, inside legs shorter
+        - Pure rotation (speed=0, turn!=0) rotates in place
         
         Uses smoothed parameters from EMA filter for smooth transitions.
         """
@@ -384,13 +412,19 @@ class TripodGait(GaitEngine):
         # heading_deg: 0° = forward, 90° = strafe right, -90° = strafe left
         walk_dir = heading / 90.0  # Normalize to -1..+1 range
         
+        # Walking turn: calculate rotation per phase
+        # turn_rate is in deg/s, phase duration is cycle_ms/2
+        phase_duration_s = (p.cycle_ms / 2.0) / 1000.0
+        turn_per_phase_deg = turn_rate * phase_duration_s
+        turn_per_phase_rad = math.radians(turn_per_phase_deg)
+        
         # Debug CSV logging - write header on first call
         debug_log = None
         if GAIT_DEBUG_LOG_ENABLED:
             try:
                 if not _gait_debug_log_initialized:
                     debug_log = open(GAIT_DEBUG_LOG_PATH, 'w')
-                    debug_log.write("time_ms,phase,t_active,in_overlap,speed,heading,effective_step,step_offset,walk_dir,")
+                    debug_log.write("time_ms,phase,t_active,in_overlap,speed,heading,turn_rate,effective_step,step_offset,walk_dir,")
                     debug_log.write("leg,base_rot_deg,rot_cos,rot_sin,is_swing,stride_mag,x_prime,y,z_prime\n")
                     _gait_debug_log_initialized = True
                 else:
@@ -412,6 +446,20 @@ class TripodGait(GaitEngine):
             is_tripod_a = leg in TRIPOD_A
             assigned_swing = (is_tripod_a and self._phase == 0) or (not is_tripod_a and self._phase == 1)
             
+            # Calculate turn-adjusted stride for this leg
+            # Arc length = angle (rad) * radius
+            # For walking turn: each leg travels an arc proportional to its distance from body center
+            # LEG_HIP_X gives lateral offset: positive = right side, negative = left side
+            # For CW turn (positive turn_rate): right legs (positive X) take shorter strides
+            # For CCW turn (negative turn_rate): left legs (negative X) take shorter strides
+            turn_arc_mm = turn_per_phase_rad * LEG_HIP_X[leg]  # Arc contribution from turn
+            
+            # Combine translation stride with turn arc
+            # - effective_step: translation component (same for all legs)
+            # - turn_arc_mm: rotation component (varies by leg position)
+            # For pure rotation (speed=0), legs move in opposite directions
+            leg_effective_step = effective_step - turn_arc_mm
+            
             # Compute stride magnitude and height using Bezier curves
             if assigned_swing:
                 # Swing phase: use 5-point Bezier for smooth arc
@@ -419,7 +467,7 @@ class TripodGait(GaitEngine):
                 # t_active goes 0->1 during active phase, but swing needs its own 0->1
                 if in_overlap:
                     # During overlap, foot is at end of swing (on ground, at front)
-                    stride_mag = effective_step
+                    stride_mag = leg_effective_step
                     y = base_y
                 else:
                     # Active swing: smooth Bezier trajectory
@@ -427,25 +475,20 @@ class TripodGait(GaitEngine):
                     swing_t = t_active  # 0 at start of swing, 1 at end
                     
                     # 5-point Bezier control points for swing arc (x=unused, y=height, z=stride)
-                    # P0: Start - back position, on ground
-                    # P1: Initial lift - slight overshoot back, beginning lift
-                    # P2: Peak - center, maximum height (configurable to compensate for Bezier attenuation)
-                    # P3: Descending - near front, coming down
-                    # P4: End - front position, on ground
+                    # Use leg_effective_step for this leg's adjusted stride
                     swing_points = [
-                        (0, base_y,                                    -effective_step),                        # P0: start (back)
-                        (0, base_y + p.bezier_p1_height * lift_height, -p.bezier_p1_overshoot * effective_step), # P1: slight lift, overshoot back
-                        (0, base_y + p.bezier_p2_height * lift_height, -0.1 * effective_step),                   # P2: peak height, ~center
-                        (0, base_y + p.bezier_p3_height * lift_height, p.bezier_p3_overshoot * effective_step),  # P3: descending, overshoot front
-                        (0, base_y,                                    effective_step),                          # P4: end (front)
+                        (0, base_y,                                    -leg_effective_step),                        # P0: start (back)
+                        (0, base_y + p.bezier_p1_height * lift_height, -p.bezier_p1_overshoot * leg_effective_step), # P1: slight lift, overshoot back
+                        (0, base_y + p.bezier_p2_height * lift_height, -0.1 * leg_effective_step),                   # P2: peak height, ~center
+                        (0, base_y + p.bezier_p3_height * lift_height, p.bezier_p3_overshoot * leg_effective_step),  # P3: descending, overshoot front
+                        (0, base_y,                                    leg_effective_step),                          # P4: end (front)
                     ]
                     
                     _, y, stride_mag = bezier_point(swing_points, swing_t)
             else:
                 # Stance phase: linear motion from front (+step) to back (-step)
-                # This is equivalent to a 2-point Bezier (straight line)
                 # t_active goes 0->1, stride goes +step to -step
-                stride_mag = effective_step * (1.0 - 2.0 * t_active)
+                stride_mag = leg_effective_step * (1.0 - 2.0 * t_active)
                 y = base_y  # Always on ground during stance
             
             # Apply OMNI mode rotation (matches old Hexapod_Simple firmware)
@@ -525,6 +568,286 @@ class TripodGait(GaitEngine):
         return l_x_prime, l_z_prime, cos_angle, sin_angle
 
 #----------------------------------------------------------------------------------------------------------------------
+# Wave Gait Implementation
+#----------------------------------------------------------------------------------------------------------------------
+
+# Wave gait sequence: one leg at a time, maximum stability
+# Order: RR -> RM -> RF -> LR -> LM -> LF (rear to front, alternating sides)
+WAVE_SEQUENCE = [LEG_RR, LEG_RM, LEG_RF, LEG_LR, LEG_LM, LEG_LF]
+
+
+class WaveGait(GaitEngine):
+    """Wave gait — one leg swings at a time, maximum stability.
+    
+    6 phases, each phase one leg swings while 5 legs stance.
+    Very slow but extremely stable - good for rough terrain.
+    
+    Sequence: RR -> RM -> RF -> LR -> LM -> LF (rear to front, alternating sides)
+    """
+    
+    def __init__(self, params: Optional[GaitParams] = None):
+        super().__init__(params)
+        self._wave_phase = 0  # 0-5, which leg is currently swinging
+    
+    def start(self) -> None:
+        """Begin gait execution."""
+        super().start()
+        self._wave_phase = 0
+    
+    def tick(self, dt_seconds: float = None) -> List[List[float]]:
+        """Advance gait by one tick and return foot targets."""
+        if self.state != GaitState.RUNNING:
+            return [foot.as_list() for foot in self._feet]
+        
+        # Update elapsed time
+        if dt_seconds is not None:
+            self._elapsed_ms += int(dt_seconds * 1000)
+        elif self._start_time is not None:
+            self._elapsed_ms = int((time.monotonic() - self._start_time) * 1000)
+        
+        # Wave gait: 6 phases, each phase = cycle_ms / 6
+        phase_ms = self.params.cycle_ms // 6
+        phase_elapsed = self._elapsed_ms - self._phase_start_ms
+        if phase_elapsed >= phase_ms:
+            self._wave_phase = (self._wave_phase + 1) % 6
+            self._phase_start_ms = self._elapsed_ms
+            phase_elapsed = 0
+        
+        # Compute progression within phase
+        active_ms = int(phase_ms * (100.0 - self.params.overlap_pct) / 100.0)
+        t_active = min(1.0, phase_elapsed / active_ms) if active_ms > 0 else 0.0
+        in_overlap = phase_elapsed >= active_ms
+        
+        # Apply EMA smoothing to parameters
+        alpha = self.params.smoothing_alpha
+        self._smoothed_speed = alpha * self.params.speed_scale + (1.0 - alpha) * self._smoothed_speed
+        self._smoothed_heading = alpha * self.params.heading_deg + (1.0 - alpha) * self._smoothed_heading
+        self._smoothed_turn_rate = alpha * self.params.turn_rate_deg_s + (1.0 - alpha) * self._smoothed_turn_rate
+        
+        # Delegate to foot target computation
+        self._compute_foot_targets(t_active, in_overlap)
+        
+        return [foot.as_list() for foot in self._feet]
+    
+    def _compute_foot_targets(self, t_active: float, in_overlap: bool) -> None:
+        """Compute wave gait foot positions with walking turn support.
+        
+        Only one leg swings at a time. All others push the body forward (stance).
+        Walking turn: each leg's stride adjusted by its arc around turn center.
+        """
+        p = self.params
+        speed = self._smoothed_speed
+        heading = self._smoothed_heading
+        turn_rate = self._smoothed_turn_rate
+        effective_step = p.step_len_mm * speed
+        walk_dir = heading / 90.0
+        
+        # Walking turn: calculate rotation per phase (wave has 6 phases per cycle)
+        phase_duration_s = (p.cycle_ms / 6.0) / 1000.0
+        turn_per_phase_deg = turn_rate * phase_duration_s
+        turn_per_phase_rad = math.radians(turn_per_phase_deg)
+        
+        # Bezier parameters
+        lift_height = p.lift_mm
+        base_y = p.base_y_mm
+        
+        # The currently swinging leg
+        swing_leg = WAVE_SEQUENCE[self._wave_phase]
+        
+        for leg in range(NUM_LEGS):
+            x = p.base_x_mm
+            y = base_y
+            
+            is_swing = (leg == swing_leg)
+            
+            # Calculate turn-adjusted stride for this leg
+            turn_arc_mm = turn_per_phase_rad * LEG_HIP_X[leg]
+            leg_effective_step = effective_step - turn_arc_mm
+            
+            if is_swing:
+                # Swing phase: Bezier trajectory
+                if in_overlap:
+                    stride_mag = leg_effective_step
+                    y = base_y
+                else:
+                    swing_t = t_active
+                    swing_points = [
+                        (0, base_y,                                    -leg_effective_step),
+                        (0, base_y + p.bezier_p1_height * lift_height, -p.bezier_p1_overshoot * leg_effective_step),
+                        (0, base_y + p.bezier_p2_height * lift_height, -0.1 * leg_effective_step),
+                        (0, base_y + p.bezier_p3_height * lift_height, p.bezier_p3_overshoot * leg_effective_step),
+                        (0, base_y,                                    leg_effective_step),
+                    ]
+                    _, y, stride_mag = bezier_point(swing_points, swing_t)
+            else:
+                # Stance phase: All stance legs move together over 6 phases
+                stance_progress = (self._wave_phase + t_active) / 6.0
+                stride_mag = leg_effective_step * (1.0 - 2.0 * stance_progress)
+                y = base_y
+            
+            # Apply leg rotation
+            x_prime, z_prime = self._apply_leg_rotation_simple(leg, x, stride_mag, walk_dir)
+            self._feet[leg] = FootTarget(x=x_prime, y=y, z=z_prime)
+    
+    def _apply_leg_rotation_simple(self, leg: int, base_x: float, stride_z: float, walk_dir: float) -> Tuple[float, float]:
+        """Apply per-leg rotation (simplified version without debug return values)."""
+        base_z = -self.params.base_x_mm * LEG_BASE_SIN[leg]
+        base_x_calc = self.params.base_x_mm * LEG_BASE_COS[leg]
+        sign = 1.0 if leg in (LEG_LF, LEG_LM, LEG_LR) else -1.0
+        full_angle = math.radians(LEG_BASE_ROTATION_DEG[leg]) + sign * math.radians(walk_dir * 90.0)
+        cos_angle = math.cos(full_angle)
+        sin_angle = math.sin(full_angle)
+        
+        stride_x_prime = stride_z * sin_angle
+        stride_z_prime = stride_z * cos_angle
+        
+        return base_x_calc + stride_x_prime, stride_z_prime
+
+
+#----------------------------------------------------------------------------------------------------------------------
+# Ripple Gait Implementation
+#----------------------------------------------------------------------------------------------------------------------
+
+# Ripple gait sequence: two legs at a time (diagonal pairs)
+# 3 phases with 2 legs each for good speed/stability balance
+RIPPLE_GROUPS = [
+    [LEG_RF, LEG_LR],  # Phase 0: Right-front + Left-rear
+    [LEG_RM, LEG_LM],  # Phase 1: Right-middle + Left-middle  
+    [LEG_RR, LEG_LF],  # Phase 2: Right-rear + Left-front
+]
+
+
+class RippleGait(GaitEngine):
+    """Ripple gait — two legs swing at a time in diagonal pairs.
+    
+    3 phases, each phase two diagonal legs swing while 4 legs stance.
+    Good balance between speed and stability.
+    
+    Phase 0: RF + LR swing
+    Phase 1: RM + LM swing
+    Phase 2: RR + LF swing
+    """
+    
+    def __init__(self, params: Optional[GaitParams] = None):
+        super().__init__(params)
+        self._ripple_phase = 0  # 0-2, which pair is currently swinging
+    
+    def start(self) -> None:
+        """Begin gait execution."""
+        super().start()
+        self._ripple_phase = 0
+    
+    def tick(self, dt_seconds: float = None) -> List[List[float]]:
+        """Advance gait by one tick and return foot targets."""
+        if self.state != GaitState.RUNNING:
+            return [foot.as_list() for foot in self._feet]
+        
+        # Update elapsed time
+        if dt_seconds is not None:
+            self._elapsed_ms += int(dt_seconds * 1000)
+        elif self._start_time is not None:
+            self._elapsed_ms = int((time.monotonic() - self._start_time) * 1000)
+        
+        # Ripple gait: 3 phases, each phase = cycle_ms / 3
+        phase_ms = self.params.cycle_ms // 3
+        phase_elapsed = self._elapsed_ms - self._phase_start_ms
+        if phase_elapsed >= phase_ms:
+            self._ripple_phase = (self._ripple_phase + 1) % 3
+            self._phase_start_ms = self._elapsed_ms
+            phase_elapsed = 0
+        
+        # Compute progression within phase
+        active_ms = int(phase_ms * (100.0 - self.params.overlap_pct) / 100.0)
+        t_active = min(1.0, phase_elapsed / active_ms) if active_ms > 0 else 0.0
+        in_overlap = phase_elapsed >= active_ms
+        
+        # Apply EMA smoothing to parameters
+        alpha = self.params.smoothing_alpha
+        self._smoothed_speed = alpha * self.params.speed_scale + (1.0 - alpha) * self._smoothed_speed
+        self._smoothed_heading = alpha * self.params.heading_deg + (1.0 - alpha) * self._smoothed_heading
+        self._smoothed_turn_rate = alpha * self.params.turn_rate_deg_s + (1.0 - alpha) * self._smoothed_turn_rate
+        
+        # Delegate to foot target computation
+        self._compute_foot_targets(t_active, in_overlap)
+        
+        return [foot.as_list() for foot in self._feet]
+    
+    def _compute_foot_targets(self, t_active: float, in_overlap: bool) -> None:
+        """Compute ripple gait foot positions with walking turn support.
+        
+        Two diagonal legs swing at a time. Four legs stance.
+        Walking turn: each leg's stride adjusted by its arc around turn center.
+        """
+        p = self.params
+        speed = self._smoothed_speed
+        heading = self._smoothed_heading
+        turn_rate = self._smoothed_turn_rate
+        effective_step = p.step_len_mm * speed
+        walk_dir = heading / 90.0
+        
+        # Walking turn: calculate rotation per phase (ripple has 3 phases per cycle)
+        phase_duration_s = (p.cycle_ms / 3.0) / 1000.0
+        turn_per_phase_deg = turn_rate * phase_duration_s
+        turn_per_phase_rad = math.radians(turn_per_phase_deg)
+        
+        # Bezier parameters
+        lift_height = p.lift_mm
+        base_y = p.base_y_mm
+        
+        # The currently swinging legs
+        swing_legs = RIPPLE_GROUPS[self._ripple_phase]
+        
+        for leg in range(NUM_LEGS):
+            x = p.base_x_mm
+            y = base_y
+            
+            is_swing = (leg in swing_legs)
+            
+            # Calculate turn-adjusted stride for this leg
+            turn_arc_mm = turn_per_phase_rad * LEG_HIP_X[leg]
+            leg_effective_step = effective_step - turn_arc_mm
+            
+            if is_swing:
+                # Swing phase: Bezier trajectory
+                if in_overlap:
+                    stride_mag = leg_effective_step
+                    y = base_y
+                else:
+                    swing_t = t_active
+                    swing_points = [
+                        (0, base_y,                                    -leg_effective_step),
+                        (0, base_y + p.bezier_p1_height * lift_height, -p.bezier_p1_overshoot * leg_effective_step),
+                        (0, base_y + p.bezier_p2_height * lift_height, -0.1 * leg_effective_step),
+                        (0, base_y + p.bezier_p3_height * lift_height, p.bezier_p3_overshoot * leg_effective_step),
+                        (0, base_y,                                    leg_effective_step),
+                    ]
+                    _, y, stride_mag = bezier_point(swing_points, swing_t)
+            else:
+                # Stance phase: 4 legs move together over 3 phases
+                stance_progress = (self._ripple_phase + t_active) / 3.0
+                stride_mag = leg_effective_step * (1.0 - 2.0 * stance_progress)
+                y = base_y
+            
+            # Apply leg rotation
+            x_prime, z_prime = self._apply_leg_rotation_simple(leg, x, stride_mag, walk_dir)
+            self._feet[leg] = FootTarget(x=x_prime, y=y, z=z_prime)
+    
+    def _apply_leg_rotation_simple(self, leg: int, base_x: float, stride_z: float, walk_dir: float) -> Tuple[float, float]:
+        """Apply per-leg rotation (simplified version without debug return values)."""
+        base_z = -self.params.base_x_mm * LEG_BASE_SIN[leg]
+        base_x_calc = self.params.base_x_mm * LEG_BASE_COS[leg]
+        sign = 1.0 if leg in (LEG_LF, LEG_LM, LEG_LR) else -1.0
+        full_angle = math.radians(LEG_BASE_ROTATION_DEG[leg]) + sign * math.radians(walk_dir * 90.0)
+        cos_angle = math.cos(full_angle)
+        sin_angle = math.sin(full_angle)
+        
+        stride_x_prime = stride_z * sin_angle
+        stride_z_prime = stride_z * cos_angle
+        
+        return base_x_calc + stride_x_prime, stride_z_prime
+
+
+#----------------------------------------------------------------------------------------------------------------------
 # Stationary Test Pattern
 #----------------------------------------------------------------------------------------------------------------------
 
@@ -591,6 +914,179 @@ class StationaryPattern(GaitEngine):
             z_prime = z
         
         return x_prime, z_prime
+
+
+#----------------------------------------------------------------------------------------------------------------------
+# Gait Transition Manager
+#----------------------------------------------------------------------------------------------------------------------
+
+class GaitTransitionState(Enum):
+    """State machine for gait transitions."""
+    IDLE = auto()           # No transition pending
+    WAITING = auto()        # Waiting for phase boundary in current gait
+    BLENDING = auto()       # Actively blending between gaits
+    COMPLETE = auto()       # Transition finished, ready to clean up
+
+
+class GaitTransition:
+    """Manages smooth phase-locked transitions between gait types.
+    
+    Strategy: Phase-Locked with Blending
+    1. When transition requested, mark pending and wait for current gait's phase end
+    2. At phase boundary, start blending: run both gaits in parallel
+    3. Interpolate foot positions from old to new gait over blend duration
+    4. Complete transition when blend finished
+    
+    This ensures no leg is mid-swing when transition starts, and provides
+    smooth motion interpolation during the switch.
+    """
+    
+    # Default blend duration (ms) - one phase of the faster gait
+    DEFAULT_BLEND_MS = 500
+    
+    def __init__(self, blend_ms: int = None):
+        self.state = GaitTransitionState.IDLE
+        self.blend_ms = blend_ms or self.DEFAULT_BLEND_MS
+        
+        # Gaits involved in transition
+        self._from_gait: Optional[GaitEngine] = None
+        self._to_gait: Optional[GaitEngine] = None
+        
+        # Transition timing
+        self._blend_start_ms: int = 0
+        self._blend_elapsed_ms: int = 0
+        
+        # Track phase at transition request (to detect boundary crossing)
+        self._waiting_phase: int = -1
+    
+    def request_transition(self, from_gait: GaitEngine, to_gait: GaitEngine) -> bool:
+        """Request a transition from current gait to new gait.
+        
+        Args:
+            from_gait: Currently running gait engine
+            to_gait: New gait engine to transition to (should be initialized but not started)
+            
+        Returns:
+            True if transition was queued, False if already transitioning
+        """
+        if self.state != GaitTransitionState.IDLE:
+            return False  # Already transitioning
+        
+        self._from_gait = from_gait
+        self._to_gait = to_gait
+        self._waiting_phase = from_gait._phase if hasattr(from_gait, '_phase') else 0
+        self.state = GaitTransitionState.WAITING
+        return True
+    
+    def tick(self, dt_seconds: float = None) -> Tuple[Optional[List[List[float]]], bool]:
+        """Process one tick of the transition.
+        
+        Call this instead of the gait engine's tick() when a transition is active.
+        
+        Args:
+            dt_seconds: Time since last tick
+            
+        Returns:
+            Tuple of (foot_targets, is_complete):
+            - foot_targets: 6x3 array of foot positions, or None if no transition active
+            - is_complete: True when transition is finished (caller should switch to new gait)
+        """
+        if self.state == GaitTransitionState.IDLE:
+            return None, False
+        
+        if self.state == GaitTransitionState.WAITING:
+            # Tick the from_gait normally
+            feet_from = self._from_gait.tick(dt_seconds)
+            
+            # Check if phase boundary crossed (for tripod) or use general check
+            current_phase = getattr(self._from_gait, '_phase', 0)
+            wave_phase = getattr(self._from_gait, '_wave_phase', -1)
+            ripple_phase = getattr(self._from_gait, '_ripple_phase', -1)
+            
+            # Detect any phase transition
+            phase_changed = False
+            if wave_phase >= 0:  # WaveGait
+                phase_changed = wave_phase != self._waiting_phase
+            elif ripple_phase >= 0:  # RippleGait
+                phase_changed = ripple_phase != self._waiting_phase
+            else:  # TripodGait or others
+                phase_changed = current_phase != self._waiting_phase
+            
+            if phase_changed:
+                # Phase boundary reached - start blending
+                self.state = GaitTransitionState.BLENDING
+                self._blend_start_ms = self._from_gait._elapsed_ms
+                self._blend_elapsed_ms = 0
+                
+                # Start the new gait (copy relevant timing from old gait)
+                self._to_gait.params.speed_scale = self._from_gait.params.speed_scale
+                self._to_gait.params.heading_deg = self._from_gait.params.heading_deg
+                self._to_gait.params.turn_rate_deg_s = self._from_gait.params.turn_rate_deg_s
+                self._to_gait._smoothed_speed = self._from_gait._smoothed_speed
+                self._to_gait._smoothed_heading = self._from_gait._smoothed_heading
+                self._to_gait._smoothed_turn_rate = self._from_gait._smoothed_turn_rate
+                self._to_gait.start()
+            
+            return feet_from, False
+        
+        if self.state == GaitTransitionState.BLENDING:
+            # Tick both gaits
+            feet_from = self._from_gait.tick(dt_seconds)
+            feet_to = self._to_gait.tick(dt_seconds)
+            
+            # Update blend elapsed time
+            dt_ms = int((dt_seconds or 0.006) * 1000)
+            self._blend_elapsed_ms += dt_ms
+            
+            # Calculate blend factor (0 = all old, 1 = all new)
+            blend_t = min(1.0, self._blend_elapsed_ms / self.blend_ms)
+            
+            # Smooth blend using ease-in-out (cosine interpolation)
+            # This gives smooth acceleration/deceleration at blend boundaries
+            blend_factor = 0.5 * (1.0 - math.cos(blend_t * math.pi))
+            
+            # Interpolate foot positions
+            blended_feet = []
+            for i in range(NUM_LEGS):
+                blended = [
+                    feet_from[i][0] * (1.0 - blend_factor) + feet_to[i][0] * blend_factor,
+                    feet_from[i][1] * (1.0 - blend_factor) + feet_to[i][1] * blend_factor,
+                    feet_from[i][2] * (1.0 - blend_factor) + feet_to[i][2] * blend_factor,
+                ]
+                blended_feet.append(blended)
+            
+            # Check if blend complete
+            if blend_t >= 1.0:
+                self.state = GaitTransitionState.COMPLETE
+                return blended_feet, True
+            
+            return blended_feet, False
+        
+        if self.state == GaitTransitionState.COMPLETE:
+            return None, True
+        
+        return None, False
+    
+    def get_target_gait(self) -> Optional[GaitEngine]:
+        """Return the gait we're transitioning to (for caller to use after completion)."""
+        return self._to_gait
+    
+    def reset(self) -> None:
+        """Reset transition state (call after completing transition)."""
+        self.state = GaitTransitionState.IDLE
+        self._from_gait = None
+        self._to_gait = None
+        self._waiting_phase = -1
+        self._blend_start_ms = 0
+        self._blend_elapsed_ms = 0
+    
+    def is_active(self) -> bool:
+        """Check if a transition is in progress."""
+        return self.state != GaitTransitionState.IDLE
+    
+    def get_state_name(self) -> str:
+        """Get human-readable state name."""
+        return self.state.name
 
 
 #----------------------------------------------------------------------------------------------------------------------

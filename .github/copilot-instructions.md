@@ -2,6 +2,30 @@
 
 These rules help AI coding agents work productively in this repo. Keep edits small, deterministic, and aligned with the Teensy 4.1 + Arduino 1.8.19 constraints.
 
+---
+
+## ⚠️ CRITICAL: Version & Changelog Updates (DO NOT SKIP)
+
+**EVERY code change MUST include these updates before task completion:**
+
+1. **Bump version** in source file:
+   - Firmware: `FW_VERSION` in `.ino`
+   - Python controller: `CONTROLLER_VERSION` in `controller.py`
+2. **Increment build number**: `CONTROLLER_BUILD` / firmware build
+3. **Add inline changelog entry** (top of `.ino` or `controller.py`): date, version, summary
+4. **Add entry to `CHANGELOG.md`** at repo root
+
+### Pre-commit checklist (verify before completing ANY task)
+- [ ] Version bumped in source file
+- [ ] Build number incremented
+- [ ] Inline changelog updated (date, version, one-line summary)
+- [ ] `CHANGELOG.md` updated with full description
+- [ ] `docs/TODO.md` updated if task was listed there
+
+**Do NOT mark a task complete without these updates.**
+
+---
+
 ## Big picture
 - Target: Teensy 4.1 controlling 18x Hiwonder HTS‑35S serial bus servos via the lx16a‑servo library.
 - Buses: one serial bus per leg (6 total), 3 servos each.
