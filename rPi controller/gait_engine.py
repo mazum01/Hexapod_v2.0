@@ -653,6 +653,12 @@ class WaveGait(GaitEngine):
         
         # The currently swinging leg
         swing_leg = WAVE_SEQUENCE[self._wave_phase]
+
+        # Map leg -> its index in the wave sequence so stance legs can be
+        # distributed across the stance trajectory instead of marching in sync.
+        # Without this offset, all stance legs share the same stride position and
+        # the gait tends to "walk in place".
+        wave_index_by_leg = {leg: idx for idx, leg in enumerate(WAVE_SEQUENCE)}
         
         for leg in range(NUM_LEGS):
             x = p.base_x_mm
@@ -680,8 +686,14 @@ class WaveGait(GaitEngine):
                     ]
                     _, y, stride_mag = bezier_point(swing_points, swing_t)
             else:
-                # Stance phase: All stance legs move together over 6 phases
-                stance_progress = (self._wave_phase + t_active) / 6.0
+                # Stance phase: 5 phases long (since 1 of 6 phases is swing for this leg).
+                # Compute where this leg is along its stance trajectory based on how many
+                # phases have elapsed since it last swung.
+                idx_leg = wave_index_by_leg.get(leg, 0)
+                phases_since_swing = (self._wave_phase - idx_leg) % 6
+                # phases_since_swing is 1..5 for stance legs; 0 for the swing leg.
+                stance_phase = max(0, phases_since_swing - 1)  # 0..4
+                stance_progress = (stance_phase + t_active) / 5.0  # 0..1
                 stride_mag = leg_effective_step * (1.0 - 2.0 * stance_progress)
                 y = base_y
             
@@ -796,6 +808,12 @@ class RippleGait(GaitEngine):
         
         # The currently swinging legs
         swing_legs = RIPPLE_GROUPS[self._ripple_phase]
+
+        # Map leg -> its index in the ripple group sequence so stance legs can be
+        # distributed across the stance trajectory instead of marching in sync.
+        ripple_index_by_leg = {
+            leg: idx for idx, group in enumerate(RIPPLE_GROUPS) for leg in group
+        }
         
         for leg in range(NUM_LEGS):
             x = p.base_x_mm
@@ -823,8 +841,14 @@ class RippleGait(GaitEngine):
                     ]
                     _, y, stride_mag = bezier_point(swing_points, swing_t)
             else:
-                # Stance phase: 4 legs move together over 3 phases
-                stance_progress = (self._ripple_phase + t_active) / 3.0
+                # Stance phase: 2 phases long (since 1 of 3 phases is swing for this leg).
+                # Compute where this leg is along its stance trajectory based on how many
+                # phases have elapsed since it last swung.
+                idx_leg = ripple_index_by_leg.get(leg, 0)
+                phases_since_swing = (self._ripple_phase - idx_leg) % 3
+                # phases_since_swing is 1..2 for stance legs; 0 for swing legs.
+                stance_phase = max(0, phases_since_swing - 1)  # 0..1
+                stance_progress = (stance_phase + t_active) / 2.0  # 0..1
                 stride_mag = leg_effective_step * (1.0 - 2.0 * stance_progress)
                 y = base_y
             

@@ -1,15 +1,18 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-11-14 (Impedance + IMP commands FW 0.2.13)
-Owner: Hexapod v2.0 firmware (MARS)
+Last updated: 2025-12-15 (PID/IMP/EST menu persistence + docs cleanup; controller Ctrl 0.5.27 b138)
+Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
 - [ ] not-started | [~] in-progress | [x] completed
 - Keep items short and actionable; mirror high-level plan in docs/PROJECT_SPEC.md when relevant.
 - Copilot will update this file when TODOs change, and reference it in commits.
+ - Reminder: On any behavior change or TODO completion, also bump FW/Controller versions, update in-file change logs, update CHANGELOG.md, and keep docs/USER_MANUAL.md in sync with the new versions.
 
-## Open tasks
+## Open tasks (firmware)
 
+ - [x] Auto-generate missing config keys on boot (2025-12-09)
+  - Added `configWriteDefaults()` called after `configLoad()` in setup() to ensure all known config keys exist in /config.txt with code-default values. Fixes TUCK params and other settings disappearing on reboot.
  
  - [x] CSV logging to SD (2025-11-09 → 2025-11-10)
   - Phase 1 + FULL mode implemented; size rotation; tail/clear; leg-aggregated rows; per-servo OOS; settings persistence (RATE/MODE/HEADER/ROTATE/MAXKB) excluding enabled. Remaining future (deferred): Bresenham sampling, column mask/filter, compression/binary format.
@@ -80,6 +83,100 @@ Conventions
   - Increment FW_VERSION patch with every assistant-made code change. Update main .ino header and CHANGELOG entries when a TODO is completed or behavior changes; skip verbose changelog spam for pure profiling/formatting edits.
  - [~] Confirm major/minor version bumps
    - Major/minor version increments require explicit user confirmation. Patch and FW_BUILD monotonic can auto-increment with edits.
+
+  ## Python controller TODOs
+
+  1. [ ] Align commands with firmware
+    - Goal: Diff Python command usage vs current Teensy HELP output; identify missing abstractions (e.g., STATUS polling, SAFETY toggles).
+    - Deliverable: Proposed command map + deprecation list + wrapper strategy.
+    - Acceptance: Document approved; ready for incremental implementation tasks.
+
+  2. [ ] Logging enhancements (controller)
+    - Goal: Optional structured event log (enable, posture, errors) with timestamps.
+    - Deliverable: Simple logger writing CSV or JSON lines; toggle via config.
+    - Acceptance: Log captures listed events; disabled mode has zero measurable overhead.
+
+  3. [ ] Telemetry data structures upgrade
+    - Goal: Use lightweight structured containers for servo/system telemetry for clarity.
+    - Deliverable: Definitions + parser returning structured objects.
+    - Acceptance: Parsing performance acceptable; code readability improved.
+
+  4. [ ] Joystick command tolerance filtering
+    - Goal: Reduce spam by skipping tiny deltas.
+    - Deliverable: Threshold logic before send_cmd.
+    - Acceptance: Serial traffic decreased; control feel unchanged.
+
+  5. [ ] Document telemetry field mapping
+    - Goal: Clarify S1/S2/S3/S4 schemas and indices.
+    - Deliverable: Inline comments + doc snippet.
+    - Acceptance: New contributors can interpret telemetry quickly.
+
+  6. [ ] Configurable voltage/temp thresholds
+    - Goal: Move color palette thresholds to config.
+    - Deliverable: Config keys + usage in display rendering.
+    - Acceptance: Adjusting file changes display scaling.
+
+  7. [ ] Split display rendering
+    - Goal: Break UpdateDisplay into pure sub-functions.
+    - Deliverable: Functions (render_status_text, render_servo_bars, apply_overlays, mirror_output).
+    - Acceptance: Top-level function shorter & clearer.
+
+  8. [x] Honor firmware safety state (2025-12-12)
+    - Goal: Make Python controller read and obey Teensy safety/lockout state instead of ignoring it.
+    - Deliverable: Safety flags parsed from S1 (and/or STATUS), with Python-side guards that block gaits/postures when safety is tripped.
+    - Acceptance: When firmware signals safety lockout, Python no longer starts gaits or motion until cleared.
+    - Status: Implemented via S5 safety telemetry segment, Python-side safety state, hard lockout response (stop gait + `LEG ALL DISABLE` + `DISABLE`), menu Safety tab, and full-screen safety overlay while lockout is active.
+
+  9. [x] Make Wave gait translate (2025-12-13)
+    - Goal: Fix WaveGait so it produces forward translation instead of marching in place.
+    - Deliverable: Adjusted wave gait parameters/phase offsets so body advances forward under wave pattern.
+    - Acceptance: Selecting Wave gait on hardware moves robot forward at reasonable speed with stable stance.
+    - Status: Updated WaveGait stance phase distribution so stance legs are distributed across the stride rather than moving in sync.
+
+  10. [x] Eye vertical offset wiring (2025-12-10)
+    - Goal: Make the "Vertical" (V Center) parameter in the Eyes tab actually move eye positions.
+    - Deliverable: Proper plumbing from MarsMenu value into SimpleEyes / DisplayThread so vertical offset changes render location.
+    - Acceptance: Changing eye vertical parameter visibly shifts eyes up/down on the LCD.
+
+  11. [x] Finer eye spacing granularity (2025-12-10)
+    - Goal: Reduce horizontal spacing step size for finer tuning.
+    - Deliverable: Updated menu range/step and controller-to-eyes mapping using smaller increments.
+    - Acceptance: Eyes spacing adjustment feels smoother with many distinct positions.
+
+  12. [x] Reverse strafe direction (2025-12-10)
+    - Goal: Fix left/right strafe mapping so joystick X causes intuitive sideways motion.
+    - Deliverable: Adjusted sign convention in gait input→foot target mapping so left stick X and right stick X produce correct lateral direction.
+    - Acceptance: On hardware, pushing stick left strafes left; pushing right strafes right.
+
+  13. [x] Reduce turning gain (2025-12-11)
+    - Goal: Lower yaw/turn rate gain so outside legs do not collide for small joystick inputs.
+    - Deliverable: Tuned mapping from turn joystick axis to gait_engine turn_rate_deg_s (and/or differential stride) with appropriate deadzone.
+    - Acceptance: With modest turn input, robot arcs smoothly without leg-leg collisions; full-deflection still allows tight turns.
+
+  14. [x] Show firmware/controller versions at startup (2025-12-08)
+    - Goal: Display Teensy firmware build (date + FW_VERSION/FW_BUILD) and Python controller version/build alongside the MARS banner on controller startup.
+    - Deliverable: Startup banner line (or two) printed over USB serial and/or LCD that includes firmware and controller versions/dates in a concise, non-blocking way.
+    - Acceptance: On launch, the controller prints both firmware and controller version info; values stay in sync with FW_VERSION/FW_BUILD and CONTROLLER_VERSION/CONTROLLER_BUILD.
+
+  15. [x] Rename Arachnotron banner to MARS
+    - Goal: Update the controller’s startup banner text to use the new project name "M.A.R.S. — Modular Autonomous Robotic System" instead of "Arachnotron".
+    - Deliverable: Startup output and any on-screen text that still says Arachnotron are updated to say M.A.R.S., without adding extra blocking delay.
+    - Acceptance: On controller startup, the banner clearly shows the M.A.R.S. name and no remaining Arachnotron references in primary startup messaging.
+
+  16. [x] Mirror window keyboard mapping (2025-12-08)
+    - Goal: Fully map MarsMenu keyboard controls onto the OpenCV mirror window key stream so menu navigation feels as complete and responsive as the curses-based path.
+    - Deliverable: cv2.waitKey handling that supports tab navigation, item navigation, value adjustment, selection, and exit, mirroring the arrow/A/D/Esc behavior used in the terminal.
+    - Acceptance: With focus on the mirror window, keys move items, adjust values, switch tabs, and close the menu; latency is acceptable and behavior matches the terminal controls.
+
+  17. [x] Firmware + controller user manual (2025-12-10)
+    - Goal: Maintain a comprehensive user manual covering both the Teensy firmware (MARS_Hexapod) and the Python controller, including setup, command protocols, menus, safety behaviors, and troubleshooting.
+    - Deliverable: A versioned manual document (`docs/USER_MANUAL.md`) whose revision is explicitly tied to the current FW_VERSION/FW_BUILD and CONTROLLER_VERSION/CONTROLLER_BUILD.
+    - Acceptance: Manual is updated whenever behavior changes; top-of-file revision section references matching firmware and controller versions, and a process note/command imperative is documented to keep the manual in sync with any future code changes.
+
+  18. [x] Dedicated PID/IMP/EST menu tabs (2025-12-15)
+    - Goal: Give PID/IMP/EST separate tabs that display current firmware values and allow updates from the menu.
+    - Deliverable: PID/IMP/EST tabs with LIST polling/parsing and per-field edit callbacks.
+    - Acceptance: Values on-screen match `PID LIST` / `IMP LIST` / `EST LIST`, and edits send the matching firmware commands.
 
 ## Completed
  - [x] Keep STATUS slim (2025-11-12)

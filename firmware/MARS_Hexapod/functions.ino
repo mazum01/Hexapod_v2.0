@@ -114,6 +114,8 @@ extern volatile uint8_t  g_log_sample_div;
 extern volatile uint32_t g_log_tick_counter;
 extern volatile uint8_t  g_log_mode;
 extern volatile bool     g_log_header;
+extern volatile bool     g_log_rotate;
+extern volatile uint32_t g_log_max_bytes;
 #endif
 
 // Forward declaration for loop Hz apply helper in main sketch
@@ -231,6 +233,43 @@ void telemetryPrintS3()
       if (!(leg == 5 && j == 2)) Serial.print(',');
     }
   }
+  Serial.print('\n');
+}
+
+// Prints compact S5 segment with detailed safety state and config.
+// Format:
+//   S5:<lockout>,<cause_mask>,<override_mask>,<clearance_mm>,<soft_limits>,<collision>,<temp_C>
+// Where:
+//   lockout       : 0/1  (g_lockout)
+//   cause_mask    : bitmask of LockoutCauseBits (decimal)
+//   override_mask : bitmask of overrides (decimal)
+//   clearance_mm  : integer-rounded safety clearance in mm
+//   soft_limits   : 0/1  (g_safety_soft_limits_enabled)
+//   collision     : 0/1  (g_safety_collision_enabled)
+//   temp_C        : integer over-temp lockout threshold in °C
+void telemetryPrintS5()
+{
+  if (!Serial) return;
+  Serial.print(F("S5:"));
+  // lockout flag
+  Serial.print(g_lockout ? 1 : 0);
+  Serial.print(',');
+  // cause and override bitmasks (decimal for easier parsing on Pi)
+  Serial.print((unsigned int)g_lockout_causes);
+  Serial.print(',');
+  Serial.print((unsigned int)g_override_mask);
+  Serial.print(',');
+  // clearance_mm (rounded) and safety toggles
+  int clr_mm = (int)lroundf(g_safety_clearance_mm);
+  Serial.print(clr_mm);
+  Serial.print(',');
+  Serial.print(g_safety_soft_limits_enabled ? 1 : 0);
+  Serial.print(',');
+  Serial.print(g_safety_collision_enabled ? 1 : 0);
+  Serial.print(',');
+  // Over-temp lockout threshold in °C (convert from 0.1C units)
+  int temp_C = (int)(g_safety_temp_lockout_c10 / 10);
+  Serial.print(temp_C);
   Serial.print('\n');
 }
 
@@ -1538,6 +1577,279 @@ void refreshOffsetsAtStartup() {
       g_offset_cd[L][J] = cd;
     }
   }
+}
+
+// -----------------------------------------------------------------------------
+// Config write helper: update or append key=value in /config.txt on SD
+// Used by runtime commands (e.g., TUCK SET) to persist settings.
+// Uses temp file pattern to safely update config without data loss.
+// -----------------------------------------------------------------------------
+void configSetKeyValue(const char* key, const char* val)
+{
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+  if (!key || !val) return;
+  if (!SD.begin(BUILTIN_SDCARD)) return;
+
+  // Build new key=value line
+  char kv[96];
+  kv[0] = 0;
+  strncat(kv, key, sizeof(kv) - 1);
+  strncat(kv, "=", sizeof(kv) - 1 - strlen(kv));
+  strncat(kv, val, sizeof(kv) - 1 - strlen(kv));
+
+  // Open source and temp destination
+  File fin = SD.open("/config.txt", FILE_READ);
+  File fout = SD.open("/config.tmp", FILE_WRITE);
+  if (!fout) {
+    if (fin) fin.close();
+    return;
+  }
+
+  bool replaced = false;
+  size_t keyLen = strlen(key);
+
+  if (fin) {
+    static char linebuf[128];
+    int llen = 0;
+    while (fin.available()) {
+      int ch = fin.read();
+      if (ch < 0) break;
+      if (ch == '\r') continue;
+      if (ch == '\n') {
+        linebuf[llen] = 0;
+        // Check if this line matches the key
+        char* eq = strchr(linebuf, '=');
+        bool match = false;
+        if (eq) {
+          // Compute existing key length (chars before '=')
+          size_t existingKeyLen = (size_t)(eq - linebuf);
+          // Trim trailing spaces from existing key
+          while (existingKeyLen > 0 && (linebuf[existingKeyLen - 1] == ' ' || linebuf[existingKeyLen - 1] == '\t')) --existingKeyLen;
+          // Skip leading spaces
+          const char* lineKey = linebuf;
+          while (*lineKey == ' ' || *lineKey == '\t') { ++lineKey; if (existingKeyLen > 0) --existingKeyLen; }
+          // Compare
+          if (keyLen == existingKeyLen && strncmp(lineKey, key, keyLen) == 0) {
+            match = true;
+          }
+        }
+        if (match) {
+          fout.println(kv);
+          replaced = true;
+        } else if (llen > 0) {
+          fout.println(linebuf);
+        }
+        llen = 0;
+      } else if (llen + 1 < (int)sizeof(linebuf)) {
+        linebuf[llen++] = (char)ch;
+      }
+    }
+    // Handle final line without newline
+    if (llen > 0) {
+      linebuf[llen] = 0;
+      char* eq = strchr(linebuf, '=');
+      bool match = false;
+      if (eq) {
+        size_t existingKeyLen = (size_t)(eq - linebuf);
+        while (existingKeyLen > 0 && (linebuf[existingKeyLen - 1] == ' ' || linebuf[existingKeyLen - 1] == '\t')) --existingKeyLen;
+        const char* lineKey = linebuf;
+        while (*lineKey == ' ' || *lineKey == '\t') { ++lineKey; if (existingKeyLen > 0) --existingKeyLen; }
+        if (keyLen == existingKeyLen && strncmp(lineKey, key, keyLen) == 0) {
+          match = true;
+        }
+      }
+      if (match) {
+        fout.println(kv);
+        replaced = true;
+      } else {
+        fout.println(linebuf);
+      }
+    }
+    fin.close();
+  }
+
+  // Append if not replaced
+  if (!replaced) {
+    fout.println(kv);
+  }
+
+  fout.close();
+
+  // Atomic swap: remove old, rename temp to config
+  SD.remove("/config.txt");
+  SD.rename("/config.tmp", "/config.txt");
+#else
+  (void)key; (void)val;
+#endif
+}
+
+// -----------------------------------------------------------------------------
+// Config defaults writer: Ensures all known config keys exist with their
+// current (code-default or previously loaded) values. Called once at boot
+// after configLoad() to populate missing keys so /config.txt is complete.
+// Uses configSetKeyValue for each key; existing keys are updated in-place,
+// missing keys are appended.
+// -----------------------------------------------------------------------------
+void configWriteDefaults()
+{
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+  char buf[48];
+
+  // --- Core system ---
+  snprintf(buf, sizeof(buf), "%u", g_loop_hz);
+  configSetKeyValue("loop_hz", buf);
+
+  snprintf(buf, sizeof(buf), "%u", g_servo_fb_fail_threshold);
+  configSetKeyValue("oos.fail_threshold", buf);
+
+  // --- Rate limit ---
+  // Store as deg/s (cdeg/100)
+  if (g_rate_limit_cdeg_per_s > 0) {
+    float dps = g_rate_limit_cdeg_per_s / 100.0f;
+    dtostrf(dps, 1, 1, buf);
+  } else {
+    snprintf(buf, sizeof(buf), "0");
+  }
+  configSetKeyValue("rate_limit.deg_per_s", buf);
+
+  // --- Safety ---
+  configSetKeyValue("safety.soft_limits", g_safety_soft_limits_enabled ? "true" : "false");
+  configSetKeyValue("safety.collision", g_safety_collision_enabled ? "true" : "false");
+  snprintf(buf, sizeof(buf), "%d", g_safety_temp_lockout_c10 / 10);
+  configSetKeyValue("safety.temp_lockout_c", buf);
+  dtostrf(g_safety_clearance_mm, 1, 0, buf);
+  configSetKeyValue("safety.clearance_mm", buf);
+
+  // --- PID ---
+  configSetKeyValue("pid.enabled", g_pid_enabled ? "true" : "false");
+  configSetKeyValue("pid.mode", (g_pid_mode == 1) ? "shadow" : "active");
+  snprintf(buf, sizeof(buf), "%u", g_pid_shadow_report_hz);
+  configSetKeyValue("pid.shadow_report_hz", buf);
+  // Per-joint gains
+  const char* jointNames[3] = {"coxa", "femur", "tibia"};
+  for (int j = 0; j < 3; ++j) {
+    char keyBuf[40];
+    snprintf(keyBuf, sizeof(keyBuf), "pid.kp_milli.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_pid_kp_milli[j]);
+    configSetKeyValue(keyBuf, buf);
+
+    snprintf(keyBuf, sizeof(keyBuf), "pid.ki_milli.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_pid_ki_milli[j]);
+    configSetKeyValue(keyBuf, buf);
+
+    snprintf(keyBuf, sizeof(keyBuf), "pid.kd_milli.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_pid_kd_milli[j]);
+    configSetKeyValue(keyBuf, buf);
+
+    snprintf(keyBuf, sizeof(keyBuf), "pid.kd_alpha_milli.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_pid_kd_alpha_milli[j]);
+    configSetKeyValue(keyBuf, buf);
+  }
+
+  // --- Estimator ---
+  snprintf(buf, sizeof(buf), "%u", g_est_cmd_alpha_milli);
+  configSetKeyValue("est.cmd_alpha_milli", buf);
+  snprintf(buf, sizeof(buf), "%u", g_est_meas_alpha_milli);
+  configSetKeyValue("est.meas_alpha_milli", buf);
+  snprintf(buf, sizeof(buf), "%u", g_est_meas_vel_alpha_milli);
+  configSetKeyValue("est.meas_vel_alpha_milli", buf);
+
+  // --- Impedance ---
+  configSetKeyValue("imp.enabled", g_impedance.config().enabled ? "true" : "false");
+  {
+    const char* modeStr = "off";
+    if (g_impedance.config().mode == IMP_MODE_JOINT) modeStr = "joint";
+    else if (g_impedance.config().mode == IMP_MODE_CART) modeStr = "cart";
+    configSetKeyValue("imp.mode", modeStr);
+  }
+  snprintf(buf, sizeof(buf), "%u", g_impedance.config().joint_deadband_cd);
+  configSetKeyValue("imp.joint_deadband_cd", buf);
+  dtostrf(g_impedance.config().cart_deadband_mm, 1, 1, buf);
+  configSetKeyValue("imp.cart_deadband_mm", buf);
+  snprintf(buf, sizeof(buf), "%u", g_impedance.config().output_scale_milli);
+  configSetKeyValue("imp.output_scale_milli", buf);
+  // Joint impedance gains
+  for (int j = 0; j < 3; ++j) {
+    char keyBuf[48];
+    snprintf(keyBuf, sizeof(keyBuf), "imp.joint.k_spring_milli.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_impedance.config().joint.k_spring_milli[j]);
+    configSetKeyValue(keyBuf, buf);
+
+    snprintf(keyBuf, sizeof(keyBuf), "imp.joint.k_damp_milli.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_impedance.config().joint.k_damp_milli[j]);
+    configSetKeyValue(keyBuf, buf);
+  }
+  // Cartesian impedance gains
+  const char* axisNames[3] = {"x", "y", "z"};
+  for (int a = 0; a < 3; ++a) {
+    char keyBuf[48];
+    snprintf(keyBuf, sizeof(keyBuf), "imp.cart.k_spring_milli.%s", axisNames[a]);
+    snprintf(buf, sizeof(buf), "%u", g_impedance.config().cart.k_spring_milli[a]);
+    configSetKeyValue(keyBuf, buf);
+
+    snprintf(keyBuf, sizeof(keyBuf), "imp.cart.k_damp_milli.%s", axisNames[a]);
+    snprintf(buf, sizeof(buf), "%u", g_impedance.config().cart.k_damp_milli[a]);
+    configSetKeyValue(keyBuf, buf);
+  }
+
+  // --- Compliance ---
+  configSetKeyValue("comp.enabled", g_comp_enabled ? "true" : "false");
+  snprintf(buf, sizeof(buf), "%u", g_comp_leak_milli);
+  configSetKeyValue("comp.leak_milli", buf);
+  for (int j = 0; j < 3; ++j) {
+    char keyBuf[40];
+    snprintf(keyBuf, sizeof(keyBuf), "comp.kp_milli.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_comp_kp_milli[j]);
+    configSetKeyValue(keyBuf, buf);
+
+    snprintf(keyBuf, sizeof(keyBuf), "comp.range_cd.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_comp_range_cd[j]);
+    configSetKeyValue(keyBuf, buf);
+
+    snprintf(keyBuf, sizeof(keyBuf), "comp.deadband_cd.%s", jointNames[j]);
+    snprintf(buf, sizeof(buf), "%u", g_comp_deadband_cd[j]);
+    configSetKeyValue(keyBuf, buf);
+  }
+
+  // --- TUCK parameters ---
+  snprintf(buf, sizeof(buf), "%d", (int)g_tuck_tibia_cd);
+  configSetKeyValue("tuck.tibia_cd", buf);
+  snprintf(buf, sizeof(buf), "%d", (int)g_tuck_femur_cd);
+  configSetKeyValue("tuck.femur_cd", buf);
+  snprintf(buf, sizeof(buf), "%d", (int)g_tuck_coxa_cd);
+  configSetKeyValue("tuck.coxa_cd", buf);
+  snprintf(buf, sizeof(buf), "%d", (int)g_tuck_tol_tibia_cd);
+  configSetKeyValue("tuck.tol_tibia_cd", buf);
+  snprintf(buf, sizeof(buf), "%d", (int)g_tuck_tol_other_cd);
+  configSetKeyValue("tuck.tol_other_cd", buf);
+  snprintf(buf, sizeof(buf), "%u", (unsigned)g_tuck_timeout_ms);
+  configSetKeyValue("tuck.timeout_ms", buf);
+
+  // --- Tripod test gait ---
+  snprintf(buf, sizeof(buf), "%lu", (unsigned long)g_test_overlap_pct);
+  configSetKeyValue("test.trigait.overlap_pct", buf);
+  snprintf(buf, sizeof(buf), "%lu", (unsigned long)g_test_cycle_ms);
+  configSetKeyValue("test.trigait.cycle_ms", buf);
+  snprintf(buf, sizeof(buf), "%d", (int)g_test_base_y_mm);
+  configSetKeyValue("test.trigait.height_mm", buf);
+  snprintf(buf, sizeof(buf), "%d", (int)g_test_base_x_mm);
+  configSetKeyValue("test.trigait.basex_mm", buf);
+  snprintf(buf, sizeof(buf), "%d", (int)g_test_step_len_mm);
+  configSetKeyValue("test.trigait.steplen_mm", buf);
+  snprintf(buf, sizeof(buf), "%d", (int)g_test_lift_y_mm);
+  configSetKeyValue("test.trigait.lift_mm", buf);
+
+  // --- Logging ---
+  configSetKeyValue("logging.enabled", g_log_enabled ? "true" : "false");
+  snprintf(buf, sizeof(buf), "%u", g_log_rate_hz);
+  configSetKeyValue("logging.rate_hz", buf);
+  snprintf(buf, sizeof(buf), "%u", g_log_mode);
+  configSetKeyValue("logging.mode", buf);
+  configSetKeyValue("logging.header", g_log_header ? "true" : "false");
+  configSetKeyValue("logging.rotate", g_log_rotate ? "true" : "false");
+  snprintf(buf, sizeof(buf), "%lu", (unsigned long)(g_log_max_bytes / 1024UL));
+  configSetKeyValue("logging.max_kb", buf);
+#endif
 }
 
 // -----------------------------------------------------------------------------

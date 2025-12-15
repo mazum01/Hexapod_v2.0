@@ -8,7 +8,7 @@ All code must be clearly commented:
 # Hexapod v2.0 Controller — Project Specification (Phase 1)
 Project codename: MARS — Modular Autonomous Robotic System
 
-Last updated: 2025-11-18 (Estimator tuning finalized + STAND/TUCK idle semantics FW 0.2.15)
+Last updated: 2025-12-15 (PID/IMP/EST menu tabs + controller.ini persistence; Ctrl 0.5.26)
 Target MCU: Teensy 4.1
 Servo type: Hiwonder HTS-35S (serial bus)
 Servo library: lx16a-servo
@@ -260,7 +260,23 @@ PID_SHADOW t_ms=<millis> <LEG>:diff_cd=c/f/t err_cd=c/f/t est_cd=c/f/t tgt_cd=c/
   - `err_cd`: PID error used this tick = base target (pre-PID) − estimate/read.
   - `est_cd`: estimated joint angle (meas-corrected on RR leg; otherwise exponential estimate).
   - `tgt_cd`: base target before PID correction (from IK/command, pre safety+rate limiting).
-  - `lx/ly/lz` are coordinates relative to the leg’s hip origin (LEG-frame), expressed in BODY axes (no COXA_OFFSET translation).
+
+### Telemetry: Safety S5 segment
+
+- Emitted once per tick when telemetry is enabled, alongside S1–S3.
+- Format (comma-separated after `S5:` prefix):
+
+  $$S5:<lockout>,<cause\_mask>,<override\_mask>,<clearance\_mm>,<soft\_limits>,<collision>,<temp\_C>$$
+
+  - `lockout` – 0 or 1 indicating whether firmware safety lockout is active.
+  - `cause_mask` – bitmask of active lockout causes (e.g., TEMP, COLLISION).
+  - `override_mask` – bitmask of safety overrides currently in effect.
+  - `clearance_mm` – current configured `safety.clearance_mm` keep-out distance.
+  - `soft_limits` – 0/1 reflecting `safety.soft_limits` enable state.
+  - `collision` – 0/1 reflecting `safety.collision` enable state.
+  - `temp_C` – over-temperature lockout threshold in °C.
+
+- The Python controller parses S5 into a shared safety state, drives a Safety tab in the MARS menu, renders a full-screen safety overlay when `lockout=1`, and enforces a hard lockout policy (stop gait, `LEG ALL DISABLE`, `DISABLE`, and block new motion until cleared via `SAFETY CLEAR`).
  - Torque policy: `DISABLE` torques off all servos at the next control tick; `ENABLE` does not torque-on any servo automatically. `SERVO ... ENABLE` torques on only when global is enabled; otherwise, it updates masks without sending torque-on.
 
 Core commands (Phase 1 + Phase 2 PID/impedance)

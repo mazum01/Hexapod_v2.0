@@ -126,11 +126,41 @@
 # 2025-12-07  v0.4.40 b106: LCARS color variety: frame elements, tabs, items use distinct palette colors; first tap to wake display is now ignored.
 # 2025-12-07  v0.4.41 b107: First-tap fix: properly tracks finger lift after wake before allowing subsequent touches to be processed.
 # 2025-12-07  v0.4.42 b108: First-tap fix v2: simplified to counter-based approach - ignore touches until finger lifts after wake.
+# 2025-12-07  v0.4.43 b109: First-tap fix v3: changed counter from 2 to 1 - only ignore the wake touch, not the next touch too.
+# 2025-12-07  v0.5.0 b110: Touchscreen config menu complete (TODO #4): Auto-Disable timeout, Gait controls (Start/Stop, params), Posture buttons, INFO telemetry updates.
+# 2025-12-07  v0.5.1 b111: Bugfix: gait callbacks now use _savedGaitLiftMm/_savedGaitWidthMm globals instead of non-existent _gaitLiftMm.
+# 2025-12-08  v0.5.2 b112: Gait fix: reverse joystick Y now correctly drives reverse walking (backward motion instead of forward).
+# 2025-12-08  v0.5.3 b113: Eye fix: eye intensity now responds symmetrically to both forward and reverse gait speed.
+# 2025-12-08  v0.5.4 b114: Gait menu: Cycle Time now wired to gait params and saved config.
+# 2025-12-08  v0.5.5 b115: Reason-aware auto-disable: tuck auto-disable no longer fires after subsequent posture/gait commands.
+# 2025-12-08  v0.5.6 b116: System tab telemetry: added average servo temperature metric.
+# 2025-12-08  v0.5.7 b117: Rebranded controller UI: mirror window title and LCD ASCII logo now use M.A.R.S. — Modular Autonomous Robotic System.
+# 2025-12-08  v0.5.8 b118: Mirror window keyboard mapping now mirrors MarsMenu controls (tab/item/value/select/close) when menu visible.
+# 2025-12-10  v0.5.9 b119: Wired Eyes tab V Center parameter into SimpleEyes vertical offset and display thread baseline; added persistent vertical_offset config key.
+# 2025-12-10  v0.5.10 b120: Reduced Eyes menu Spacing step from 5% to 1% for finer horizontal eye spacing control.
+# 2025-12-10  v0.5.11 b121: Reversed strafe mapping so joystick X left/right produces matching left/right crab-walk motion.
+# 2025-12-11  v0.5.12 b122: Made walking turn gain configurable via MARS Gait menu and persisted it as [gait] turn_max_deg_s in controller.ini.
+# 2025-12-12  v0.5.13 b123: Fixed right-stick turn handler NameError by basing eye intensity on tracked gait speed input instead of an undefined local variable.
+# 2025-12-12  v0.5.14 b124: Restored left-stick Y gait speed mapping and eye intensity behavior (pupil dilation/red fade) while keeping right-stick Y for configurable turn rate.
+# 2025-12-12  v0.5.15 b125: Added S5 safety telemetry parsing, hard safety lock handling (DISABLE + LEG ALL DISABLE), Safety tab in MARS menu, and full-screen safety overlay when firmware reports a lockout.
+# 2025-12-12  v0.5.16 b126: Added tab pagination to MarsMenu so tabs render in fixed, touch-friendly sizes even as more categories are added; only the current page of tabs is shown at once, navigable via existing tab navigation controls. Added on-screen page indicator (e.g., "1/2") near the tab area when multiple pages exist.
+# 2025-12-12  v0.5.17 b127: Moved the tab page indicator above the tab stacks so it never overlaps tab labels, and restyled the LCARS indicator as a small LCARS-style pill integrated into the frame.
+# 2025-12-12  v0.5.18 b128: Extended the Safety tab with explicit actions to send SAFETY OVERRIDE commands (ALL, TEMP, COLLISION, NONE) to the firmware alongside SAFETY CLEAR, allowing safety causes to be selectively overridden from the on-screen menu.
+# 2025-12-13  v0.5.19 b129: Fixed WaveGait foot phase distribution so the Wave gait translates forward instead of marching in place.
+# 2025-12-13  v0.5.20 b130: Fixed RippleGait stance phase distribution so the Ripple gait translates forward instead of marching in place.
+# 2025-12-13  v0.5.21 b131: Menu telemetry: render valid values (e.g., 0.00A) instead of '---'; fix servo temp stats to use S3 schema.
+# 2025-12-13  v0.5.22 b132: Menu telemetry: battery voltage now displays whenever present (0.0V renders as 0.0V, not '---').
+# 2025-12-13  v0.5.23 b133: Menu telemetry: when battery voltage is missing/0, show average servo bus voltage from S3.
+# 2025-12-14  v0.5.24 b134: Menu: Added PID/IMP/EST controls that send firmware commands.
+# 2025-12-15  v0.5.25 b135: Menu: Added dedicated PID/IMP/EST tabs with live LIST polling/parsing and per-field editing.
+# 2025-12-15  v0.5.26 b136: PID/IMP/EST menu: Persist edits to controller.ini ([pid]/[imp]/[est]) so values restore on restart.
+# 2025-12-15  v0.5.26 b137: Docs/cleanup: Updated USER_MANUAL revision/tabs; removed accidental controller-arachnotron file.
+# 2025-12-15  v0.5.27 b138: Version/docs: Startup banner firmware version string updated to match current firmware (0.2.36/b152).
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.4.42"
+CONTROLLER_VERSION = "0.5.27"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 108
+CONTROLLER_BUILD = 138
 #----------------------------------------------------------------------------------------------------------------------
 # Telemetry index constants (S1 schema)
 # These named constants prevent magic numbers and make schema changes explicit.
@@ -265,6 +295,8 @@ class Controller:
         self.steeringMode = SteeringMode.OMNI
         # Auto-disable scheduling
         self.autoDisableAt = None
+        self.autoDisableReason = None  # e.g., "TUCK", "STAND", etc.
+        self.autoDisableGen = 0       # generation counter to detect stale timers
         # Debug telemetry
         self.lastRawS1 = ''
         self.lastParsedS1 = []
@@ -389,12 +421,15 @@ class Controller:
             if self.eyes.update() or self.forceDisplayUpdate:
                 telemetry_stale = (self.teensy is not None and self.lastTelemetryTime is None)
                 robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if len(self.state) > IDX_ROBOT_ENABLED else True
+                safety_active, safety_text = get_safety_overlay_state()
                 UpdateDisplay(self.disp, self.eyes.display_image, self.menu._image, 
-                            self.servo, self.legs, self.state, self.mirror, self.menuState,
-                            teensy_connected=(self.teensy is not None),
-                            controller_connected=(self.controller is not None),
-                            telemetry_stale=telemetry_stale,
-                            robot_enabled=robot_enabled)
+                              self.servo, self.legs, self.state, self.mirror, self.menuState,
+                              teensy_connected=(self.teensy is not None),
+                              controller_connected=(self.controller is not None),
+                              telemetry_stale=telemetry_stale,
+                              robot_enabled=robot_enabled,
+                              safety_active=safety_active,
+                              safety_text=safety_text)
                 self.forceDisplayUpdate = False
                 return True
         except (AttributeError, TypeError) as e:
@@ -434,6 +469,19 @@ class Controller:
         try:
             dataLines = teensyData.splitlines()
             for line in dataLines:
+                line = line.strip()
+                if not line:
+                    continue
+                # Handle non-telemetry single-line responses (LIST outputs)
+                if line.startswith('PID '):
+                    _parse_pid_list_line(line)
+                    continue
+                if line.startswith('IMP '):
+                    _parse_imp_list_line(line)
+                    continue
+                if line.startswith('EST '):
+                    _parse_est_list_line(line)
+                    continue
                 segments = line.split('|')
                 for segment in segments:
                     elements = segment.split(',')
@@ -469,6 +517,26 @@ class Controller:
                         processTelemS4(elements, self.legs)
                         self.lastTelemetryTime = time.time()
                         self.telemetryRetryDeadline = None
+                    elif header == 'S5:':
+                        global _safety_state, _last_safety_lockout, _gaitActive, _gaitEngine
+                        prev_lockout = _safety_state.get("lockout", False)
+                        processTelemS5(elements, _safety_state)
+                        self.lastTelemetryTime = time.time()
+                        self.telemetryRetryDeadline = None
+                        lockout = _safety_state.get("lockout", False)
+                        if lockout and not prev_lockout:
+                            # New safety lockout detected: stop gait and hard-disable
+                            if _gaitActive and _gaitEngine is not None:
+                                _gaitEngine.stop()
+                            _gaitActive = False
+                            try:
+                                send_cmd(b'LEG ALL DISABLE', force=True)
+                                send_cmd(b'DISABLE', force=True)
+                            except Exception:
+                                pass
+                            if self.verbose:
+                                print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
+                        _last_safety_lockout = lockout
         except (ValueError, IndexError) as e:
             # Malformed telemetry line - skip but log in verbose mode
             if self.verbose:
@@ -547,9 +615,11 @@ class Controller:
                             # Select/activate current menu item
                             _marsMenu.select()
                             self.forceDisplayUpdate = True
-                        elif self.teensy is not None:
+                        elif self.teensy is not None and not _safety_state.get("lockout", False):
                             # Normal A button behavior: Stand
                             apply_posture(b'STAND', auto_disable_s=4.0)
+                        elif self.teensy is not None and _safety_state.get("lockout", False) and self.verbose:
+                            print("  Stand blocked: firmware safety lockout is active.", end="\r\n")
                     elif event.code == 305 and event.value == 1:  # B button
                         if self.verbose:
                             print("\nB button pressed", end="\r\n")
@@ -579,8 +649,10 @@ class Controller:
                     elif event.code == 307 and event.value == 1:  # Y tuck (BTN_NORTH)
                         if self.verbose:
                             print("\nY button pressed (Tuck)", end="\r\n")
-                        if self.teensy is not None:
+                        if self.teensy is not None and not _safety_state.get("lockout", False):
                             apply_posture(b'TUCK', auto_disable_s=4.0)
+                        elif self.teensy is not None and _safety_state.get("lockout", False) and self.verbose:
+                            print("  Tuck blocked: firmware safety lockout is active.", end="\r\n")
                     elif event.code == 318 and event.value == 1:  # right joystick press - disable
                         if self.verbose:
                             print("\nRight joystick pressed (Disable)", end="\r\n")
@@ -609,6 +681,10 @@ class Controller:
                             _marsMenu.handle_button('LB')
                             self.forceDisplayUpdate = True
                         elif not _gaitActive:
+                            if _safety_state.get("lockout", False):
+                                if self.verbose:
+                                    print("\nGait start blocked: firmware safety lockout is active.", end="\r\n")
+                                continue
                             # Start gait - cancel any pending auto-disable first
                             _autoDisableAt = None
                             self.autoDisableAt = None
@@ -701,21 +777,22 @@ class Controller:
                     # Gait control: Left stick Y for speed
                     # Joystick range: 0-65535, center=32768, up/forward=0, down/back=65535
                     elif event.code == 1:  # left stick Y
-                        # Normalize to -1.0 (back) to +1.0 (forward)
-                        # up=0 -> +1.0 (forward), center=32768 -> 0, down=65535 -> -1.0 (back)
-                        speed = (32768.0 - event.value) / 32768.0
-                        
+                        # Normalize to -1.0 (forward) to +1.0 (back)
+                        # up=0 -> -1.0 (forward), center=32768 -> 0, down=65535 -> +1.0 (back)
+                        speed = (event.value - 32768.0) / 32768.0
+
                         # Gait speed control
                         if _gaitActive and _gaitEngine is not None:
                             speed_deadzone = speed
                             if abs(speed_deadzone) < 0.1:  # 10% deadzone
                                 speed_deadzone = 0.0
-                            # Store speed for combined heading calculation
+                            # Store speed for gait engine
                             self._gaitSpeedInput = speed_deadzone
                             self._updateGaitHeading()
-                        
+
                         # Eye control (always active, but skip display update during gait to reduce overhead)
-                        value = max(0, speed)  # Only positive values (forward/up)
+                        # Intensity tracks magnitude of speed in either direction (forward/back)
+                        value = min(1.0, max(0.0, abs(speed)))
                         self.eyes.eyelid_percent = value * 75.0  # 0 to 75 range for intensity
                         self.eyes.eyelid_angle = value * 35.0
                         self.eyes.eye_size = (25, 45 - int(value * 10))
@@ -724,6 +801,23 @@ class Controller:
                             self.forceDisplayUpdate = True
                             self.eyes.update(force_update=True)
                         # Verbose disabled to reduce overhead during gait
+                    # Gait control: Right stick Y for turn rate
+                    # Joystick range: 0-65535, center=32768, up=0, down=65535
+                    elif event.code == 5:  # right stick Y
+                        # Only process if value indicates joystick (not trigger which shares code on some controllers)
+                        if event.value > 1023:
+                            # Walking turn control: right stick Y for turn rate
+                            # Normalize to -1.0 (up/CCW) to +1.0 (down/CW)
+                            turn_input = (event.value - 32768.0) / 32768.0
+                            if abs(turn_input) < 0.1:  # 10% deadzone
+                                turn_input = 0.0
+
+                            if _gaitActive and _gaitEngine is not None:
+                                # Map to turn rate using configurable maximum (deg/s)
+                                # Positive = clockwise (right turn), negative = CCW (left turn)
+                                _gaitEngine.params.turn_rate_deg_s = turn_input * _gaitTurnMaxDegS
+                                if self.verbose and abs(turn_input) > 0.1:
+                                    print(f"Turn rate: {turn_input * _gaitTurnMaxDegS:.1f} deg/s", end="\r\n")
                     # Event code 2 can be either:
                     # - Left trigger (LT): values 0-1023
                     # - Right stick X (on some controllers): values 0-65535 with center at 32768
@@ -743,7 +837,8 @@ class Controller:
                             if abs(strafe) < 0.05:  # 5% deadzone (reduced from 10%)
                                 strafe = 0.0
                             # Map to heading angle: -90° (left) to +90° (right), 0° = forward
-                            _gaitEngine.params.heading_deg = strafe * 90.0
+                            # Reverse strafe direction so joystick X matches world left/right motion
+                            _gaitEngine.params.heading_deg = -strafe * 90.0
                         else:
                             # Eye control when gait not active
                             scaledValue = ((32768.0 - float(event.value)) / 32768.0)
@@ -901,6 +996,24 @@ class Controller:
                 send_cmd(b'Y 1', force=True)
                 self.telemetryRetryCount = 1
                 self.telemetryRetryDeadline = None
+
+            # Poll PID/IMP/EST LIST while menu is visible so tabs stay in sync.
+            global _pid_list_next_at, _imp_list_next_at, _est_list_next_at
+            if self.teensy is not None and _marsMenu is not None and _marsMenu.visible:
+                now = time.time()
+                if _pid_list_next_at <= 0.0:
+                    _pid_list_next_at = now
+                    _imp_list_next_at = now + 0.35
+                    _est_list_next_at = now + 0.70
+                if now >= _pid_list_next_at:
+                    send_cmd(b'PID LIST', throttle_ms=250)
+                    _pid_list_next_at = now + 1.0
+                if now >= _imp_list_next_at:
+                    send_cmd(b'IMP LIST', throttle_ms=250)
+                    _imp_list_next_at = now + 1.0
+                if now >= _est_list_next_at:
+                    send_cmd(b'EST LIST', throttle_ms=250)
+                    _est_list_next_at = now + 1.0
         except serial.SerialException as e:
             if self.verbose:
                 print(f"Housekeeping serial error: {e}", end="\r\n")
@@ -1083,17 +1196,16 @@ def drawLogo(disp):
     draw = ImageDraw.Draw(image)
 
     # Draw a simple logo (a blue rectangle with text)
-    fontMICR = get_font(6)
+    fontMICR = get_font(12)
     Color = "WHITE"
     Top = 10
     lineHeight = 8
-    draw.text((20, Top), u"   ____  ____    ____     __  __ __  ____    ___   ______  ____    ___   ____  \n", fill = Color, font=fontMICR)
-    draw.text((20, Top + lineHeight), u"  /    ||    \\  /    |   /  ]|  |  ||    \\  /   \\ |      ||    \\  /   \\ |    \\ \n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 2*lineHeight), u" |  o  ||  D  )|  o  |  /  / |  |  ||  _  ||     ||      ||  D  )|     ||  _  |\n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 3*lineHeight), u" |     ||    / |     | /  /  |  _  ||  |  ||  O  ||_|  |_||    / |  O  ||  |  |\n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 4*lineHeight), u" |  _  ||    \\ |  _  |/   \\_ |  |  ||  |  ||     |  |  |  |    \\ |     ||  |  |\n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 5*lineHeight), u" |  |  ||  .  \\|  |  |\\     ||  |  ||  |  ||     |  |  |  |  .  \\|     ||  |  |\n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 6*lineHeight), u" |__|__||__|\\_||__|__| \\____||__|__||__|__| \\___/   |__|  |__|\\_| \\___/ |__|__|\n", fill = Color, font=fontMICR)
+    draw.text((20, Top), u"  __  __    _    ____   ____   ____  \n", fill = Color, font=fontMICR)
+    draw.text((20, Top + lineHeight), u" |  \\/  |  / \\  |  _ \\ / ___| / ___|\n", fill = Color, font=fontMICR)
+    draw.text((20, Top + 2*lineHeight), u" | |\\/| | / _ \\ | |_) | |  _  \\___ \\ \n", fill = Color, font=fontMICR)
+    draw.text((20, Top + 3*lineHeight), u" | |  | |/ ___ \\|  __/| |_| | ___) |\n", fill = Color, font=fontMICR)
+    draw.text((20, Top + 4*lineHeight), u" |_|  |_/_/   \\_\\_|    \\____||____/ \n", fill = Color, font=fontMICR)
+    draw.text((20, Top + 5*lineHeight), u"   Modular Autonomous Robotic System\n", fill = Color, font=fontMICR)
     #image=image.rotate(180, expand=True)  # rotate the image to fit the display
 
     # Show the image on the display
@@ -1102,7 +1214,11 @@ def drawLogo(disp):
 # Frame change detection for display optimization
 _last_frame_hash = None
 
-def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirror=False, menuState=None, teensy_connected=True, controller_connected=True, telemetry_stale=False, robot_enabled=True):
+def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None,
+                  mirror=False, menuState=None,
+                  teensy_connected=True, controller_connected=True,
+                  telemetry_stale=False, robot_enabled=True,
+                  safety_active=False, safety_text=""):
     """Updates the display with the given image.
     
     Optimizations applied:
@@ -1117,61 +1233,77 @@ def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirr
         robot_enabled: If False, draws 'DISABLED' watermark overlay
     """
     
-    # Only copy if we need to draw overlays
-    has_status_overlay = not teensy_connected or not controller_connected or telemetry_stale or not robot_enabled
-    needs_overlay = (servo is not None and (_menuState == "data" or _menuState == "settings")) or has_status_overlay
-    if needs_overlay:
-        imageCopy = image.copy()
-    else:
-        imageCopy = image  # Use original directly if no modifications needed
-    
-    # Draw connection/status overlays
-    overlay_y_offset = 0
-    overlay_texts = []  # List of (text, color) tuples
-    if not teensy_connected:
-        overlay_texts.append(("NO TEENSY", "RED"))
-    elif telemetry_stale:
-        # Only show stale if teensy connected but no data
-        overlay_texts.append(("NO TELEMETRY", "ORANGE"))
-    if not controller_connected:
-        overlay_texts.append(("NO CONTROLLER", "RED"))
-    
-    # DISABLED is shown separately at bottom
-    show_disabled = not robot_enabled and teensy_connected and not telemetry_stale
-
-    if overlay_texts:
+    # Safety overlay: replace normal content with full-screen safety view
+    if safety_active:
+        imageCopy = Image.new("RGB", (disp.height, disp.width), (255, 230, 0))
         draw = ImageDraw.Draw(imageCopy)
-        font = get_font(28)
-        # Calculate total height for vertical centering
-        line_height = 36  # font size + spacing
-        total_height = len(overlay_texts) * line_height
-        start_y = (disp.width - total_height) // 2
+        font = get_font(26)
+        text = safety_text if safety_text else "SAFETY LOCKOUT"
+        # Center text
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        x = (disp.height - text_width) // 2
+        y = (disp.width - text_height) // 2
+        # Shadow + text
+        draw.text((x + 2, y + 2), text, fill="BLACK", font=font)
+        draw.text((x, y), text, fill="BLACK", font=font)
+    else:
+        # Only copy if we need to draw overlays
+        has_status_overlay = (not teensy_connected or not controller_connected or
+                              telemetry_stale or not robot_enabled)
+        needs_overlay = (servo is not None and (_menuState == "data" or _menuState == "settings")) or has_status_overlay
+        if needs_overlay:
+            imageCopy = image.copy()
+        else:
+            imageCopy = image  # Use original directly if no modifications needed
         
-        for i, (text, color) in enumerate(overlay_texts):
-            # Get text bounding box for horizontal centering
+        # Draw connection/status overlays
+        overlay_texts = []  # List of (text, color) tuples
+        if not teensy_connected:
+            overlay_texts.append(("NO TEENSY", "RED"))
+        elif telemetry_stale:
+            # Only show stale if teensy connected but no data
+            overlay_texts.append(("NO TELEMETRY", "ORANGE"))
+        if not controller_connected:
+            overlay_texts.append(("NO CONTROLLER", "RED"))
+        
+        # DISABLED is shown separately at bottom
+        show_disabled = not robot_enabled and teensy_connected and not telemetry_stale
+
+        if overlay_texts:
+            draw = ImageDraw.Draw(imageCopy)
+            font = get_font(28)
+            # Calculate total height for vertical centering
+            line_height = 36  # font size + spacing
+            total_height = len(overlay_texts) * line_height
+            start_y = (disp.width - total_height) // 2
+            
+            for i, (text, color) in enumerate(overlay_texts):
+                # Get text bounding box for horizontal centering
+                bbox = draw.textbbox((0, 0), text, font=font)
+                text_width = bbox[2] - bbox[0]
+                x = (disp.height - text_width) // 2
+                y = start_y + i * line_height
+                # Draw shadow for visibility
+                draw.text((x + 2, y + 2), text, fill="BLACK", font=font)
+                # Draw text in color
+                draw.text((x, y), text, fill=color, font=font)
+        
+        # Draw DISABLED at bottom of screen
+        if show_disabled:
+            draw = ImageDraw.Draw(imageCopy)
+            font = get_font(28)
+            text = "DISABLED"
             bbox = draw.textbbox((0, 0), text, font=font)
             text_width = bbox[2] - bbox[0]
             x = (disp.height - text_width) // 2
-            y = start_y + i * line_height
-            # Draw shadow for visibility
+            y = disp.width - 40  # Near bottom
             draw.text((x + 2, y + 2), text, fill="BLACK", font=font)
-            # Draw text in color
-            draw.text((x, y), text, fill=color, font=font)
+            draw.text((x, y), text, fill="YELLOW", font=font)
     
-    # Draw DISABLED at bottom of screen
-    if show_disabled:
-        draw = ImageDraw.Draw(imageCopy)
-        font = get_font(28)
-        text = "DISABLED"
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        x = (disp.height - text_width) // 2
-        y = disp.width - 40  # Near bottom
-        draw.text((x + 2, y + 2), text, fill="BLACK", font=font)
-        draw.text((x, y), text, fill="YELLOW", font=font)
-    
-    # add in the leg/servo visualization
-    if servo is not None:
+    # add in the leg/servo visualization (suppressed when in safety overlay)
+    if servo is not None and not safety_active:
         # create a draw object to draw on the image
         draw = ImageDraw.Draw(imageCopy)
 
@@ -1231,8 +1363,39 @@ def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None, mirr
         image2 = np.array(imageCopy)                        
         height, width = image2.shape[:2]
         image2 = cv.resize(cv.cvtColor(image2, cv.COLOR_RGB2BGR), (width*2, height*2), interpolation=cv.INTER_LANCZOS4)
-        cv.imshow("arachnotron", image2)
-        cv.waitKey(1)
+        cv.imshow("M.A.R.S. — Modular Autonomous Robotic System", image2)
+        # When mirror window has focus, route keys to MarsMenu
+        key = cv.waitKey(1) & 0xFF
+        if key != 255 and _marsMenu is not None and _marsMenu.visible:
+            # Mirror MarsMenu keyboard semantics for the curses path:
+            # - Arrow keys / WASD: item navigation
+            # - Tab / Shift+Tab: tab navigation
+            # - Left/Right (or J/L): value decrement/increment
+            # - Enter/Space: select/activate
+            # - Esc/Q: close menu
+            if key in (ord('w'), ord('W'), 82):  # up or arrow up
+                _marsMenu.nav_up()
+            elif key in (ord('s'), ord('S'), 84):  # down or arrow down
+                _marsMenu.nav_down()
+            elif key in (ord('a'), ord('A'), 81):  # left or arrow left
+                _marsMenu.nav_left()
+            elif key in (ord('d'), ord('D'), 83):  # right or arrow right
+                _marsMenu.nav_right()
+            elif key in (9,):  # TAB cycles tabs forward
+                _marsMenu.handle_button('RB')
+            elif key in (353,):  # Shift+TAB cycles tabs backward (if available)
+                _marsMenu.handle_button('LB')
+            elif key in (ord('j'), ord('J')):
+                _marsMenu.decrement()
+            elif key in (ord('l'), ord('L')):
+                _marsMenu.increment()
+            elif key in (10, 13, ord(' ')):
+                _marsMenu.select()
+            elif key in (27, ord('q'), ord('Q')):  # ESC or Q closes menu
+                _marsMenu.hide()
+            # Force display refresh after any menu key
+            global _forceDisplayUpdate
+            _forceDisplayUpdate = True
     else:
         cv.destroyAllWindows()
     
@@ -1291,18 +1454,26 @@ class DisplayThread(threading.Thread):
         self._controller_connected = True
         self._telemetry_stale = False
         self._robot_enabled = True
+        self._safety_active = False
+        self._safety_text = ""
         # Configurable look range (pixels of eye offset at max input)
         self.look_range_x = look_range_x
         self.look_range_y = look_range_y
         # Base eye offsets (from config)
         self._base_center_offset = self.eyes.eye_center_offset
         self._base_vertical_offset = self.eyes.eye_vertical_offset
+
+    def set_base_vertical_offset(self, offset: float):
+        """Update the baseline vertical eye offset used for joystick look."""
+        with self._lock:
+            self._base_vertical_offset = offset
         
     def update_state(self, servo=None, legs=None, state=None, mirror=None, 
                      menu_state=None, force_update=False, verbose=None,
                      look_x=None, look_y=None, teensy_connected=None,
                      controller_connected=None, telemetry_stale=None,
-                     robot_enabled=None):
+                     robot_enabled=None, safety_active=None,
+                     safety_text=None):
         """Thread-safe update of display state from main thread."""
         with self._lock:
             if servo is not None:
@@ -1331,6 +1502,10 @@ class DisplayThread(threading.Thread):
                 self._telemetry_stale = telemetry_stale
             if robot_enabled is not None:
                 self._robot_enabled = robot_enabled
+            if safety_active is not None:
+                self._safety_active = safety_active
+            if safety_text is not None:
+                self._safety_text = safety_text
     
     def stop(self):
         """Signal thread to stop and wait for it to finish."""
@@ -1358,6 +1533,8 @@ class DisplayThread(threading.Thread):
         last_controller_connected = True
         last_telemetry_stale = False
         last_robot_enabled = True
+        last_safety_active = False
+        last_safety_text = ""
         
         while not self._stop_event.is_set():
             try:
@@ -1376,17 +1553,23 @@ class DisplayThread(threading.Thread):
                     controller_connected = self._controller_connected
                     telemetry_stale = self._telemetry_stale
                     robot_enabled = self._robot_enabled
+                    safety_active = self._safety_active
+                    safety_text = self._safety_text
                 
                 # Detect status changes - force immediate render
                 status_changed = (teensy_connected != last_teensy_connected or 
                                  controller_connected != last_controller_connected or
                                  telemetry_stale != last_telemetry_stale or
-                                 robot_enabled != last_robot_enabled)
+                                 robot_enabled != last_robot_enabled or
+                                 safety_active != last_safety_active or
+                                 safety_text != last_safety_text)
                 if status_changed:
                     last_teensy_connected = teensy_connected
                     last_controller_connected = controller_connected
                     last_telemetry_stale = telemetry_stale
                     last_robot_enabled = robot_enabled
+                    last_safety_active = safety_active
+                    last_safety_text = safety_text
                 
                 # Detect look direction change (threshold to avoid noise)
                 look_changed = (abs(look_x - last_look_x) > 0.05 or 
@@ -1425,7 +1608,9 @@ class DisplayThread(threading.Thread):
                                  teensy_connected=teensy_connected,
                                  controller_connected=controller_connected,
                                  telemetry_stale=telemetry_stale,
-                                 robot_enabled=robot_enabled)
+                                 robot_enabled=robot_enabled,
+                                 safety_active=safety_active,
+                                 safety_text=safety_text)
                 
             except (AttributeError, TypeError, OSError) as e:
                 # Display/SPI errors - log but don't crash thread
@@ -1513,6 +1698,219 @@ def processTelemS4(elements, leg):
             leg[idx][0] = int(elements[idx])
     except ValueError as e:
         print(f"Error processing S4 telemetry data: {e}", end="\r\n")
+
+
+# Safety telemetry (S5) and overlay helpers
+_safety_state = {
+    "lockout": False,
+    "cause_mask": 0,
+    "override_mask": 0,
+    "clearance_mm": 0,
+    "soft_limits": False,
+    "collision": False,
+    "temp_c": 0,
+}
+_last_safety_lockout = False
+
+
+def processTelemS5(elements, safety_state):
+    """Process S5 safety telemetry.
+
+    Expected format (7 fields):
+        lockout, cause_mask, override_mask, clearance_mm, soft_limits,
+        collision, temp_c
+    """
+    expected = 7
+    count = len(elements)
+    if count < expected:
+        if _verbose:
+            print(f"WARN S5 length {count} < expected {expected}, skipping.", end="\r\n")
+        return
+    if count > expected and _verbose:
+        print(f"WARN S5 length {count} > expected {expected}, truncating.", end="\r\n")
+    try:
+        safety_state["lockout"] = bool(int(elements[0]))
+        safety_state["cause_mask"] = int(elements[1])
+        safety_state["override_mask"] = int(elements[2])
+        safety_state["clearance_mm"] = int(elements[3])
+        safety_state["soft_limits"] = bool(int(elements[4]))
+        safety_state["collision"] = bool(int(elements[5]))
+        safety_state["temp_c"] = int(elements[6])
+    except ValueError as e:
+        print(f"Error processing S5 telemetry data: {e}", end="\r\n")
+
+
+def get_safety_overlay_state():
+    """Return (active, text) tuple for safety overlay rendering."""
+    active = _safety_state.get("lockout", False)
+    if not active:
+        return False, ""
+    mask = _safety_state.get("cause_mask", 0)
+    labels = []
+    # Bit mapping from firmware LockoutCauseBits
+    if mask & 0x01:
+        labels.append("TEMP")
+    if mask & 0x02:
+        labels.append("COLLISION")
+    if not labels:
+        labels.append("UNKNOWN")
+    base = "SAFETY LOCKOUT: " + "/".join(labels)
+    return True, base
+
+
+# PID/IMP/EST LIST state (parsed from firmware text responses)
+_pid_ini = {
+    "enabled": None,
+    "mode": None,
+    "shadow_hz": None,
+    "kp": None,
+    "ki": None,
+    "kd": None,
+    "kdalph": None,
+}
+_imp_ini = {
+    "enabled": None,
+    "mode": None,
+    "scale": None,
+    "jspring": None,
+    "jdamp": None,
+    "cspring": None,
+    "cdamp": None,
+    "jdb_cd": None,
+    "cdb_mm": None,
+}
+_est_ini = {
+    "cmd_alpha_milli": None,
+    "meas_alpha_milli": None,
+    "meas_vel_alpha_milli": None,
+}
+
+_pid_state = {
+    "enabled": None,        # bool
+    "mode": None,           # 'active'|'shadow'
+    "kp": None,             # [coxa,femur,tibia] milli
+    "ki": None,
+    "kd": None,
+    "kdalph": None,
+    "shadow_hz": None,      # int
+    "last_update": 0.0,
+}
+_imp_state = {
+    "enabled": None,        # bool
+    "mode": None,           # 'off'|'joint'|'cart'
+    "jspring": None,        # [coxa,femur,tibia] milli
+    "jdamp": None,
+    "cspring": None,        # [x,y,z] milli
+    "cdamp": None,
+    "scale": None,          # int milli
+    "jdb_cd": None,         # int
+    "cdb_mm": None,         # float
+    "last_update": 0.0,
+}
+_est_state = {
+    "cmd_alpha_milli": None,
+    "meas_alpha_milli": None,
+    "meas_vel_alpha_milli": None,
+    "last_update": 0.0,
+}
+
+_pid_list_next_at = 0.0
+_imp_list_next_at = 0.0
+_est_list_next_at = 0.0
+
+
+def _parse_triplet_int(value: str):
+    parts = value.split('/')
+    if len(parts) != 3:
+        return None
+    out = []
+    for p in parts:
+        try:
+            out.append(int(p))
+        except (TypeError, ValueError):
+            return None
+    return out
+
+
+def _parse_pid_list_line(line: str):
+    global _pid_state
+    # Example: PID enabled=1 mode=active kp=0/0/0 ki=0/0/0 kd=0/0/0 kdalph=200/200/200 shadow_hz=2
+    tokens = line.strip().split()
+    if not tokens or tokens[0] != "PID":
+        return
+    for tok in tokens[1:]:
+        if '=' not in tok:
+            continue
+        k, v = tok.split('=', 1)
+        k = k.strip().lower()
+        v = v.strip()
+        if k == 'enabled':
+            _pid_state['enabled'] = (v == '1' or v.lower() == 'true')
+        elif k == 'mode':
+            _pid_state['mode'] = v.lower()
+        elif k in ('kp', 'ki', 'kd', 'kdalph'):
+            tri = _parse_triplet_int(v)
+            if tri is not None:
+                _pid_state[k] = tri
+        elif k == 'shadow_hz':
+            try:
+                _pid_state['shadow_hz'] = int(v)
+            except (TypeError, ValueError):
+                pass
+    _pid_state['last_update'] = time.time()
+
+
+def _parse_imp_list_line(line: str):
+    global _imp_state
+    # Example: IMP enabled=0 mode=off jspring=0/0/0 jdamp=0/0/0 cspring=0/0/0 cdamp=0/0/0 scale=1000 jdb_cd=50 cdb_mm=10.00
+    tokens = line.strip().split()
+    if not tokens or tokens[0] != "IMP":
+        return
+    for tok in tokens[1:]:
+        if '=' not in tok:
+            continue
+        k, v = tok.split('=', 1)
+        k = k.strip().lower()
+        v = v.strip()
+        if k == 'enabled':
+            _imp_state['enabled'] = (v == '1' or v.lower() == 'true')
+        elif k == 'mode':
+            _imp_state['mode'] = v.lower()
+        elif k in ('jspring', 'jdamp', 'cspring', 'cdamp'):
+            tri = _parse_triplet_int(v)
+            if tri is not None:
+                _imp_state[k] = tri
+        elif k in ('scale', 'jdb_cd'):
+            try:
+                _imp_state[k] = int(v)
+            except (TypeError, ValueError):
+                pass
+        elif k == 'cdb_mm':
+            try:
+                _imp_state['cdb_mm'] = float(v)
+            except (TypeError, ValueError):
+                pass
+    _imp_state['last_update'] = time.time()
+
+
+def _parse_est_list_line(line: str):
+    global _est_state
+    # Example: EST cmd_alpha_milli=100 meas_alpha_milli=150 meas_vel_alpha_milli=100
+    tokens = line.strip().split()
+    if not tokens or tokens[0] != "EST":
+        return
+    for tok in tokens[1:]:
+        if '=' not in tok:
+            continue
+        k, v = tok.split('=', 1)
+        k = k.strip().lower()
+        v = v.strip()
+        if k in ('cmd_alpha_milli', 'meas_alpha_milli', 'meas_vel_alpha_milli'):
+            try:
+                _est_state[k] = int(v)
+            except (TypeError, ValueError):
+                pass
+    _est_state['last_update'] = time.time()
 
 
 
@@ -1603,6 +2001,7 @@ _gaitMaxStepLenMm = 40.0
 _gaitOverlapPct = 5.0
 _gaitSmoothingAlpha = 0.15
 _gaitSendDivisor = 3
+_gaitTurnMaxDegS = 60.0
 _cmdThrottleMs = 50.0
 _autoDisableS = 5.0
 # Bezier curve shape parameters
@@ -1613,7 +2012,8 @@ _bezierP3Height = 0.35
 _bezierP3Overshoot = 1.1
 # Eye settings
 _eyeSpacingOffset = 10
-_eyeCenterOffset = 5
+_eyeCenterOffset = 5      # Horizontal eye center offset (pixels)
+_eyeVerticalOffset = 0    # Vertical eye center offset from baseline (pixels)
 _eyeEyelidAngle = 0
 _eyeBlinkPercentStep = 0.25
 _eyeRotation = -10
@@ -1645,6 +2045,16 @@ _humanEyeColorDarkBrown = (50, 30, 20)    # Dark brown
 # Menu settings (saved to config)
 _menuTheme = 0      # 0=MARS, 1=LCARS
 _menuPalette = 0    # LCARS palette: 0=Classic, 1=Nemesis, 2=LowerDecks, 3=PADD
+
+
+def _parse_ini_triplet_int(s):
+    try:
+        parts = str(s).strip().split('/')
+        if len(parts) != 3:
+            return None
+        return [int(parts[0]), int(parts[1]), int(parts[2])]
+    except Exception:
+        return None
 # Display thread settings
 _displayThreadEnabled = True
 _displayThreadHz = 15.0
@@ -1678,6 +2088,67 @@ try:
     if 'menu' in _cfg:
         _menuTheme = _cfg.getint('menu', 'theme', fallback=_menuTheme)
         _menuPalette = _cfg.getint('menu', 'palette', fallback=_menuPalette)
+
+    # Load optional PID/IMP/EST defaults
+    if 'pid' in _cfg:
+        _pid_ini['enabled'] = _cfg.getboolean('pid', 'enabled', fallback=_pid_ini['enabled'])
+        _pid_ini['mode'] = _cfg.get('pid', 'mode', fallback=_pid_ini['mode'])
+        _pid_ini['shadow_hz'] = _cfg.getint('pid', 'shadow_hz', fallback=_pid_ini['shadow_hz'])
+        _pid_ini['kp'] = _parse_ini_triplet_int(_cfg.get('pid', 'kp', fallback=None))
+        _pid_ini['ki'] = _parse_ini_triplet_int(_cfg.get('pid', 'ki', fallback=None))
+        _pid_ini['kd'] = _parse_ini_triplet_int(_cfg.get('pid', 'kd', fallback=None))
+        _pid_ini['kdalph'] = _parse_ini_triplet_int(_cfg.get('pid', 'kdalph', fallback=None))
+
+    if 'imp' in _cfg:
+        _imp_ini['enabled'] = _cfg.getboolean('imp', 'enabled', fallback=_imp_ini['enabled'])
+        _imp_ini['mode'] = _cfg.get('imp', 'mode', fallback=_imp_ini['mode'])
+        _imp_ini['scale'] = _cfg.getint('imp', 'scale', fallback=_imp_ini['scale'])
+        _imp_ini['jspring'] = _parse_ini_triplet_int(_cfg.get('imp', 'jspring', fallback=None))
+        _imp_ini['jdamp'] = _parse_ini_triplet_int(_cfg.get('imp', 'jdamp', fallback=None))
+        _imp_ini['cspring'] = _parse_ini_triplet_int(_cfg.get('imp', 'cspring', fallback=None))
+        _imp_ini['cdamp'] = _parse_ini_triplet_int(_cfg.get('imp', 'cdamp', fallback=None))
+        _imp_ini['jdb_cd'] = _cfg.getint('imp', 'jdb_cd', fallback=_imp_ini['jdb_cd'])
+        try:
+            _imp_ini['cdb_mm'] = _cfg.getfloat('imp', 'cdb_mm', fallback=_imp_ini['cdb_mm'])
+        except Exception:
+            pass
+
+    if 'est' in _cfg:
+        _est_ini['cmd_alpha_milli'] = _cfg.getint('est', 'cmd_alpha_milli', fallback=_est_ini['cmd_alpha_milli'])
+        _est_ini['meas_alpha_milli'] = _cfg.getint('est', 'meas_alpha_milli', fallback=_est_ini['meas_alpha_milli'])
+        _est_ini['meas_vel_alpha_milli'] = _cfg.getint('est', 'meas_vel_alpha_milli', fallback=_est_ini['meas_vel_alpha_milli'])
+
+    # Merge controller.ini defaults into live PID/IMP/EST menu state (until firmware LIST overwrites)
+    try:
+        if _pid_ini.get('enabled') is not None:
+            _pid_state['enabled'] = bool(_pid_ini['enabled'])
+        if _pid_ini.get('mode'):
+            _pid_state['mode'] = str(_pid_ini['mode']).strip().lower()
+        if _pid_ini.get('shadow_hz') is not None:
+            _pid_state['shadow_hz'] = int(_pid_ini['shadow_hz'])
+        for k in ('kp', 'ki', 'kd', 'kdalph'):
+            if _pid_ini.get(k) is not None:
+                _pid_state[k] = list(_pid_ini[k])
+
+        if _imp_ini.get('enabled') is not None:
+            _imp_state['enabled'] = bool(_imp_ini['enabled'])
+        if _imp_ini.get('mode'):
+            _imp_state['mode'] = str(_imp_ini['mode']).strip().lower()
+        if _imp_ini.get('scale') is not None:
+            _imp_state['scale'] = int(_imp_ini['scale'])
+        for k in ('jspring', 'jdamp', 'cspring', 'cdamp'):
+            if _imp_ini.get(k) is not None:
+                _imp_state[k] = list(_imp_ini[k])
+        if _imp_ini.get('jdb_cd') is not None:
+            _imp_state['jdb_cd'] = int(_imp_ini['jdb_cd'])
+        if _imp_ini.get('cdb_mm') is not None:
+            _imp_state['cdb_mm'] = float(_imp_ini['cdb_mm'])
+
+        for k in ('cmd_alpha_milli', 'meas_alpha_milli', 'meas_vel_alpha_milli'):
+            if _est_ini.get(k) is not None:
+                _est_state[k] = int(_est_ini[k])
+    except Exception:
+        pass
     # Load saved gait parameters
     _savedGaitWidthMm = 100.0
     _savedGaitLiftMm = 60.0
@@ -1700,6 +2171,7 @@ try:
         _gaitSmoothingAlpha = _cfg.getfloat('gait', 'smoothing_alpha', fallback=_gaitSmoothingAlpha)
         _gaitSendDivisor = _cfg.getint('gait', 'send_divisor', fallback=_gaitSendDivisor)
         _cmdThrottleMs = _cfg.getfloat('gait', 'cmd_throttle_ms', fallback=_cmdThrottleMs)
+        _gaitTurnMaxDegS = _cfg.getfloat('gait', 'turn_max_deg_s', fallback=_gaitTurnMaxDegS)
         # Bezier curve shape
         _bezierP1Height = _cfg.getfloat('gait', 'bezier_p1_height', fallback=_bezierP1Height)
         _bezierP1Overshoot = _cfg.getfloat('gait', 'bezier_p1_overshoot', fallback=_bezierP1Overshoot)
@@ -1710,6 +2182,7 @@ try:
     if 'eyes' in _cfg:
         _eyeSpacingOffset = _cfg.getint('eyes', 'spacing_offset', fallback=_eyeSpacingOffset)
         _eyeCenterOffset = _cfg.getint('eyes', 'center_offset', fallback=_eyeCenterOffset)
+        _eyeVerticalOffset = _cfg.getint('eyes', 'vertical_offset', fallback=_eyeVerticalOffset)
         _eyeEyelidAngle = _cfg.getint('eyes', 'eyelid_angle', fallback=_eyeEyelidAngle)
         _eyeBlinkPercentStep = _cfg.getfloat('eyes', 'blink_percent_step', fallback=_eyeBlinkPercentStep)
         _eyeRotation = _cfg.getint('eyes', 'rotation', fallback=_eyeRotation)
@@ -1755,8 +2228,12 @@ except (configparser.Error, ValueError, KeyError) as e:
     _gaitLiftMinMm = 20.0
     _gaitLiftMaxMm = 100.0
 
-def save_gait_settings(width_mm: float, lift_mm: float) -> bool:
-    """Save gait parameters to controller.ini [gait] section."""
+def save_gait_settings(width_mm: float, lift_mm: float, cycle_ms: int = None, turn_max_deg_s: float = None) -> bool:
+    """Save gait parameters to controller.ini [gait] section.
+
+    width_mm and lift_mm are always persisted; cycle_ms is optional and
+    only written when provided to avoid clobbering existing config
+    unexpectedly."""
     global _cfg, _cfg_path
     if _cfg is None or _cfg_path is None:
         return False
@@ -1765,6 +2242,10 @@ def save_gait_settings(width_mm: float, lift_mm: float) -> bool:
             _cfg.add_section('gait')
         _cfg.set('gait', 'width_mm', f'{width_mm:.1f}')
         _cfg.set('gait', 'lift_mm', f'{lift_mm:.1f}')
+        if cycle_ms is not None:
+            _cfg.set('gait', 'cycle_ms', str(int(cycle_ms)))
+        if turn_max_deg_s is not None:
+            _cfg.set('gait', 'turn_max_deg_s', f'{turn_max_deg_s:.1f}')
         with open(_cfg_path, 'w') as f:
             _cfg.write(f)
         return True
@@ -1808,7 +2289,7 @@ def save_human_eye_settings(size: int = None, color_idx: int = None) -> bool:
         return False
 
 def save_eye_center_offset(offset: int) -> bool:
-    """Save eye vertical center offset to controller.ini [eyes] section."""
+    """Save eye horizontal center offset to controller.ini [eyes] section."""
     global _cfg, _cfg_path
     if _cfg is None or _cfg_path is None:
         return False
@@ -1821,6 +2302,22 @@ def save_eye_center_offset(offset: int) -> bool:
         return True
     except (IOError, OSError, configparser.Error) as e:
         print(f"Failed to save eye center offset: {e}", end="\r\n")
+        return False
+
+def save_eye_vertical_offset(offset: int) -> bool:
+    """Save eye vertical center offset to controller.ini [eyes] section."""
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'eyes' not in _cfg:
+            _cfg.add_section('eyes')
+        _cfg.set('eyes', 'vertical_offset', str(offset))
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error) as e:
+        print(f"Failed to save eye vertical offset: {e}", end="\r\n")
         return False
 
 def save_menu_settings(theme: int = None, palette: int = None) -> bool:
@@ -1844,6 +2341,87 @@ def save_menu_settings(theme: int = None, palette: int = None) -> bool:
         print(f"Failed to save menu settings: {e}", end="\r\n")
         return False
 
+
+def _fmt_triplet(tri):
+    try:
+        if tri is None or len(tri) != 3:
+            return None
+        return f"{int(tri[0])}/{int(tri[1])}/{int(tri[2])}"
+    except Exception:
+        return None
+
+
+def save_pid_settings() -> bool:
+    """Persist current PID tab values to controller.ini [pid]."""
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'pid' not in _cfg:
+            _cfg.add_section('pid')
+        if _pid_state.get('enabled') is not None:
+            _cfg.set('pid', 'enabled', 'true' if _pid_state['enabled'] else 'false')
+        if _pid_state.get('mode') is not None:
+            _cfg.set('pid', 'mode', str(_pid_state['mode']))
+        if _pid_state.get('shadow_hz') is not None:
+            _cfg.set('pid', 'shadow_hz', str(int(_pid_state['shadow_hz'])))
+        for k in ('kp', 'ki', 'kd', 'kdalph'):
+            s = _fmt_triplet(_pid_state.get(k))
+            if s is not None:
+                _cfg.set('pid', k, s)
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error, ValueError, TypeError):
+        return False
+
+
+def save_imp_settings() -> bool:
+    """Persist current IMP tab values to controller.ini [imp]."""
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'imp' not in _cfg:
+            _cfg.add_section('imp')
+        if _imp_state.get('enabled') is not None:
+            _cfg.set('imp', 'enabled', 'true' if _imp_state['enabled'] else 'false')
+        if _imp_state.get('mode') is not None:
+            _cfg.set('imp', 'mode', str(_imp_state['mode']))
+        if _imp_state.get('scale') is not None:
+            _cfg.set('imp', 'scale', str(int(_imp_state['scale'])))
+        for k in ('jspring', 'jdamp', 'cspring', 'cdamp'):
+            s = _fmt_triplet(_imp_state.get(k))
+            if s is not None:
+                _cfg.set('imp', k, s)
+        if _imp_state.get('jdb_cd') is not None:
+            _cfg.set('imp', 'jdb_cd', str(int(_imp_state['jdb_cd'])))
+        if _imp_state.get('cdb_mm') is not None:
+            _cfg.set('imp', 'cdb_mm', f"{float(_imp_state['cdb_mm']):.3f}")
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error, ValueError, TypeError):
+        return False
+
+
+def save_est_settings() -> bool:
+    """Persist current EST tab values to controller.ini [est]."""
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'est' not in _cfg:
+            _cfg.add_section('est')
+        for k in ('cmd_alpha_milli', 'meas_alpha_milli', 'meas_vel_alpha_milli'):
+            if _est_state.get(k) is not None:
+                _cfg.set('est', k, str(int(_est_state[k])))
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error, ValueError, TypeError):
+        return False
+
 # initialize the display and start logging to it
 #_disp = LCD_1inch9.LCD_1inch9()
 _disp = st7789.st7789()
@@ -1863,6 +2441,11 @@ _backGroundImage = Image.new("RGB", (_disp.width, _disp.height), "BLACK")  # cre
 #_backGroundImage = _backGroundImage.resize((_disp.width, _disp.height), Image.Resampling.LANCZOS)  # resize the image to fit the display
 UpdateDisplay(_disp, _backGroundImage, None, _servo, _legs, _state, _mirrorDisplay)  # display the blank image
 drawLogo(_disp)  # draw the logo on the display
+time.sleep(5)
+
+# Startup banner (printed to stdout for logs/USB serial capture)
+print("MARS - Modular Autonomous Robotic System", end="\r\n")
+print(f"Firmware 0.2.36/b152 · Controller {CONTROLLER_VERSION}/b{CONTROLLER_BUILD}", end="\r\n")
 
 # initizlizxe the touch screen
 _touch = cst816d.cst816d()
@@ -1891,6 +2474,7 @@ _eyes.eye_size = (_eyeSizeX, _eyeSizeY)
 _eyes.rotation = _eyeRotation
 _eyes.eye_spacing_offset = _eyeSpacingOffset
 _eyes.eye_center_offset = _eyeCenterOffset
+_eyes.eye_vertical_offset = _eyeVerticalOffset
 _eyes.eyelid_angle = _eyeEyelidAngle
 _eyes.blink_percent_step = _eyeBlinkPercentStep
 _eyes.human_eye_spacing_pct = _humanEyeSpacingPct
@@ -1940,12 +2524,14 @@ def _setup_mars_menu():
         _forceDisplayUpdate = True
     
     def on_eye_vcenter_change(val):
-        global _eyes, _eyeCenterOffset, _forceDisplayUpdate
-        _eyeCenterOffset = val
-        _eyes.eye_center_offset = val
+        global _eyes, _eyeVerticalOffset, _forceDisplayUpdate, _displayThread
+        _eyeVerticalOffset = val
+        _eyes.eye_vertical_offset = val
+        if _displayThread is not None:
+            _displayThread.set_base_vertical_offset(val)
         _eyes.update(force_update=True)
         _forceDisplayUpdate = True
-        save_eye_center_offset(val)
+        save_eye_vertical_offset(val)
     
     _marsMenu.set_callback(MenuCategory.EYES, "Style", "on_change", on_eye_style_change)
     _marsMenu.set_callback(MenuCategory.EYES, "Human Color", "on_change", on_human_color_change)
@@ -1991,26 +2577,395 @@ def _setup_mars_menu():
         if _verbose:
             print("Shutdown requested via menu", end="\r\n")
     
+    def on_auto_disable_change(val):
+        global _autoDisableS
+        _autoDisableS = float(val)
+        if _verbose:
+            print(f"Auto-disable timeout set to {val}s", end="\r\n")
+
+    def _kick_list_poll(which: str):
+        global _pid_list_next_at, _imp_list_next_at, _est_list_next_at
+        now = time.time()
+        if which == 'PID':
+            _pid_list_next_at = min(_pid_list_next_at if _pid_list_next_at > 0.0 else now, now + 0.05)
+        elif which == 'IMP':
+            _imp_list_next_at = min(_imp_list_next_at if _imp_list_next_at > 0.0 else now, now + 0.05)
+        elif which == 'EST':
+            _est_list_next_at = min(_est_list_next_at if _est_list_next_at > 0.0 else now, now + 0.05)
+
+    # === PID callbacks ===
+    def on_pid_enabled_change(val):
+        try:
+            _pid_state['enabled'] = (val == 1)
+            save_pid_settings()
+            send_cmd(b'PID ENABLE' if val == 1 else b'PID DISABLE', force=True)
+            _kick_list_poll('PID')
+        except Exception:
+            pass
+
+    def on_pid_mode_change(val):
+        try:
+            _pid_state['mode'] = 'active' if val == 0 else 'shadow'
+            save_pid_settings()
+            send_cmd(b'PID MODE ACTIVE' if val == 0 else b'PID MODE SHADOW', force=True)
+            _kick_list_poll('PID')
+        except Exception:
+            pass
+
+    def on_pid_shadow_hz_change(val):
+        try:
+            _pid_state['shadow_hz'] = int(val)
+            save_pid_settings()
+            send_cmd(f"PID SHADOW_RATE {int(val)}".encode('ascii'), force=True)
+            _kick_list_poll('PID')
+        except Exception:
+            pass
+
+    def _make_pid_gain_cb(kind: str, joint: str):
+        def _cb(val):
+            try:
+                key = kind.lower()
+                arr = _pid_state.get(key)
+                if arr is None or len(arr) != 3:
+                    arr = [0, 0, 0]
+                idx = 0 if joint == 'COXA' else (1 if joint == 'FEMUR' else 2)
+                arr[idx] = int(val)
+                _pid_state[key] = arr
+                save_pid_settings()
+                send_cmd(f"PID {kind} {joint} {int(val)}".encode('ascii'), force=True)
+                _kick_list_poll('PID')
+            except Exception:
+                pass
+        return _cb
+
+    def _make_pid_kdalpha_cb(joint: str):
+        def _cb(val):
+            try:
+                arr = _pid_state.get('kdalph')
+                if arr is None or len(arr) != 3:
+                    arr = [200, 200, 200]
+                idx = 0 if joint == 'COXA' else (1 if joint == 'FEMUR' else 2)
+                arr[idx] = int(val)
+                _pid_state['kdalph'] = arr
+                save_pid_settings()
+                send_cmd(f"PID KDALPHA {joint} {int(val)}".encode('ascii'), force=True)
+                _kick_list_poll('PID')
+            except Exception:
+                pass
+        return _cb
+
+    # === IMP callbacks ===
+    def on_imp_enabled_change(val):
+        try:
+            _imp_state['enabled'] = (val == 1)
+            save_imp_settings()
+            send_cmd(b'IMP ENABLE' if val == 1 else b'IMP DISABLE', force=True)
+            _kick_list_poll('IMP')
+        except Exception:
+            pass
+
+    def on_imp_mode_change(val):
+        try:
+            _imp_state['mode'] = 'joint' if val == 1 else ('cart' if val == 2 else 'off')
+            save_imp_settings()
+            if val == 1:
+                cmd = b'IMP MODE JOINT'
+            elif val == 2:
+                cmd = b'IMP MODE CART'
+            else:
+                cmd = b'IMP MODE OFF'
+            send_cmd(cmd, force=True)
+            _kick_list_poll('IMP')
+        except Exception:
+            pass
+
+    def on_imp_scale_change(val):
+        try:
+            _imp_state['scale'] = int(val)
+            save_imp_settings()
+            send_cmd(f"IMP SCALE {int(val)}".encode('ascii'), force=True)
+            _kick_list_poll('IMP')
+        except Exception:
+            pass
+
+    def _make_imp_joint_gain_cb(kind: str, joint: str):
+        def _cb(val):
+            try:
+                key = kind.lower()
+                arr = _imp_state.get(key)
+                if arr is None or len(arr) != 3:
+                    arr = [0, 0, 0]
+                idx = 0 if joint == 'COXA' else (1 if joint == 'FEMUR' else 2)
+                arr[idx] = int(val)
+                _imp_state[key] = arr
+                save_imp_settings()
+                send_cmd(f"IMP {kind} {joint} {int(val)}".encode('ascii'), force=True)
+                _kick_list_poll('IMP')
+            except Exception:
+                pass
+        return _cb
+
+    def _make_imp_cart_gain_cb(kind: str, axis: str):
+        def _cb(val):
+            try:
+                key = kind.lower()
+                arr = _imp_state.get(key)
+                if arr is None or len(arr) != 3:
+                    arr = [0, 0, 0]
+                idx = 0 if axis == 'X' else (1 if axis == 'Y' else 2)
+                arr[idx] = int(val)
+                _imp_state[key] = arr
+                save_imp_settings()
+                send_cmd(f"IMP {kind} {axis} {int(val)}".encode('ascii'), force=True)
+                _kick_list_poll('IMP')
+            except Exception:
+                pass
+        return _cb
+
+    def on_imp_jdb_change(val):
+        try:
+            _imp_state['jdb_cd'] = int(val)
+            save_imp_settings()
+            send_cmd(f"IMP JDB {int(val)}".encode('ascii'), force=True)
+            _kick_list_poll('IMP')
+        except Exception:
+            pass
+
+    def on_imp_cdb_change(val):
+        try:
+            _imp_state['cdb_mm'] = float(val)
+            save_imp_settings()
+            send_cmd(f"IMP CDB {float(val):.3f}".encode('ascii'), force=True)
+            _kick_list_poll('IMP')
+        except Exception:
+            pass
+
+    # === EST callbacks ===
+    def on_est_cmd_alpha_change(val):
+        try:
+            _est_state['cmd_alpha_milli'] = int(val)
+            save_est_settings()
+            send_cmd(f"EST CMD_ALPHA {int(val)}".encode('ascii'), force=True)
+            _kick_list_poll('EST')
+        except Exception:
+            pass
+
+    def on_est_meas_alpha_change(val):
+        try:
+            _est_state['meas_alpha_milli'] = int(val)
+            save_est_settings()
+            send_cmd(f"EST MEAS_ALPHA {int(val)}".encode('ascii'), force=True)
+            _kick_list_poll('EST')
+        except Exception:
+            pass
+
+    def on_est_vel_alpha_change(val):
+        try:
+            _est_state['meas_vel_alpha_milli'] = int(val)
+            save_est_settings()
+            send_cmd(f"EST MEAS_VEL_ALPHA {int(val)}".encode('ascii'), force=True)
+            _kick_list_poll('EST')
+        except Exception:
+            pass
+    
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Theme", "on_change", on_theme_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Palette", "on_change", on_palette_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Brightness", "on_change", on_brightness_change)
+    _marsMenu.set_callback(MenuCategory.SYSTEM, "Auto-Disable", "on_change", on_auto_disable_change)
+
+    _marsMenu.set_callback(MenuCategory.PID, "Enabled", "on_change", on_pid_enabled_change)
+    _marsMenu.set_callback(MenuCategory.PID, "Mode", "on_change", on_pid_mode_change)
+    _marsMenu.set_callback(MenuCategory.PID, "Shadow Hz", "on_change", on_pid_shadow_hz_change)
+    _marsMenu.set_callback(MenuCategory.PID, "Kp Coxa", "on_change", _make_pid_gain_cb('KP', 'COXA'))
+    _marsMenu.set_callback(MenuCategory.PID, "Kp Femur", "on_change", _make_pid_gain_cb('KP', 'FEMUR'))
+    _marsMenu.set_callback(MenuCategory.PID, "Kp Tibia", "on_change", _make_pid_gain_cb('KP', 'TIBIA'))
+    _marsMenu.set_callback(MenuCategory.PID, "Ki Coxa", "on_change", _make_pid_gain_cb('KI', 'COXA'))
+    _marsMenu.set_callback(MenuCategory.PID, "Ki Femur", "on_change", _make_pid_gain_cb('KI', 'FEMUR'))
+    _marsMenu.set_callback(MenuCategory.PID, "Ki Tibia", "on_change", _make_pid_gain_cb('KI', 'TIBIA'))
+    _marsMenu.set_callback(MenuCategory.PID, "Kd Coxa", "on_change", _make_pid_gain_cb('KD', 'COXA'))
+    _marsMenu.set_callback(MenuCategory.PID, "Kd Femur", "on_change", _make_pid_gain_cb('KD', 'FEMUR'))
+    _marsMenu.set_callback(MenuCategory.PID, "Kd Tibia", "on_change", _make_pid_gain_cb('KD', 'TIBIA'))
+    _marsMenu.set_callback(MenuCategory.PID, "Kdα Coxa", "on_change", _make_pid_kdalpha_cb('COXA'))
+    _marsMenu.set_callback(MenuCategory.PID, "Kdα Femur", "on_change", _make_pid_kdalpha_cb('FEMUR'))
+    _marsMenu.set_callback(MenuCategory.PID, "Kdα Tibia", "on_change", _make_pid_kdalpha_cb('TIBIA'))
+
+    _marsMenu.set_callback(MenuCategory.IMP, "Enabled", "on_change", on_imp_enabled_change)
+    _marsMenu.set_callback(MenuCategory.IMP, "Mode", "on_change", on_imp_mode_change)
+    _marsMenu.set_callback(MenuCategory.IMP, "Scale", "on_change", on_imp_scale_change)
+    _marsMenu.set_callback(MenuCategory.IMP, "J Spring Coxa", "on_change", _make_imp_joint_gain_cb('JSPRING', 'COXA'))
+    _marsMenu.set_callback(MenuCategory.IMP, "J Spring Femur", "on_change", _make_imp_joint_gain_cb('JSPRING', 'FEMUR'))
+    _marsMenu.set_callback(MenuCategory.IMP, "J Spring Tibia", "on_change", _make_imp_joint_gain_cb('JSPRING', 'TIBIA'))
+    _marsMenu.set_callback(MenuCategory.IMP, "J Damp Coxa", "on_change", _make_imp_joint_gain_cb('JDAMP', 'COXA'))
+    _marsMenu.set_callback(MenuCategory.IMP, "J Damp Femur", "on_change", _make_imp_joint_gain_cb('JDAMP', 'FEMUR'))
+    _marsMenu.set_callback(MenuCategory.IMP, "J Damp Tibia", "on_change", _make_imp_joint_gain_cb('JDAMP', 'TIBIA'))
+    _marsMenu.set_callback(MenuCategory.IMP, "C Spring X", "on_change", _make_imp_cart_gain_cb('CSPRING', 'X'))
+    _marsMenu.set_callback(MenuCategory.IMP, "C Spring Y", "on_change", _make_imp_cart_gain_cb('CSPRING', 'Y'))
+    _marsMenu.set_callback(MenuCategory.IMP, "C Spring Z", "on_change", _make_imp_cart_gain_cb('CSPRING', 'Z'))
+    _marsMenu.set_callback(MenuCategory.IMP, "C Damp X", "on_change", _make_imp_cart_gain_cb('CDAMP', 'X'))
+    _marsMenu.set_callback(MenuCategory.IMP, "C Damp Y", "on_change", _make_imp_cart_gain_cb('CDAMP', 'Y'))
+    _marsMenu.set_callback(MenuCategory.IMP, "C Damp Z", "on_change", _make_imp_cart_gain_cb('CDAMP', 'Z'))
+    _marsMenu.set_callback(MenuCategory.IMP, "J Deadband", "on_change", on_imp_jdb_change)
+    _marsMenu.set_callback(MenuCategory.IMP, "C Deadband", "on_change", on_imp_cdb_change)
+
+    _marsMenu.set_callback(MenuCategory.EST, "Cmd α", "on_change", on_est_cmd_alpha_change)
+    _marsMenu.set_callback(MenuCategory.EST, "Meas α", "on_change", on_est_meas_alpha_change)
+    _marsMenu.set_callback(MenuCategory.EST, "Vel α", "on_change", on_est_vel_alpha_change)
+
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Verbose", "on_change", on_verbose_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Mirror Display", "on_change", on_mirror_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Save All", "on_select", on_save_all)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Shutdown", "on_select", on_shutdown)
     
+    # === GAIT callbacks ===
+    def on_gait_type_change(val):
+        # 0=Tripod, 1=Wave, 2=Ripple, 3=Stationary - only Tripod implemented for now
+        if _verbose:
+            gait_names = ["Tripod", "Wave", "Ripple", "Stationary"]
+            print(f"Gait type: {gait_names[val]}", end="\r\n")
+    
+    def on_step_height_change(val):
+        global _savedGaitLiftMm, _gaitEngine
+        _savedGaitLiftMm = val
+        if _gaitEngine is not None:
+            _gaitEngine.params.lift_mm = val
+        if _verbose:
+            print(f"Step height: {val}mm", end="\r\n")
+    
+    def on_step_length_change(val):
+        global _gaitEngine
+        if _gaitEngine is not None:
+            _gaitEngine.params.step_length_mm = val
+        if _verbose:
+            print(f"Step length: {val}mm", end="\r\n")
+
+    def on_turn_rate_change(val):
+        global _gaitTurnMaxDegS, _savedGaitWidthMm, _savedGaitLiftMm, _gaitCycleMs
+        _gaitTurnMaxDegS = float(val)
+        # Persist alongside other gait settings so value survives restart
+        save_gait_settings(_savedGaitWidthMm, _savedGaitLiftMm, cycle_ms=_gaitCycleMs, turn_max_deg_s=_gaitTurnMaxDegS)
+        if _verbose:
+            print(f"Max turn rate: {_gaitTurnMaxDegS:.1f} deg/s", end="\r\n")
+    
+    def on_cycle_time_change(val):
+        global _gaitEngine, _gaitCycleMs, _savedGaitWidthMm, _savedGaitLiftMm
+        _gaitCycleMs = int(val)
+        if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
+            _gaitEngine.params.cycle_ms = _gaitCycleMs
+        # Persist to config alongside width/lift so new gaits pick up the value
+        save_gait_settings(_savedGaitWidthMm, _savedGaitLiftMm, cycle_ms=_gaitCycleMs)
+        if _verbose:
+            print(f"Cycle time: {_gaitCycleMs}ms", end="\r\n")
+    
+    def on_start_gait():
+        global _gaitActive, _gaitEngine, _autoDisableAt
+        if not _gaitActive:
+            ensure_enabled()
+            if _gaitEngine is None:
+                from gait_engine import TripodGait, GaitParams
+                params = GaitParams()
+                params.base_x_mm = _savedGaitWidthMm
+                params.lift_mm = _savedGaitLiftMm
+                params.cycle_ms = _gaitCycleMs
+                _gaitEngine = TripodGait(params)
+            _gaitEngine.start()
+            _gaitActive = True
+            _autoDisableAt = None
+            if _verbose:
+                print("Gait started via menu", end="\r\n")
+    
+    def on_stop_gait():
+        global _gaitActive, _gaitEngine, _autoDisableAt
+        if _gaitActive:
+            if _gaitEngine is not None:
+                _gaitEngine.stop()
+            _gaitActive = False
+            _autoDisableAt = time.time() + _autoDisableS
+            if _verbose:
+                print("Gait stopped via menu", end="\r\n")
+    
+    _marsMenu.set_callback(MenuCategory.GAIT, "Type", "on_change", on_gait_type_change)
+    _marsMenu.set_callback(MenuCategory.GAIT, "Step Height", "on_change", on_step_height_change)
+    _marsMenu.set_callback(MenuCategory.GAIT, "Step Length", "on_change", on_step_length_change)
+    _marsMenu.set_callback(MenuCategory.GAIT, "Turn Rate", "on_change", on_turn_rate_change)
+    _marsMenu.set_callback(MenuCategory.GAIT, "Cycle Time", "on_change", on_cycle_time_change)
+    _marsMenu.set_callback(MenuCategory.GAIT, "Start Gait", "on_select", on_start_gait)
+    _marsMenu.set_callback(MenuCategory.GAIT, "Stop Gait", "on_select", on_stop_gait)
+    
+    # === POSTURE callbacks ===
+    def on_stand():
+        apply_posture(b'STAND', auto_disable_s=_autoDisableS)
+        _marsMenu.hide()
+    
+    def on_tuck():
+        apply_posture(b'TUCK', auto_disable_s=_autoDisableS)
+        _marsMenu.hide()
+    
+    def on_home():
+        apply_posture(b'HOME', auto_disable_s=_autoDisableS)
+        _marsMenu.hide()
+    
+    _marsMenu.set_callback(MenuCategory.POSTURE, "Stand", "on_select", on_stand)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "Tuck", "on_select", on_tuck)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "Home", "on_select", on_home)
+
+    # === SAFETY callbacks ===
+    def on_clear_safety():
+        """Issue SAFETY CLEAR to Teensy to request clearing lockout.
+
+        Python will continue to honor safety state based on S5; this
+        action merely forwards a clear request to firmware.
+        """
+        if _teensy is not None:
+            send_cmd(b'SAFETY CLEAR', force=True)
+            if _verbose:
+                print("SAFETY CLEAR command sent to Teensy", end="\r\n")
+
+    def _send_safety_override(keyword: bytes, label: str):
+        """Helper to send SAFETY OVERRIDE <keyword> to Teensy from menu.
+
+        This only affects firmware safety evaluation; Python continues
+        to mirror and honor S5-reported state.
+        """
+        if _teensy is not None:
+            cmd = b'SAFETY OVERRIDE ' + keyword
+            send_cmd(cmd, force=True)
+            if _verbose:
+                print(f"SAFETY OVERRIDE {label} command sent to Teensy", end="\r\n")
+
+    def on_override_all():
+        _send_safety_override(b'ALL', 'ALL')
+
+    def on_override_temp():
+        _send_safety_override(b'TEMP', 'TEMP')
+
+    def on_override_collision():
+        _send_safety_override(b'COLLISION', 'COLLISION')
+
+    def on_override_none():
+        _send_safety_override(b'NONE', 'NONE')
+
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Clear Safety", "on_select", on_clear_safety)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Override ALL", "on_select", on_override_all)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Override TEMP", "on_select", on_override_temp)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Override COLLISION", "on_select", on_override_collision)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Override NONE", "on_select", on_override_none)
+    
     # === Sync initial values ===
     _marsMenu.set_value(MenuCategory.EYES, "Style", _eyes.left_shape)
     _marsMenu.set_value(MenuCategory.EYES, "Human Color", _eyes.human_eye_color_idx)
     _marsMenu.set_value(MenuCategory.EYES, "Size", _eyes.human_eye_size)
-    _marsMenu.set_value(MenuCategory.EYES, "V Center", _eyeCenterOffset)
+    _marsMenu.set_value(MenuCategory.EYES, "V Center", _eyeVerticalOffset)
     _marsMenu.set_value(MenuCategory.EYES, "Spacing", int(_eyes.human_eye_spacing_pct * 100))
     _marsMenu.set_value(MenuCategory.EYES, "CRT Effect", 1 if _eyes.crt_mode else 0)
     _marsMenu.set_value(MenuCategory.SYSTEM, "Theme", _menuTheme)
     _marsMenu.set_value(MenuCategory.SYSTEM, "Palette", _menuPalette)
     _marsMenu.set_value(MenuCategory.SYSTEM, "Brightness", _displayBrightness)
+    _marsMenu.set_value(MenuCategory.SYSTEM, "Auto-Disable", int(_autoDisableS))
     _marsMenu.set_value(MenuCategory.SYSTEM, "Verbose", 1 if _verbose else 0)
     _marsMenu.set_value(MenuCategory.SYSTEM, "Mirror Display", 1 if _mirrorDisplay else 0)
+    _marsMenu.set_value(MenuCategory.GAIT, "Step Height", int(_savedGaitLiftMm))
+    _marsMenu.set_value(MenuCategory.GAIT, "Turn Rate", int(_gaitTurnMaxDegS))
+    _marsMenu.set_value(MenuCategory.GAIT, "Cycle Time", int(_gaitCycleMs))
     _marsMenu.set_value(MenuCategory.INFO, "Ctrl Version", f"{CONTROLLER_VERSION} b{CONTROLLER_BUILD}")
     
     # Apply saved theme/palette
@@ -2018,6 +2973,160 @@ def _setup_mars_menu():
     _marsMenu.lcars_palette = _menuPalette
 
 _setup_mars_menu()
+
+def update_menu_info():
+    """Update INFO menu items from current telemetry data.
+
+    INFO tab shows instantaneous values; System tab can show aggregated stats
+    such as average battery voltage or servo temperature when available.
+    """
+    global _marsMenu, _state, _servo, _safety_state
+    if _marsMenu is None:
+        return
+    
+    # Compute average servo voltage from _servo (S3 telemetry)
+    avg_servo_v = None
+    if _servo is not None:
+        v_sum = 0.0
+        v_count = 0
+        for s in _servo:
+            if not s or len(s) < 1:
+                continue
+            v = s[0]
+            if v is None:
+                continue
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                continue
+            if v <= 0:
+                continue
+            v_sum += v
+            v_count += 1
+        if v_count > 0:
+            avg_servo_v = v_sum / v_count
+
+    # Update INFO items from _state (S1 telemetry) - instantaneous values
+    if len(_state) > IDX_BATTERY_V:
+        batt_v = _state[IDX_BATTERY_V]
+        # If battery voltage is missing/zero, fall back to average servo bus voltage.
+        if batt_v is None or batt_v <= 0:
+            _marsMenu.set_value(MenuCategory.INFO, "Battery", avg_servo_v)
+        else:
+            _marsMenu.set_value(MenuCategory.INFO, "Battery", batt_v)
+    if len(_state) > IDX_CURRENT_A:
+        _marsMenu.set_value(MenuCategory.INFO, "Current", _state[IDX_CURRENT_A])
+    if len(_state) > IDX_LOOP_US:
+        loop_us = int(_state[IDX_LOOP_US])
+        _marsMenu.set_value(MenuCategory.INFO, "Loop Time", loop_us if loop_us > 0 else None)
+    if len(_state) > IDX_PITCH_DEG:
+        _marsMenu.set_value(MenuCategory.INFO, "IMU Pitch", _state[IDX_PITCH_DEG])
+    if len(_state) > IDX_ROLL_DEG:
+        _marsMenu.set_value(MenuCategory.INFO, "IMU Roll", _state[IDX_ROLL_DEG])
+    
+    # Find servo temperature statistics from _servo array
+    max_temp = None
+    temp_sum = 0.0
+    temp_count = 0
+    if _servo is not None:
+        for i in range(len(_servo)):
+            # _servo entries are [voltage_V, temp_C, enabled] (S3/S2)
+            if len(_servo[i]) > 1:
+                temp = _servo[i][1]
+                if temp is None:
+                    continue
+                try:
+                    tval = float(temp)
+                except (TypeError, ValueError):
+                    continue
+                # Ignore uninitialized/invalid temps
+                if tval <= 0:
+                    continue
+                temp_sum += tval
+                temp_count += 1
+                if max_temp is None or tval > max_temp:
+                    max_temp = tval
+    # INFO tab shows max servo temperature
+    _marsMenu.set_value(MenuCategory.INFO, "Servo Temp", int(max_temp) if max_temp is not None else None)
+    # SYSTEM tab can show average servo temperature when available
+    _marsMenu.set_value(MenuCategory.SYSTEM, "Avg Servo Temp", (temp_sum / temp_count) if temp_count > 0 else None)
+
+    # SAFETY tab: mirror latest S5 snapshot
+    lockout = _safety_state.get("lockout", False)
+    cause_mask = _safety_state.get("cause_mask", 0)
+    override_mask = _safety_state.get("override_mask", 0)
+    clearance_mm = _safety_state.get("clearance_mm", 0)
+    soft_limits = _safety_state.get("soft_limits", False)
+    collision = _safety_state.get("collision", False)
+    temp_c = _safety_state.get("temp_c", 0)
+
+    state_str = "LOCKOUT" if lockout else "OK"
+    _marsMenu.set_value(MenuCategory.SAFETY, "State", state_str)
+    _marsMenu.set_value(MenuCategory.SAFETY, "Cause", f"0x{cause_mask:04X}")
+    _marsMenu.set_value(MenuCategory.SAFETY, "Override", f"0x{override_mask:04X}")
+    _marsMenu.set_value(MenuCategory.SAFETY, "Clearance", int(clearance_mm))
+    _marsMenu.set_value(MenuCategory.SAFETY, "Soft Limits", "On" if soft_limits else "Off")
+    _marsMenu.set_value(MenuCategory.SAFETY, "Collision", "On" if collision else "Off")
+    _marsMenu.set_value(MenuCategory.SAFETY, "Temp Lock", f"{int(temp_c)}C")
+
+    # PID/IMP/EST tabs: mirror latest LIST snapshots (if available)
+    if _pid_state.get("enabled") is not None:
+        _marsMenu.set_value(MenuCategory.PID, "Enabled", 1 if _pid_state["enabled"] else 0)
+    if _pid_state.get("mode") is not None:
+        _marsMenu.set_value(MenuCategory.PID, "Mode", 0 if _pid_state["mode"] == "active" else 1)
+    if _pid_state.get("shadow_hz") is not None:
+        _marsMenu.set_value(MenuCategory.PID, "Shadow Hz", int(_pid_state["shadow_hz"]))
+    if _pid_state.get("kp") is not None:
+        _marsMenu.set_value(MenuCategory.PID, "Kp Coxa", int(_pid_state["kp"][0]))
+        _marsMenu.set_value(MenuCategory.PID, "Kp Femur", int(_pid_state["kp"][1]))
+        _marsMenu.set_value(MenuCategory.PID, "Kp Tibia", int(_pid_state["kp"][2]))
+    if _pid_state.get("ki") is not None:
+        _marsMenu.set_value(MenuCategory.PID, "Ki Coxa", int(_pid_state["ki"][0]))
+        _marsMenu.set_value(MenuCategory.PID, "Ki Femur", int(_pid_state["ki"][1]))
+        _marsMenu.set_value(MenuCategory.PID, "Ki Tibia", int(_pid_state["ki"][2]))
+    if _pid_state.get("kd") is not None:
+        _marsMenu.set_value(MenuCategory.PID, "Kd Coxa", int(_pid_state["kd"][0]))
+        _marsMenu.set_value(MenuCategory.PID, "Kd Femur", int(_pid_state["kd"][1]))
+        _marsMenu.set_value(MenuCategory.PID, "Kd Tibia", int(_pid_state["kd"][2]))
+    if _pid_state.get("kdalph") is not None:
+        _marsMenu.set_value(MenuCategory.PID, "Kdα Coxa", int(_pid_state["kdalph"][0]))
+        _marsMenu.set_value(MenuCategory.PID, "Kdα Femur", int(_pid_state["kdalph"][1]))
+        _marsMenu.set_value(MenuCategory.PID, "Kdα Tibia", int(_pid_state["kdalph"][2]))
+
+    if _imp_state.get("enabled") is not None:
+        _marsMenu.set_value(MenuCategory.IMP, "Enabled", 1 if _imp_state["enabled"] else 0)
+    if _imp_state.get("mode") is not None:
+        mode = _imp_state["mode"]
+        _marsMenu.set_value(MenuCategory.IMP, "Mode", 1 if mode == "joint" else (2 if mode == "cart" else 0))
+    if _imp_state.get("scale") is not None:
+        _marsMenu.set_value(MenuCategory.IMP, "Scale", int(_imp_state["scale"]))
+    if _imp_state.get("jspring") is not None:
+        _marsMenu.set_value(MenuCategory.IMP, "J Spring Coxa", int(_imp_state["jspring"][0]))
+        _marsMenu.set_value(MenuCategory.IMP, "J Spring Femur", int(_imp_state["jspring"][1]))
+        _marsMenu.set_value(MenuCategory.IMP, "J Spring Tibia", int(_imp_state["jspring"][2]))
+    if _imp_state.get("jdamp") is not None:
+        _marsMenu.set_value(MenuCategory.IMP, "J Damp Coxa", int(_imp_state["jdamp"][0]))
+        _marsMenu.set_value(MenuCategory.IMP, "J Damp Femur", int(_imp_state["jdamp"][1]))
+        _marsMenu.set_value(MenuCategory.IMP, "J Damp Tibia", int(_imp_state["jdamp"][2]))
+    if _imp_state.get("cspring") is not None:
+        _marsMenu.set_value(MenuCategory.IMP, "C Spring X", int(_imp_state["cspring"][0]))
+        _marsMenu.set_value(MenuCategory.IMP, "C Spring Y", int(_imp_state["cspring"][1]))
+        _marsMenu.set_value(MenuCategory.IMP, "C Spring Z", int(_imp_state["cspring"][2]))
+    if _imp_state.get("cdamp") is not None:
+        _marsMenu.set_value(MenuCategory.IMP, "C Damp X", int(_imp_state["cdamp"][0]))
+        _marsMenu.set_value(MenuCategory.IMP, "C Damp Y", int(_imp_state["cdamp"][1]))
+        _marsMenu.set_value(MenuCategory.IMP, "C Damp Z", int(_imp_state["cdamp"][2]))
+    if _imp_state.get("jdb_cd") is not None:
+        _marsMenu.set_value(MenuCategory.IMP, "J Deadband", int(_imp_state["jdb_cd"]))
+    if _imp_state.get("cdb_mm") is not None:
+        _marsMenu.set_value(MenuCategory.IMP, "C Deadband", float(_imp_state["cdb_mm"]))
+
+    if _est_state.get("cmd_alpha_milli") is not None:
+        _marsMenu.set_value(MenuCategory.EST, "Cmd α", int(_est_state["cmd_alpha_milli"]))
+    if _est_state.get("meas_alpha_milli") is not None:
+        _marsMenu.set_value(MenuCategory.EST, "Meas α", int(_est_state["meas_alpha_milli"]))
+    if _est_state.get("meas_vel_alpha_milli") is not None:
+        _marsMenu.set_value(MenuCategory.EST, "Vel α", int(_est_state["meas_vel_alpha_milli"]))
 
 # Create and start display thread if enabled
 _displayThread = None
@@ -2030,7 +3139,9 @@ if _displayThreadEnabled:
                                 teensy_connected=(_teensy is not None),
                                 controller_connected=(_controller is not None),
                                 telemetry_stale=(_teensy is not None and _lastTelemetryTime is None),
-                                robot_enabled=(_state[IDX_ROBOT_ENABLED] == 1.0 if len(_state) > IDX_ROBOT_ENABLED else True))
+                                robot_enabled=(_state[IDX_ROBOT_ENABLED] == 1.0 if len(_state) > IDX_ROBOT_ENABLED else True),
+                                safety_active=_safety_state.get("lockout", False),
+                                safety_text=get_safety_overlay_state()[1])
     _displayThread.start()
     if _verbose:
         print(f"Display thread started at {_displayThreadHz} Hz (blink divisor: {_blinkFrameDivisor})", end="\r\n")
@@ -2093,6 +3204,11 @@ def ensure_enabled() -> bool:
         True if enable commands were sent, False if already enabled or no Teensy.
     """
     global _enabledLocal
+    # Honor firmware safety lockout: never try to re-enable while locked out
+    if _safety_state.get("lockout", False):
+        if _verbose:
+            print("Safety lockout active; refusing ENABLE. Clear SAFETY on Teensy first.", end="\r\n")
+        return False
     if _teensy is None:
         return False
     # Check both local tracking and telemetry state
@@ -2105,13 +3221,18 @@ def ensure_enabled() -> bool:
 
 # Tuck auto-disable scheduling
 _autoDisableAt = None  # when not None, time (epoch seconds) at which to send DISABLE after posture command (tuck/stand)
- # Enable flag consumed directly from _state[IDX_ROBOT_ENABLED]; no SQ telemetry support required.
-_lastPosture = None  # tracks last posture name sent (for future dynamic messaging)
+# Enable flag consumed directly from _state[IDX_ROBOT_ENABLED]; no SQ telemetry support required.
+_autoDisableReason = None  # string reason for pending auto-disable (e.g., 'TUCK')
+_autoDisableGen = 0        # generation counter to detect stale timers
+_lastPosture = None        # tracks last posture name sent (for future dynamic messaging)
 
 def apply_posture(name, auto_disable_s: float = None, require_enable: bool = True):
     """Unified posture helper (TUCK/STAND/HOME) using byte commands.
-    Auto enable sequence if required; schedules auto disable if >0."""
-    global _autoDisableAt, _lastPosture
+    Auto enable sequence if required; schedules auto disable if >0.
+    Auto-disable is reason-aware: posture auto-disable will not fire if superseded
+    by a newer posture/gait command.
+    """
+    global _autoDisableAt, _autoDisableReason, _autoDisableGen, _lastPosture
     if auto_disable_s is None:
         auto_disable_s = _autoDisableS
     if _teensy is None:
@@ -2134,12 +3255,17 @@ def apply_posture(name, auto_disable_s: float = None, require_enable: bool = Tru
         ensure_enabled()
     if send_cmd(posture, force=True):
         _lastPosture = posture
+        # Bump generation on every successful posture command
+        _autoDisableGen += 1
+        reason = posture.decode('ascii', errors='ignore') if isinstance(posture, (bytes, bytearray)) else str(posture)
         if auto_disable_s > 0:
             _autoDisableAt = time.time() + auto_disable_s
+            _autoDisableReason = reason
             if _verbose:
-                print(f"\n{posture} sequence sent. Auto DISABLE in {auto_disable_s:.0f}s.", end="\r\n")
+                print(f"\n{posture} sequence sent. Auto DISABLE in {auto_disable_s:.0f}s (reason={reason}).", end="\r\n")
         else:
             _autoDisableAt = None
+            _autoDisableReason = None
         return True
     return False
 
@@ -2211,6 +3337,10 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
         gaitEngine: Current gait engine or None
         gaitActive: Whether gait is currently active
     """
+    # Update INFO menu items from telemetry (only if menu visible to save cycles)
+    if _marsMenu is not None and _marsMenu.visible:
+        update_menu_info()
+    
     if displayThread is not None and displayThread.is_alive():
         # Compute eye look direction from joystick inputs
         look_x = 0.0
@@ -2224,6 +3354,7 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
         telemetry_stale = (ctrl.teensy is not None and ctrl.lastTelemetryTime is None)
         # Robot enabled state from S1 telemetry
         robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if len(ctrl.state) > IDX_ROBOT_ENABLED else True
+        safety_active, safety_text = get_safety_overlay_state()
         
         # Update thread state - it handles rendering at its own rate
         displayThread.update_state(
@@ -2233,8 +3364,10 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
             look_x=look_x, look_y=look_y,
             teensy_connected=(ctrl.teensy is not None),
             controller_connected=(ctrl.controller is not None),
-            telemetry_stale=telemetry_stale,
-            robot_enabled=robot_enabled
+                telemetry_stale=telemetry_stale,
+                robot_enabled=robot_enabled,
+                safety_active=safety_active,
+                safety_text=safety_text
         )
         ctrl.forceDisplayUpdate = False
     elif not gaitActive:
@@ -2306,47 +3439,100 @@ def phase_keyboard_input(ctrl):
     global _gaitEngine, _gaitActive, _autoDisableAt
     
     key = poll_keyboard()
-    
-    if key == 27:  # ESC key
+
+    # When MARS menu is visible, arrows/A/D/enter/esc keys drive the menu
+    if _marsMenu is not None and _marsMenu.visible and key != -1:
+        if key in (curses.KEY_UP, ord('k')):
+            _marsMenu.nav_up()
+            ctrl.forceDisplayUpdate = True
+            return True
+        elif key in (curses.KEY_DOWN, ord('j')):
+            _marsMenu.nav_down()
+            ctrl.forceDisplayUpdate = True
+            return True
+        elif key in (curses.KEY_LEFT, ord('h')):
+            _marsMenu.nav_tab_left()
+            ctrl.forceDisplayUpdate = True
+            return True
+        elif key in (curses.KEY_RIGHT, ord('l')):
+            _marsMenu.nav_tab_right()
+            ctrl.forceDisplayUpdate = True
+            return True
+        elif key in (ord('a'), ord('A')):
+            # Adjust current value/option left
+            _marsMenu.nav_left()
+            ctrl.forceDisplayUpdate = True
+            return True
+        elif key in (ord('d'), ord('D')):
+            # Adjust current value/option right
+            _marsMenu.nav_right()
+            ctrl.forceDisplayUpdate = True
+            return True
+        elif key in (10, 13, ord(' ')):  # Enter or space
+            _marsMenu.select()
+            ctrl.forceDisplayUpdate = True
+            return True
+        elif key == 27:  # ESC closes menu instead of exiting app
+            _marsMenu.hide()
+            ctrl.forceDisplayUpdate = True
+            if _verbose:
+                print("\nMARS menu closed (ESC)", end="\r\n")
+            return True
+
+    if key == 27:  # ESC key with no menu open: exit application
         if _verbose:
             print("\nESC key pressed, exiting loop", end="\r\n")
         return False
     
     elif key in (ord('t'), ord('T')):  # Test gait
-        if _state[IDX_ROBOT_ENABLED] != 1.0:
-            ensure_enabled()
-        send_cmd(b'T', force=True)
-        if _verbose:
-            print("\nTest gait command sent to Teensy", end="\r\n")
+        if _safety_state.get("lockout", False):
+            if _verbose:
+                print("\nTest gait blocked: firmware safety lockout is active.", end="\r\n")
+        else:
+            if _state[IDX_ROBOT_ENABLED] != 1.0:
+                ensure_enabled()
+            send_cmd(b'T', force=True)
+            if _verbose:
+                print("\nTest gait command sent to Teensy", end="\r\n")
     
     elif key in (ord('k'), ord('K')):  # Tuck posture
-        if _state[IDX_ROBOT_ENABLED] != 1.0:
-            ensure_enabled()
-        send_cmd(b'TUCK', force=True)
-        _autoDisableAt = time.time() + _autoDisableS
-        ctrl.autoDisableAt = _autoDisableAt
+        if _safety_state.get("lockout", False):
+            if _verbose:
+                print("\nTUCK blocked: firmware safety lockout is active.", end="\r\n")
+        else:
+            if _state[IDX_ROBOT_ENABLED] != 1.0:
+                ensure_enabled()
+            send_cmd(b'TUCK', force=True)
+            _autoDisableAt = time.time() + _autoDisableS
+            ctrl.autoDisableAt = _autoDisableAt
     
     elif key in (ord('s'), ord('S')):  # Stand posture
-        if _state[IDX_ROBOT_ENABLED] != 1.0:
-            ensure_enabled()
-        send_cmd(b'STAND', force=True)
-        _autoDisableAt = time.time() + _autoDisableS
-        ctrl.autoDisableAt = _autoDisableAt
+        if _safety_state.get("lockout", False):
+            if _verbose:
+                print("\nSTAND blocked: firmware safety lockout is active.", end="\r\n")
+        else:
+            if _state[IDX_ROBOT_ENABLED] != 1.0:
+                ensure_enabled()
+            send_cmd(b'STAND', force=True)
+            _autoDisableAt = time.time() + _autoDisableS
+            ctrl.autoDisableAt = _autoDisableAt
     
-    elif key in (ord('n'), ord('N')):  # Menu toggle
-        if _menuState is None:
-            _menuState = "data"
-        elif _menuState == "data":
-            _menuState = "settings"
-        elif _menuState == "settings":
-            _menuState = None
-        _menuVisible = _menuState != None
-        ctrl.menuState = _menuState
-        ctrl.menuVisible = _menuVisible
-        _forceDisplayUpdate = True
-        ctrl.forceDisplayUpdate = True
-        if _verbose:
-            print("\nMenu visibility toggled ON" if _menuVisible else "\nMenu visibility toggled OFF", end="\r\n")
+    elif key in (ord('n'), ord('N')):  # Menu toggle (MARS menu)
+        # Mirror Start-button behavior: only allow menu when disabled & not in motion
+        robot_enabled = (_state[IDX_ROBOT_ENABLED] == 1.0) if len(_state) > IDX_ROBOT_ENABLED else False
+        if _marsMenu.visible:
+            _marsMenu.hide()
+            ctrl.forceDisplayUpdate = True
+            if _verbose:
+                print("\nMARS menu closed (keyboard 'n')", end="\r\n")
+        elif not robot_enabled and not _gaitActive:
+            _marsMenu.show()
+            ctrl.forceDisplayUpdate = True
+            if _verbose:
+                print("\nMARS menu opened (keyboard 'n')", end="\r\n")
+        else:
+            if _verbose:
+                print("\nMARS menu blocked: disable robot first", end="\r\n")
     
     elif key in (ord('m'), ord('M')):  # Mirror toggle
         _mirrorDisplay = not _mirrorDisplay
@@ -2385,7 +3571,10 @@ def phase_keyboard_input(ctrl):
             print(f"Eye shape changed to {shape_names[_eyes.left_shape]}", end="\r\n")
     
     elif key in (ord('w'), ord('W')):  # Start gait (walk)
-        if not _gaitActive:
+        if _safety_state.get("lockout", False):
+            if _verbose:
+                print("\nGait start blocked: firmware safety lockout is active.", end="\r\n")
+        elif not _gaitActive:
             if _state[IDX_ROBOT_ENABLED] != 1.0:
                 ensure_enabled()
             params = GaitParams(
@@ -2526,16 +3715,23 @@ def phase_auto_disable(ctrl):
     Args:
         ctrl: Controller instance
     """
-    global _autoDisableAt
-    
+    global _autoDisableAt, _autoDisableReason, _autoDisableGen
+
     if ctrl.autoDisableAt is not None and time.time() >= ctrl.autoDisableAt:
-        if ctrl.teensy is not None:
-            if ctrl.state[IDX_ROBOT_ENABLED] == 1.0:
+        # Only honor auto-disable if reason/generation still match and robot is enabled
+        reason = getattr(ctrl, 'autoDisableReason', None)
+        gen = getattr(ctrl, 'autoDisableGen', 0)
+        if gen == _autoDisableGen and reason == _autoDisableReason:
+            if ctrl.teensy is not None and ctrl.state[IDX_ROBOT_ENABLED] == 1.0:
                 send_cmd(b'DISABLE', force=True)
-            if ctrl.verbose:
-                print("\nAuto DISABLE executed", end="\r\n")
+                if ctrl.verbose:
+                    print(f"\nAuto DISABLE executed (reason={reason})", end="\r\n")
+        # Clear any pending auto-disable (stale or executed)
         ctrl.autoDisableAt = None
+        ctrl.autoDisableReason = None
+        ctrl.autoDisableGen = gen
         _autoDisableAt = None
+        _autoDisableReason = None
 
 
 def phase_loop_sleep(ctrl):
@@ -2592,6 +3788,8 @@ def sync_globals_to_ctrl(ctrl):
     ctrl.menuVisible = _menuVisible
     ctrl.steeringMode = _steeringMode
     ctrl.autoDisableAt = _autoDisableAt
+    ctrl.autoDisableReason = _autoDisableReason
+    ctrl.autoDisableGen = _autoDisableGen
     ctrl.lastRawS1 = _lastRawS1
     ctrl.lastParsedS1 = _lastParsedS1
     ctrl.lastRawS2 = _lastRawS2
@@ -2607,6 +3805,7 @@ def sync_ctrl_to_globals(ctrl):
     global _lastTelemetryTime, _telemetryGraceDeadline, _telemetryStartedByScript
     global _telemetryRetryDeadline, _telemetryRetryCount, _controller, _retryCount
     global _forceDisplayUpdate, _menuState, _menuVisible, _steeringMode, _autoDisableAt
+    global _autoDisableReason, _autoDisableGen
     global _lastRawS1, _lastParsedS1, _lastRawS2, _lastParsedS2
     global _teensyLoopUs, _lastS1MonoTime, _telemSyncActive
     
@@ -2627,6 +3826,8 @@ def sync_ctrl_to_globals(ctrl):
     _menuVisible = ctrl.menuVisible
     _steeringMode = ctrl.steeringMode
     _autoDisableAt = ctrl.autoDisableAt
+    _autoDisableReason = getattr(ctrl, 'autoDisableReason', _autoDisableReason)
+    _autoDisableGen = getattr(ctrl, 'autoDisableGen', _autoDisableGen)
     _lastRawS1 = ctrl.lastRawS1
     _lastParsedS1 = ctrl.lastParsedS1
     _lastRawS2 = ctrl.lastRawS2
@@ -2761,11 +3962,11 @@ if _teensy is not None:
     time.sleep(0.02)
     send_cmd(b'DISABLE', force=True)
     time.sleep(0.02)
-    if _telemetryStartedByScript:
-        if _verbose:
-            print("Stopping telemetry ('Y 0').", end="\r\n")
-        send_cmd(b'Y 0', force=True)
-        time.sleep(0.05)
+
+    if _verbose:
+        print("Stopping telemetry ('Y 0').", end="\r\n")
+    send_cmd(b'Y 0', force=True)
+    time.sleep(0.05)
 print(end="\r\n")
 
 _controller = None

@@ -20,8 +20,12 @@ class MenuCategory:
     GAIT = 1
     POSTURE = 2
     INFO = 3
-    SYSTEM = 4
-    COUNT = 5  # Total number of categories
+    SAFETY = 4
+    SYSTEM = 5
+    PID = 6
+    IMP = 7
+    EST = 8
+    COUNT = 9  # Total number of categories
 
 
 class MenuTheme:
@@ -141,6 +145,8 @@ class MarsMenu:
     TAB_WIDTH = 55  # Wider tabs for touch
     CONTENT_X = TAB_WIDTH
     CONTENT_WIDTH = WIDTH - TAB_WIDTH
+    # Maximum number of tabs to show per page; excess tabs spill to additional pages
+    MAX_TABS_PER_PAGE = 5
     
     # Appearance - MARS theme (default)
     BG_COLOR = (20, 20, 25)
@@ -211,8 +217,8 @@ class MarsMenu:
     }
     
     # Tab labels (ASCII text for font compatibility)
-    TAB_LABELS = ["EYE", "GAIT", "POSE", "INFO", "SYS"]
-    TAB_NAMES = ["Eyes", "Gait", "Pose", "Info", "Sys"]
+    TAB_LABELS = ["EYE", "GAIT", "POSE", "INFO", "SAFE", "SYS", "PID", "IMP", "EST"]
+    TAB_NAMES = ["Eyes", "Gait", "Pose", "Info", "Safety", "Sys", "PID", "IMP", "EST"]
     
     def __init__(self, touch=None):
         """Initialize the menu system."""
@@ -239,7 +245,11 @@ class MarsMenu:
             MenuCategory.GAIT: [],
             MenuCategory.POSTURE: [],
             MenuCategory.INFO: [],
+            MenuCategory.SAFETY: [],
             MenuCategory.SYSTEM: [],
+            MenuCategory.PID: [],
+            MenuCategory.IMP: [],
+            MenuCategory.EST: [],
         }
         
         # Callbacks will be set by controller
@@ -256,6 +266,26 @@ class MarsMenu:
         self._touch_active = False
         # First-tap ignore: skip N touch events after wake
         self._ignore_touches = 0
+
+    def _get_tab_paging(self):
+        """Compute paging window for tabs.
+
+        Returns (start_index, end_index, visible_count, max_per_page, page_index, page_count).
+        """
+        total = MenuCategory.COUNT
+        if total <= 0:
+            return 0, 0, 0, 1, 0, 1
+
+        max_per = min(self.MAX_TABS_PER_PAGE, total)
+        page_count = (total + max_per - 1) // max_per
+        # Derive page from current tab index
+        page = self._current_tab // max_per
+        if page >= page_count:
+            page = page_count - 1
+        start = page * max_per
+        end = min(start + max_per, total)
+        visible = max(0, end - start)
+        return start, end, visible, max_per, page, page_count
     
     def _build_menu_items(self):
         """Build the menu item structure."""
@@ -269,7 +299,7 @@ class MarsMenu:
                     options=["Blue", "Green", "Hazel", "Brown", "DkBrown"]),
             MenuItem("Size", "value", value=33, min_val=15, max_val=50, step=2, unit="px"),
             MenuItem("V Center", "value", value=0, min_val=-30, max_val=30, step=2, unit="px"),
-            MenuItem("Spacing", "value", value=25, min_val=10, max_val=45, step=5, unit="%"),
+            MenuItem("Spacing", "value", value=25, min_val=10, max_val=45, step=1, unit="%"),
             MenuItem("CRT Effect", "option", value=1, options=["Off", "On"]),
         ]
         
@@ -279,37 +309,55 @@ class MarsMenu:
                     options=["Tripod", "Wave", "Ripple", "Stationary"]),
             MenuItem("Step Height", "value", value=60, min_val=20, max_val=100, step=5, unit="mm"),
             MenuItem("Step Length", "value", value=100, min_val=50, max_val=175, step=5, unit="mm"),
+            MenuItem("Turn Rate", "value", value=60, min_val=10, max_val=90, step=5, unit="deg/s"),
             MenuItem("Cycle Time", "value", value=2000, min_val=500, max_val=4000, step=100, unit="ms"),
-            MenuItem("Smoothing", "value", value=30, min_val=0, max_val=100, step=10, unit="%"),
+            MenuItem("Start Gait", "action"),
+            MenuItem("Stop Gait", "action"),
         ]
         
         # === POSTURE ===
         self._items[MenuCategory.POSTURE] = [
+            MenuItem("Stand", "action"),
+            MenuItem("Tuck", "action"),
+            MenuItem("Home", "action"),
             MenuItem("Stand Height", "value", value=120, min_val=80, max_val=160, step=5, unit="mm"),
-            MenuItem("Body X", "value", value=100, min_val=50, max_val=150, step=5, unit="mm"),
-            MenuItem("Body Y", "value", value=-120, min_val=-160, max_val=-80, step=5, unit="mm"),
-            MenuItem("Roll Offset", "value", value=0, min_val=-15, max_val=15, step=1, unit="°"),
-            MenuItem("Pitch Offset", "value", value=0, min_val=-15, max_val=15, step=1, unit="°"),
-            MenuItem("Apply Pose", "action"),
-            MenuItem("Save as Default", "action"),
+            MenuItem("Body Pitch", "value", value=0, min_val=-15, max_val=15, step=1, unit="°"),
+            MenuItem("Body Roll", "value", value=0, min_val=-15, max_val=15, step=1, unit="°"),
         ]
         
         # === INFO ===
         self._items[MenuCategory.INFO] = [
             MenuItem("Battery", "info", value=12.6, unit="V",
-                    format_func=lambda v: f"{v:.1f}V" if v else "---"),
+                format_func=lambda v: f"{v:.1f}V" if v is not None else "---"),
             MenuItem("Current", "info", value=0.0, unit="A",
-                    format_func=lambda v: f"{v:.2f}A" if v else "---"),
+                format_func=lambda v: f"{v:.2f}A" if v is not None else "---"),
             MenuItem("Loop Time", "info", value=0, unit="μs",
-                    format_func=lambda v: f"{v}μs" if v else "---"),
+                format_func=lambda v: f"{v}μs" if (v is not None and v > 0) else "---"),
             MenuItem("IMU Pitch", "info", value=0.0,
                     format_func=lambda v: f"{v:.1f}°" if v is not None else "---"),
             MenuItem("IMU Roll", "info", value=0.0,
                     format_func=lambda v: f"{v:.1f}°" if v is not None else "---"),
             MenuItem("Servo Temp", "info", value=0,
-                    format_func=lambda v: f"{v}°C" if v else "---"),
+                format_func=lambda v: f"{v}°C" if (v is not None and v > 0) else "---"),
             MenuItem("FW Version", "info", value="0.0.0"),
             MenuItem("Ctrl Version", "info", value="0.0.0"),
+        ]
+
+        # === SAFETY ===
+        self._items[MenuCategory.SAFETY] = [
+            MenuItem("State", "info", value="OK"),
+            MenuItem("Cause", "info", value="0x0000"),
+            MenuItem("Override", "info", value="0x0000"),
+            MenuItem("Clearance", "info", value=0, unit="mm",
+                     format_func=lambda v: f"{int(v)}mm" if v is not None else "---"),
+            MenuItem("Soft Limits", "info", value="On"),
+            MenuItem("Collision", "info", value="On"),
+            MenuItem("Temp Lock", "info", value="80C"),
+            MenuItem("Clear Safety", "action"),
+            MenuItem("Override ALL", "action"),
+            MenuItem("Override TEMP", "action"),
+            MenuItem("Override COLLISION", "action"),
+            MenuItem("Override NONE", "action"),
         ]
         
         # === SYSTEM ===
@@ -320,13 +368,61 @@ class MarsMenu:
                     options=["Classic", "Nemesis", "LwrDecks", "PADD"],
                     on_change=self._on_palette_change),
             MenuItem("Brightness", "value", value=100, min_val=10, max_val=100, step=10, unit="%"),
+            MenuItem("Auto-Disable", "value", value=5, min_val=0, max_val=30, step=1, unit="s"),
+            MenuItem("Avg Servo Temp", "info", value=0.0,
+                format_func=lambda v: f"{v:.1f}°C" if (v is not None and v > 0) else "---"),
             MenuItem("Verbose", "option", value=0, options=["Off", "On"]),
             MenuItem("Mirror Display", "option", value=0, options=["Off", "On"]),
-            MenuItem("Servo Calib", "action"),
-            MenuItem("Leg Calib", "action"),
-            MenuItem("Diagnostics", "action"),
             MenuItem("Save All", "action"),
             MenuItem("Shutdown", "action"),
+        ]
+
+        # === PID ===
+        self._items[MenuCategory.PID] = [
+            MenuItem("Enabled", "option", value=0, options=["Off", "On"]),
+            MenuItem("Mode", "option", value=0, options=["Active", "Shadow"]),
+            MenuItem("Shadow Hz", "value", value=2, min_val=1, max_val=50, step=1, unit="Hz"),
+            MenuItem("Kp Coxa", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Kp Femur", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Kp Tibia", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Ki Coxa", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Ki Femur", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Ki Tibia", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Kd Coxa", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Kd Femur", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Kd Tibia", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("Kdα Coxa", "value", value=200, min_val=0, max_val=1000, step=25),
+            MenuItem("Kdα Femur", "value", value=200, min_val=0, max_val=1000, step=25),
+            MenuItem("Kdα Tibia", "value", value=200, min_val=0, max_val=1000, step=25),
+        ]
+
+        # === IMP ===
+        self._items[MenuCategory.IMP] = [
+            MenuItem("Enabled", "option", value=0, options=["Off", "On"]),
+            MenuItem("Mode", "option", value=0, options=["Off", "Joint", "Cart"]),
+            MenuItem("Scale", "value", value=1000, min_val=0, max_val=1000, step=25),
+            MenuItem("J Spring Coxa", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("J Spring Femur", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("J Spring Tibia", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("J Damp Coxa", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("J Damp Femur", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("J Damp Tibia", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("C Spring X", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("C Spring Y", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("C Spring Z", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("C Damp X", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("C Damp Y", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("C Damp Z", "value", value=0, min_val=0, max_val=5000, step=25),
+            MenuItem("J Deadband", "value", value=50, min_val=0, max_val=1000, step=10, unit="cd"),
+            MenuItem("C Deadband", "value", value=10.0, min_val=0.0, max_val=100.0, step=0.5, unit="mm",
+                     format_func=lambda v: f"{v:.1f}mm" if v is not None else "---"),
+        ]
+
+        # === EST ===
+        self._items[MenuCategory.EST] = [
+            MenuItem("Cmd α", "value", value=500, min_val=0, max_val=1000, step=25),
+            MenuItem("Meas α", "value", value=500, min_val=0, max_val=1000, step=25),
+            MenuItem("Vel α", "value", value=500, min_val=0, max_val=2000, step=25),
         ]
     
     def set_callback(self, category, item_label, callback_type, callback):
@@ -409,8 +505,8 @@ class MarsMenu:
         """Show the menu."""
         self._visible = True
         self._needs_render = True
-        # Ignore the next 2 touch cycles (wake touch + possible bounce)
-        self._ignore_touches = 2
+        # Ignore touches until finger lifts once (the wake-up touch)
+        self._ignore_touches = 1
     
     def hide(self):
         """Hide the menu."""
@@ -592,6 +688,7 @@ class MarsMenu:
         
         # Ignore touches while counter is active (wake-up protection)
         if self._ignore_touches > 0:
+            self._ignore_touches -= 1
             return True  # Consume but don't process
         
         point, coordinates = self._touch.get_touch_xy()
@@ -610,6 +707,9 @@ class MarsMenu:
         
         # Check tab touches (left sidebar)
         if x < self.TAB_WIDTH:
+            start, end, visible, max_per, page, page_count = self._get_tab_paging()
+            if visible == 0:
+                return False
             # Tab touch zones depend on theme
             if self._theme == MenuTheme.LCARS:
                 # LCARS tabs: start_y=32, tab_height=22, gap=3
@@ -621,9 +721,10 @@ class MarsMenu:
                 # Check if touch is in the tab area
                 if y >= tab_start_y:
                     relative_y = y - tab_start_y
-                    touched_tab = relative_y // tab_total
-                    # Check if within a tab (not in the gap)
-                    if touched_tab < MenuCategory.COUNT and (relative_y % tab_total) < tab_height:
+                    local_idx = relative_y // tab_total
+                    # Check if within a tab (not in the gap) and within visible window
+                    if local_idx < visible and (relative_y % tab_total) < tab_height:
+                        touched_tab = start + local_idx
                         if touched_tab != self._current_tab:
                             self._current_tab = touched_tab
                             self._selected_item = 0
@@ -631,9 +732,10 @@ class MarsMenu:
                             self._needs_render = True
                         return True
             else:
-                # MARS theme: tabs divide height evenly
-                tab_height = self.HEIGHT // MenuCategory.COUNT
-                touched_tab = min(y // tab_height, MenuCategory.COUNT - 1)
+                # MARS theme: visible tabs divide height evenly
+                tab_height = self.HEIGHT // visible
+                local_idx = min(y // tab_height, visible - 1)
+                touched_tab = start + local_idx
                 if touched_tab != self._current_tab:
                     self._current_tab = touched_tab
                     self._selected_item = 0
@@ -949,8 +1051,42 @@ class MarsMenu:
         # Get tab colors from palette (limited to 3 colors for coherent look)
         tab_colors = colors.get('tab_colors') or [colors['tab']] * 5
         
-        for i in range(MenuCategory.COUNT):
-            y1 = start_y + i * (tab_height + tab_gap)
+        start, end, visible, max_per, page, page_count = self._get_tab_paging()
+
+        # Page indicator above the tab stack when multiple pages exist.
+        # Draw as a small LCARS-style pill so it feels native to the frame.
+        if page_count > 1 and visible > 0:
+            indicator = f"{page + 1}/{page_count}"
+            bbox = draw.textbbox((0, 0), indicator, font=self._font_small)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            pill_h = text_h + 4
+            pill_w = max(text_w + 10, 30)
+            # Center the pill horizontally over the tabs but inside the sidebar
+            pill_x = tab_x + (self.TAB_WIDTH - tab_x - pill_w) // 2
+            pill_y = max(8, start_y - pill_h - 4)
+
+            cap_r = pill_h // 2
+            # Left cap
+            draw.ellipse((pill_x, pill_y, pill_x + pill_h, pill_y + pill_h - 1),
+                         fill=colors['accent'])
+            # Body
+            draw.rectangle((pill_x + cap_r, pill_y, pill_x + pill_w - cap_r,
+                            pill_y + pill_h - 1),
+                           fill=colors['accent'])
+            # Right cap
+            draw.ellipse((pill_x + pill_w - pill_h, pill_y,
+                          pill_x + pill_w, pill_y + pill_h - 1),
+                         fill=colors['accent'])
+
+            # Black LCARS text centered in the pill
+            text_x = pill_x + (pill_w - text_w) // 2
+            text_y = pill_y + (pill_h - text_h) // 2
+            draw.text((text_x, text_y), indicator, fill=self.LCARS_BLACK,
+                      font=self._font_small)
+
+        for visible_idx, i in enumerate(range(start, end)):
+            y1 = start_y + visible_idx * (tab_height + tab_gap)
             y2 = y1 + tab_height - 1
             
             # Determine tab color
@@ -975,7 +1111,8 @@ class MarsMenu:
             text_y = y1 + (tab_height - 12) // 2
             
             # LCARS uses black text on colored elements
-            draw.text((text_x, text_y), label, fill=self.LCARS_BLACK, font=self._font_small)
+            draw.text((text_x, text_y), label, fill=self.LCARS_BLACK,
+                      font=self._font_small)
     
     def _draw_lcars_content(self, draw, colors):
         """Draw LCARS-style content area.
@@ -1114,10 +1251,30 @@ class MarsMenu:
 
     def _draw_tabs(self, draw, colors):
         """Draw the tab sidebar (MARS theme)."""
-        tab_height = self.HEIGHT // MenuCategory.COUNT
+        start, end, visible, max_per, page, page_count = self._get_tab_paging()
+        if visible <= 0:
+            return
+
+        # If we have multiple pages, reserve a small header area above the
+        # tabs for the page indicator so it doesn't overlap the first tab.
+        header_h = 0
+        if page_count > 1:
+            indicator = f"{page + 1}/{page_count}"
+            bbox = draw.textbbox((0, 0), indicator, font=self._font_small)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            header_h = text_h + 4
+            text_x = (self.TAB_WIDTH - text_w) // 2
+            text_y = 2
+            draw.text((text_x, text_y), indicator,
+                      fill=colors.get('text_dim', colors['accent']),
+                      font=self._font_small)
+
+        available_h = max(1, self.HEIGHT - header_h)
+        tab_height = available_h // visible
         
-        for i in range(MenuCategory.COUNT):
-            y1 = i * tab_height
+        for visible_idx, i in enumerate(range(start, end)):
+            y1 = header_h + visible_idx * tab_height
             y2 = y1 + tab_height - 1
             
             # Tab background
@@ -1141,8 +1298,9 @@ class MarsMenu:
             
             # Selection indicator
             if i == self._current_tab:
-                draw.rectangle((self.TAB_WIDTH - 3, y1 + 2, self.TAB_WIDTH - 1, y2 - 2),
-                              fill=colors['accent'])
+                draw.rectangle((self.TAB_WIDTH - 3, y1 + 2,
+                                self.TAB_WIDTH - 1, y2 - 2),
+                               fill=colors['accent'])
     
     def _draw_content(self, draw, colors):
         """Draw the content area for current tab (MARS theme)."""

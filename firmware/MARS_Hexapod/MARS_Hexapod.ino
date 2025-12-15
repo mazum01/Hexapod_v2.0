@@ -4,6 +4,12 @@
 
   Change log (top N entries)
   DIRECTIVE: Every code change (any file) must update BOTH this header list (add a concise dated bullet with FW version) AND `CHANGELOG.md`, bump `FW_VERSION` (patch) and `FW_BUILD`.
+  - 2025-12-12: Safety telemetry S5: Added S5 segment streaming detailed safety state (lockout, causes, overrides, clearance, toggles, temp threshold) for Python controller UI and safety handling. FW 0.2.36. (author: copilot)
+  - 2025-12-09: Float formatting fix: Replaced snprintf %f with dtostrf() for float config values (test gait params, clearance, rate limit, cart deadband). Teensy snprintf doesn't support %f; values were written as empty strings. FW 0.2.35. (author: copilot)
+  - 2025-12-09: Missing extern fix: Added missing extern declarations for g_log_rotate and g_log_max_bytes in functions.ino; configWriteDefaults() now compiles correctly and persists all config keys including test params and logging settings. FW 0.2.34. (author: copilot)
+  - 2025-12-09: Auto-generate missing config keys on boot: Added configWriteDefaults() called after configLoad() in setup() to ensure all known config keys exist in /config.txt with their code-default values. FW 0.2.33. (author: copilot)
+  - 2025-12-09: Config persistence fix v2: Rewrote configSetKeyValue to use streaming temp-file pattern (like other config writers) instead of fixed 32-line buffer. No line limit, no data loss. FW 0.2.32. (author: copilot)
+  - 2025-12-09: Config persistence fix: configSetKeyValue no longer corrupts non-matching lines when searching for key; added SD.remove before rewrite to ensure truncation. Fixes TUCK SET params not persisting across reboot. FW 0.2.31. (author: copilot)
   - 2025-11-21: Telemetry S3 format change: S3 now lists 18 voltages then 18 temperatures (v0..v17,t0..t17) to align with Python controller expectation. FW 0.2.29. (author: copilot)
   - 2025-11-21: Telemetry decoupled from FK: S1/S2/S3 output now controlled solely by `Y` (on/off) and no longer gated by the FK mask. RR_FK remains gated by `FK` mask. FW 0.2.28. (author: copilot)
   - 2025-11-21: Telemetry toggle + RR_FK: Added single-letter `Y` command (`Y1`/`Y0`) to enable/disable S1/S2/S3 streams; re-enabled legacy `RR_FK` body/leg-frame prints gated by `FK` mask. FW 0.2.27. (author: copilot)
@@ -165,6 +171,7 @@
 void telemetryPrintS1(uint8_t leg, uint16_t loop_us, uint8_t lockout, uint8_t mode, uint8_t test_phase, uint8_t rr_index, uint8_t enabled);
 void telemetryPrintS2();
 void telemetryPrintS3();
+void telemetryPrintS5();
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
 #include <FS.h>
 #include <SD.h>
@@ -178,11 +185,11 @@ void telemetryPrintS3();
 // changes behavior or completes a TODO item. Keep MAJOR/MINOR stable unless
 // explicitly requested.
 #ifndef FW_VERSION
-#define FW_VERSION "0.2.29"
+#define FW_VERSION "0.2.36"
 #endif
 // Monotonic build number (never resets across minor/major). Increment every code edit.
 #ifndef FW_BUILD
-#define FW_BUILD 145
+#define FW_BUILD 152
 #endif
 
 // -----------------------------------------------------------------------------
@@ -263,7 +270,7 @@ static volatile uint32_t g_tuck_start_ms   = 0;
 volatile int16_t  g_tuck_tibia_cd       = 200;    // tibia target (cd)
 volatile int16_t  g_tuck_femur_cd       = 19000;  // femur target (cd)
 volatile int16_t  g_tuck_coxa_cd        = 12000;  // coxa target (cd, absolute center)
-volatile int16_t  g_tuck_tol_tibia_cd   = 500;    // tolerance for tibia (cd)
+volatile int16_t  g_tuck_tol_tibia_cd   = 750;    // tolerance for tibia (cd)
 volatile int16_t  g_tuck_tol_other_cd   = 500;    // tolerance for femur/coxa (cd)
 volatile uint16_t g_tuck_timeout_ms     = 5000;   // timeout (ms)
 
@@ -291,10 +298,10 @@ File              g_log_file;                   // active log file handle
 // TEST gait runtime parameters (mutable via serial commands)
 // ----------------------------------------------------------------------------
 // Defaults chosen to match prior constants used in tripod test gait
-float    g_test_base_y_mm   = -110.0f;  // ground height (negative is down)
+float    g_test_base_y_mm   = -150.0f;  // ground height (negative is down)
 float    g_test_base_x_mm   = 130.0f;   // lateral offset
 float    g_test_step_len_mm = 40.0f;    // forward/back amplitude (|z|)
-uint32_t g_test_cycle_ms    = 3000;     // ms per tripod phase
+uint32_t g_test_cycle_ms    = 2000;     // ms per tripod phase
 float    g_test_lift_y_mm   = 40.0f;    // step height (lift amount on swing)
 float    g_test_overlap_pct = 5.0f;     // percent of per-phase time reserved as overlap (both tripods stance)
 
@@ -940,6 +947,8 @@ void setup() {
 
   // Load config (SD) before splash so status reflects applied values
   configLoad();
+  // Ensure all known config keys exist with defaults (creates missing keys)
+  configWriteDefaults();
   delay(1000); // allow time for config load
 
   // Do not wait for Serial; print if available
@@ -1839,9 +1848,11 @@ static void loopTick() {
                        g_rr_index,
                        g_enabled ? 1 : 0);
 
-      // S2: enable flags (all 18); S3: voltage/temperature (all 18)
+      // S2: enable flags (all 18); S3: voltage/temperature (all 18);
+      // S5: detailed safety state/config snapshot.
       telemetryPrintS2();
       telemetryPrintS3();
+      telemetryPrintS5();
     }
 #endif
 #if MARS_TIMING_PROBES

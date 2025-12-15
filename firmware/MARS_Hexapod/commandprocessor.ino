@@ -1803,9 +1803,11 @@ void processCmdSAFETY(const char* line, int s, int len)
   printERR(1, "BAD_ARG");
 }
 
-// TUCK <SET|CLEAR> [LEG]
-//   SET   – arm the tuck sequence for one leg or all enabled legs
-//   CLEAR – cancel any active tuck sequence
+// TUCK <SET|CLEAR|PARAMS> [LEG]
+//   SET            – arm the tuck sequence for one leg or all enabled legs
+//   CLEAR          – cancel any active tuck sequence
+//   SET <PARAM> <VAL> – update tuck.* params (TIBIA|FEMUR|COXA|TOL_TIBIA|TOL_OTHER|TIMEOUT) and persist to /config.txt
+//   PARAMS         – print current tuck.* parameter values
 void processCmdTUCK(const char* line, int s, int len)
 {
   extern volatile uint8_t  g_tuck_active;
@@ -1813,6 +1815,11 @@ void processCmdTUCK(const char* line, int s, int len)
   extern volatile uint8_t  g_tuck_done_mask;
   extern volatile uint32_t g_tuck_start_ms;
   extern volatile int16_t  g_tuck_tibia_cd;
+  extern volatile int16_t  g_tuck_femur_cd;
+  extern volatile int16_t  g_tuck_coxa_cd;
+  extern volatile int16_t  g_tuck_tol_tibia_cd;
+  extern volatile int16_t  g_tuck_tol_other_cd;
+  extern volatile uint16_t g_tuck_timeout_ms;
 
   int ts, tl;
   s = nextToken(line, s, len, &ts, &tl);
@@ -1836,8 +1843,102 @@ void processCmdTUCK(const char* line, int s, int len)
     return;
   }
 
-  // TUCK SET [LEG]
+  // TUCK PARAMS: print current tuck parameter values
+  if (!strcmp(sub, "PARAMS")) {
+    Serial.print(F("tuck.tibia_cd="));      Serial.println(g_tuck_tibia_cd);
+    Serial.print(F("tuck.femur_cd="));      Serial.println(g_tuck_femur_cd);
+    Serial.print(F("tuck.coxa_cd="));       Serial.println(g_tuck_coxa_cd);
+    Serial.print(F("tuck.tol_tibia_cd="));  Serial.println(g_tuck_tol_tibia_cd);
+    Serial.print(F("tuck.tol_other_cd="));  Serial.println(g_tuck_tol_other_cd);
+    Serial.print(F("tuck.timeout_ms="));    Serial.println(g_tuck_timeout_ms);
+    return;
+  }
+
+  // TUCK SET [LEG]   or   TUCK SET <PARAM> <VAL>
   if (!strcmp(sub, "SET")) {
+    // Peek next token to decide if this is a LEG or PARAM form
+    int ts2, tl2;
+    int s_after_sub = nextToken(line, s, len, &ts2, &tl2);
+
+    // LEG form: TUCK SET [LEG]
+    bool isLegForm = false;
+    if (tl2 <= 0) {
+      isLegForm = true;  // no extra token -> all enabled legs
+    } else {
+      char tbuf[8] = {0};
+      int n = min(tl2, 7);
+      memcpy(tbuf, line + ts2, n);
+      for (int i = 0; i < n; ++i) tbuf[i] = (char)toupper(tbuf[i]);
+      // Recognize LEG tokens (LF/LM/LR/RF/RM/RR/ALL) by mapping via legIndexFromToken
+      int leg_test = legIndexFromToken(tbuf);
+      if (leg_test >= 0 || !strcmp(tbuf, "ALL")) {
+        isLegForm = true;
+      }
+    }
+
+    if (!isLegForm) {
+      // PARAM form: TUCK SET <PARAM> <VAL>
+      if (tl2 <= 0) {
+        printERR(1, "BAD_ARG");
+        return;
+      }
+
+      char pbuf[16] = {0};
+      int pn = min(tl2, 15);
+      memcpy(pbuf, line + ts2, pn);
+      for (int i = 0; i < pn; ++i) pbuf[i] = (char)toupper(pbuf[i]);
+
+      // Read value token
+      int ts3, tl3;
+      nextToken(line, s_after_sub, len, &ts3, &tl3);
+      if (tl3 <= 0) {
+        printERR(1, "BAD_ARG");
+        return;
+      }
+      char vbuf[16] = {0};
+      int vn = min(tl3, 15);
+      memcpy(vbuf, line + ts3, vn);
+      vbuf[vn] = '\0';
+      long v = atol(vbuf);
+
+      // Clamp and apply based on PARAM
+      if (!strcmp(pbuf, "TIBIA")) {
+        if (v < 0) v = 0; if (v > 24000) v = 24000;
+        g_tuck_tibia_cd = (int16_t)v;
+        configSetKeyValue("tuck.tibia_cd", vbuf);
+      } else if (!strcmp(pbuf, "FEMUR")) {
+        if (v < 0) v = 0; if (v > 24000) v = 24000;
+        g_tuck_femur_cd = (int16_t)v;
+        configSetKeyValue("tuck.femur_cd", vbuf);
+      } else if (!strcmp(pbuf, "COXA")) {
+        // coxa is logical center; force 12000
+        v = 12000; strcpy(vbuf, "12000");
+        g_tuck_coxa_cd = (int16_t)v;
+        configSetKeyValue("tuck.coxa_cd", vbuf);
+      } else if (!strcmp(pbuf, "TOL_TIBIA")) {
+        if (v < 10) v = 10; if (v > 5000) v = 5000;
+        g_tuck_tol_tibia_cd = (int16_t)v;
+        configSetKeyValue("tuck.tol_tibia_cd", vbuf);
+      } else if (!strcmp(pbuf, "TOL_OTHER")) {
+        if (v < 10) v = 10; if (v > 5000) v = 5000;
+        g_tuck_tol_other_cd = (int16_t)v;
+        configSetKeyValue("tuck.tol_other_cd", vbuf);
+      } else if (!strcmp(pbuf, "TIMEOUT")) {
+        if (v < 250) v = 250; if (v > 10000) v = 10000;
+        g_tuck_timeout_ms = (uint16_t)v;
+        configSetKeyValue("tuck.timeout_ms", vbuf);
+      } else {
+        printERR(1, "BAD_ARG");
+        return;
+      }
+
+      return;
+    }
+
+    // --- Original TUCK SET [LEG] behavior ---
+    // TUCK is a supervisory motion; ensure we are in MODE IDLE
+    // so that test gait or other planners are not concurrently writing targets.
+    modeSetIdle();
     // TUCK is a supervisory motion; ensure we are in MODE IDLE
     // so that test gait or other planners are not concurrently writing targets.
     modeSetIdle();
