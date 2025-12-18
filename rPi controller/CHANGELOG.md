@@ -6,6 +6,7 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2025-12-18  v0.5.49 b161: Architecture: Unified telemetry parser (binary/ASCII via telemetry.py with parseBinaryS1..S5, decodeBinaryFrame); added is_robot_enabled property and ensure_enabled() method to Controller class.
 2025-12-18  v0.5.48 b160: Modularization complete — added __all__ exports to all modules, updated MODULARIZATION_PLAN.md status.
 2025-12-18  v0.5.47 b159: Modularization Phase 7: Final cleanup — removed duplicate get_font, consolidated imports. controller.py: 3838→3825 lines. Total: 4844→3825 (~21% reduction).
 2025-12-18  v0.5.46 b158: Modularization Phase 6: Extracted input_handler.py (407 lines) with keyboard/gamepad/Teensy I/O, XboxButton/XboxAxis constants, normalize_joystick/trigger. controller.py: 3946→3838 (-108 lines).
