@@ -8,7 +8,7 @@ All code must be clearly commented:
 # Hexapod v2.0 Controller — Project Specification (Phase 1)
 Project codename: MARS — Modular Autonomous Robotic System
 
-Last updated: 2025-11-18 (Estimator tuning finalized + STAND/TUCK idle semantics FW 0.2.15)
+Last updated: 2025-12-17 (Telemetry mapping documentation + S4 contact segment reintroduced; FW 0.2.41, Ctrl 0.5.39)
 Target MCU: Teensy 4.1
 Servo type: Hiwonder HTS-35S (serial bus)
 Servo library: lx16a-servo
@@ -33,9 +33,7 @@ Out of scope (Phase 1): ROS integration, advanced terrain adaptation, high‑lev
 - Bus topology: one independent serial bus per leg (6 buses total), each shared by its 3 servos.
   - UART mapping (leg → SerialX):
     - LF → Serial8
-    - LF → Serial8
     - LM → Serial3
-    - LR → Serial5
     - LR → Serial5
     - RF → Serial7
     - RM → Serial6
@@ -260,11 +258,100 @@ PID_SHADOW t_ms=<millis> <LEG>:diff_cd=c/f/t err_cd=c/f/t est_cd=c/f/t tgt_cd=c/
   - `err_cd`: PID error used this tick = base target (pre-PID) − estimate/read.
   - `est_cd`: estimated joint angle (meas-corrected on RR leg; otherwise exponential estimate).
   - `tgt_cd`: base target before PID correction (from IK/command, pre safety+rate limiting).
-  - `lx/ly/lz` are coordinates relative to the leg’s hip origin (LEG-frame), expressed in BODY axes (no COXA_OFFSET translation).
+
+### Telemetry: Compact per-tick segments (S1–S5)
+
+- Master enable: `Y <0|1>` controls whether the compact per-tick telemetry stream is emitted.
+- Format selection:
+  - `TELEM ASCII` — prints human-readable ASCII segments (`S1:`..`S5:`).
+  - `TELEM BIN 1` — prints compact binary framed telemetry instead (frame types 1/2/3/4/5).
+- Note: Even in binary mode, ASCII command replies and LIST output may interleave on the same serial link; the controller demux treats non-frame bytes as ASCII.
+
+ASCII segments (one line per segment)
+
+- **S1 (system state)**
+
+  $$S1:<loop\_us>,<battery\_V>,<current\_A>,<pitch\_deg>,<roll\_deg>,<yaw\_deg>,<gait>,<mode>,<rr\_index>,<robot\_enabled>$$
+
+  - Field indices 0..9 match the controller’s `IDX_*` constants.
+  - Some fields may be `0` when not instrumented in firmware; binary mode carries the authoritative values when available.
+
+- **S2 (servo enable flags)**
+
+  $$S2:<en_0>,<en_1>,...,<en_{17}>$$
+
+  - 18 integers (0/1).
+  - Ordering for indices 0..17: legs LF,LM,LR,RF,RM,RR × joints COXA,FEMUR,TIBIA.
+
+- **S3 (servo voltage and temperature)**
+
+  $$S3:<v_0>,...,<v_{17}>,<t_0>,...,<t_{17}>$$
+
+  - 36 values total: first 18 voltages in volts (float), then 18 temperatures in °C (int).
+  - Index ordering matches S2.
+
+- **S4 (leg contact flags)**
+
+  $$S4:<c_{LF}>,<c_{LM}>,<c_{LR}>,<c_{RF}>,<c_{RM}>,<c_{RR}>$$
+
+  - 6 integers (0/1) in canonical leg order.
+
+- **S5 (safety state/config snapshot)**
+
+  $$S5:<lockout>,<cause\_mask>,<override\_mask>,<clearance\_mm>,<soft\_limits>,<collision>,<temp\_C>$$
+
+Binary framed telemetry (TELEM BIN 1)
+
+- Frame format:
+  - Sync bytes: `0xA5 0x5A`
+  - Header: `ver (u8), type (u8), seq (u8), len (u8)`
+  - Payload: `len` bytes
+  - Checksum: XOR of `ver ^ type ^ seq ^ len ^ payload_bytes...`
+
+- Frame types (ver=1):
+  - **type=1 (S1)**: payload is either 7 bytes (legacy) or 17 bytes (extended)
+    - 7B: `u16 loop_us`, `u8 mode_is_test`, `u8 test_phase`, `u8 rr_index`, `u8 lockout`, `u8 enabled`
+    - 17B: `u16 loop_us`, `u16 battery_mV`, `i16 current_mA`, `i16 pitch_cdeg`, `i16 roll_cdeg`, `i16 yaw_cdeg`, then `u8 mode_is_test`, `u8 test_phase`, `u8 rr_index`, `u8 lockout`, `u8 enabled`
+  - **type=2 (S2)**: 18 bytes, `u8 en[18]`
+  - **type=3 (S3)**: 54 bytes, `u16 vin_mV[18]` then `u8 temp_C[18]`
+  - **type=4 (S4)**: 6 bytes, `u8 contact[6]` (LF,LM,LR,RF,RM,RR)
+  - **type=5 (S5)**: 11 bytes, `u8 lockout`, `u16 cause_mask`, `u16 override_mask`, `i16 clearance_mm`, `u8 soft_limits`, `u8 collision`, `i16 temp_C_threshold`
+
+### Telemetry: Safety S5 segment
+
+- Emitted once per tick when telemetry is enabled, alongside S1–S3.
+- Format (comma-separated after `S5:` prefix):
+
+  $$S5:<lockout>,<cause\_mask>,<override\_mask>,<clearance\_mm>,<soft\_limits>,<collision>,<temp\_C>$$
+
+  - `lockout` – 0 or 1 indicating whether firmware safety lockout is active.
+  - `cause_mask` – bitmask of active lockout causes (e.g., TEMP, COLLISION).
+  - `override_mask` – bitmask of safety overrides currently in effect.
+  - `clearance_mm` – current configured `safety.clearance_mm` keep-out distance.
+  - `soft_limits` – 0/1 reflecting `safety.soft_limits` enable state.
+  - `collision` – 0/1 reflecting `safety.collision` enable state.
+  - `temp_C` – over-temperature lockout threshold in °C.
+
+- The Python controller parses S5 into a shared safety state, drives a Safety tab in the MARS menu, renders a full-screen safety overlay when `lockout=1`, and enforces a hard lockout policy (stop gait, `LEG ALL DISABLE`, `DISABLE`, and block new motion until cleared via `SAFETY CLEAR`).
  - Torque policy: `DISABLE` torques off all servos at the next control tick; `ENABLE` does not torque-on any servo automatically. `SERVO ... ENABLE` torques on only when global is enabled; otherwise, it updates masks without sending torque-on.
+
+### Telemetry: Contact S4 segment (reserved)
+
+- Emitted once per tick when telemetry is enabled, alongside S1–S3 and S5.
+- Format (comma-separated after `S4:` prefix):
+
+  $$S4:<c_{LF}>,<c_{LM}>,<c_{LR}>,<c_{RF}>,<c_{RM}>,<c_{RR}>$$
+
+  - Each field is an integer contact flag (0/1).
+  - Canonical leg order is: LF, LM, LR, RF, RM, RR.
+  - Current firmware implementation stubs all values to 0 until foot contact sensing is added.
 
 Core commands (Phase 1 + Phase 2 PID/impedance)
 - `HELP` — prints the command list.
+- `Y <0|1>` — master telemetry enable/disable for the compact per-tick telemetry stream (S1–S3 and S5).
+- `TELEM ASCII` — select legacy ASCII telemetry format (used when telemetry is enabled via `Y 1`).
+- `TELEM BIN <0|1>` — select binary framed telemetry format (when enabled via `TELEM BIN 1` and telemetry is enabled via `Y 1`).
+  - Binary S1 (type=1) carries: `loop_us`, `battery_mV`, `current_mA`, `pitch/roll/yaw` (centideg), plus `mode/test_phase/rr_index/lockout/enabled` (u8). Some fields may be 0 if not instrumented.
 - `ENABLE` — enable motion output (clears lockout only after power‑on self‑check).
 - `DISABLE` — immediate stop/hold; motion output suppressed until `ENABLE`.
 - `STAND` — command a neutral standing pose (heights/widths from config).
@@ -274,7 +361,6 @@ Core commands (Phase 1 + Phase 2 PID/impedance)
 - `MODE IDLE` — leave test mode; stand/idle.
 - `I` — shortcut for `MODE IDLE`.
 - `T` — shortcut for `MODE TEST`.
-- `STATUS` — returns a multi-line summary (CR/LF-delimited): first line `STATUS`, then key=value lines: `enabled`, `loop_hz`, `rr_idx`, `last_err`, `overruns`, `legs`, `jmask`, telemetry grids `vin_V`, `temp`, `pos_cd`, and `home_cd`.
  - `STATUS` — returns a multi-line summary (CR/LF-delimited): first line `STATUS`, then key=value lines: `enabled`, `loop_hz`, `rr_idx`, `last_err`, `overruns`, `legs`, `jmask`, telemetry grids `vin_V`, `temp`, `pos_cd`, and `home_cd`. When `MARS_TIMING_PROBES` is enabled, includes `tprobe_us=serial/send/fb/tick` (microseconds).
   - STATUS also includes grouped sections: a compact safety summary `safety=<OK|LOCKOUT|OVERRIDDEN> cause=0x.. override=0x..`, test parameters including `overlap_pct=...`, `safety_clearance_mm=<mm>`, enables, telemetry grids, home grid, timing probes (when enabled), and OOS masks.
 - `HOME` — move enabled, in-service servos to their configured home positions (gated by leg/joint enables and OOS).
@@ -363,9 +449,8 @@ SAFETY CLEAR           -> ERR E91 NOT_LOCKED
   - TEST BASEX <mm>     — lateral offset (X)
   - TEST STEPLEN <mm>   — forward/back amplitude (|Z|)
   - TEST LIFT <mm>      — step height (lift amount on swing)
-  - TEST OVERLAP <pct>  — overlap window percent of total cycle reserved for both-tripods stance (0..25); persisted to `/config.txt` as `test.trigait.overlap_pct`
-  - Config: `test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}` — tripod gait parameters loaded at boot. `overlap_pct` also updated at runtime when changed via TEST command. Defaults: cycle_ms=3000, height_mm=-110, basex_mm=130, steplen_mm=40, lift_mm=40, overlap_pct=5.
-  - Config: `test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}` — tripod gait parameters loaded at boot. `overlap_pct` also updated at runtime when changed via TEST command. Defaults: cycle_ms=3000, height_mm=-110, basex_mm=130, steplen_mm=40, lift_mm=40, overlap_pct=5.
+  - TEST OVERLAP <pct>  — overlap window percent of total cycle reserved for both-tripods stance (0..25)
+  - Config: `test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}` — tripod gait parameters loaded at boot and updated at runtime when changed via TEST commands (when SD is enabled). Defaults: cycle_ms=3000, height_mm=-110, basex_mm=130, steplen_mm=40, lift_mm=40, overlap_pct=5.
   - STATUS prints a compact summary: `uptime=<D>d <H>h <M>m <S>s <ms>ms` (monotonic across millis() rollover) and `test=cycle_ms=... base_x=... base_y=... step_z=... lift_y=... overlap_pct=...`
 - Foot trajectory: simple trapezoidal or cycloidal swing; linear stance.
 - Body stabilization: none in Phase 1 (keep level); optional later.

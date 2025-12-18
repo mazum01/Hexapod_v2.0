@@ -1,3 +1,468 @@
+## Python Controller 0.5.48 (b160) — 2025-12-18
+
+- Added `__all__` exports to all modularized files for explicit public API.
+- Updated MODULARIZATION_PLAN.md to mark project complete with final line counts.
+- Final module sizes: telemetry (385), config_manager (663), posture (292), mars_state (385), display_thread (613), input_handler (407).
+
+## Python Controller 0.5.47 (b159) — 2025-12-18
+
+- Modularization Phase 7 (Final): Cleanup and consolidation.
+- Removed duplicate get_font function (now uses display_thread.get_font).
+- Consolidated imports and removed unused code.
+- Final result: controller.py 3838→3825 lines.
+- **Modularization complete**: 4844→3825 lines (~21% reduction). New modules: telemetry.py, config_manager.py, posture.py, mars_state.py, display_thread.py, input_handler.py.
+
+## Python Controller 0.5.46 (b158) — 2025-12-18
+
+- Modularization Phase 6: Extracted `input_handler.py` module (407 lines) with keyboard, gamepad, and Teensy I/O functions.
+- Components: init_keyboard/cleanup_keyboard/poll_keyboard, find_gamepad/testForGamePad, find_teensy/read_teensy/read_teensy_bytes.
+- Constants: XboxButton, XboxAxis classes with button/axis codes; normalize_joystick/normalize_trigger helpers.
+- Progress: controller.py 3946→3838 lines (-108 lines, ~3% reduction this phase).
+
+## Python Controller 0.5.45 (b157) — 2025-06-18
+
+- Modularization Phase 5: Extracted `display_thread.py` module (520 lines) with DisplayThread, UpdateDisplay, getColor, drawLogo, drawMarsSplash, and get_font.
+- Frame change detection and hash-based display update optimization moved to module.
+- Pattern: UpdateDisplay wrapper in controller.py injects globals (_marsMenu, ctrl, palettes) for backward compatibility.
+- Progress: controller.py 4422→3946 lines (-476 lines, ~11% reduction this phase).
+
+## Python Controller 0.5.44 (b156) — 2025-06-18
+
+- Modularization Phase 4: Created `mars_state.py` module with state container dataclasses (366 lines).
+- Containers: MarsControllerState, LoopTimingState, TeensyState, GaitState, MoveState, DisplayState, EyeSettings, PounceSettings, MenuSettings, SafetyState, AutoDisableState, DebugState, TelemetryArrays.
+- Factory functions: create_default_state(), create_gait_state_from_config(), create_eye_settings_from_config(), create_pounce_settings_from_config().
+- Foundation for gradually migrating ~150+ scattered global variables to structured containers.
+
+## Python Controller 0.5.43 (b155) — 2025-06-18
+
+- Modularization Phase 3: Extracted `posture.py` module with ensure_enabled, apply_posture, and start_pounce_move functions (281 lines).
+- Pattern: Wrappers in controller.py delegate to posture_module while preserving the original API and auto-disable state synchronization.
+- Progress: controller.py now at 4402 lines (from ~4844 original, ~9% reduction over 3 phases).
+
+## Python Controller 0.5.42 (b154) — 2025-12-18
+
+- Modularization Phase 2: Extracted `config_manager.py` module with save functions (save_gait_settings, save_pounce_settings, save_eye_*, save_menu_settings, save_pid/imp/est_settings) and config dataclasses.
+- Code cleanup: controller.py reduced by additional ~220 lines; save functions now reusable.
+
+## Python Controller 0.5.41 (b153) — 2025-12-18
+
+- Modularization Phase 1: Extracted `telemetry.py` module with all telemetry dataclasses (SystemTelemetry, ServoTelemetry, LegTelemetry, SafetyTelemetry), IDX_* constants, processTelemS1-S5 parsers, and helper functions.
+- Code cleanup: controller.py reduced by ~170 lines; telemetry code now reusable across modules.
+
+## Firmware 0.2.42 (b158) — 2025-12-18
+
+- Bugfix: Removed duplicate jitter metrics calculation block in loopTick() that was wasting cycles and double-counting jitter stats.
+- Code review: Added new TODO items for loopTick() refactor, globals.h consolidation, and controller.py modularization.
+
+## Python Controller 0.5.40 (b152) — 2025-12-18
+
+- UX: Use real Mars photo (ESA/Rosetta, CC BY-SA 3.0 IGO) for startup splash instead of procedural drawing.
+
+## Python Controller 0.5.39 (b151) — 2025-12-17
+
+- UX: Replaced LCD startup banner with a Mars splash image on black and overlaid firmware/controller versions.
+
+## Python Controller 0.5.38 (b150) — 2025-12-17
+
+- Version/docs: Updated controller startup banner firmware version string to match current firmware (0.2.41/b157).
+
+## Python Controller 0.5.37 (b149) — 2025-12-17
+
+- Telemetry/protocol: Added binary framed S4 parsing (type=4, 6 per-leg contact flags) to match firmware S4 frames.
+
+## Python Controller 0.5.36 (b148) — 2025-12-16
+
+- Telemetry/protocol: Extended binary S1 parsing to include battery/current/IMU fields when present (FW 0.2.38+), so INFO shows real values in pure-binary mode.
+
+## Python Controller 0.5.35 (b147) — 2025-12-16
+
+- Telemetry/protocol: Prefer binary framed telemetry when available by sending `TELEM BIN 1` (still uses `Y 1` / `Y 0` as the master telemetry enable).
+- Telemetry: Added a framing parser for binary S1/S2/S3/S5 packets while still supporting mixed ASCII command replies (e.g., `PID LIST`).
+
+## Python Controller 0.5.34 (b146) — 2025-12-16
+
+- Telemetry/perf: Reduced per-tick allocations in the telemetry parsing hot path (S1/S2 debug snapshots only captured when telemetry debug is enabled).
+- Perf: Gated raw gamepad event printing behind verbose+telemetry-debug to avoid console I/O overhead during normal operation.
+
+## Python Controller 0.5.33 (b145) — 2025-12-16
+
+- Motion/UI: Added Posture menu tuning parameters for Pounce and persisted them to `controller.ini` (`[pounce]`).
+- Controls: Added launch shortcuts (`Back+Y` on gamepad, `U` on keyboard) to trigger Pounce without opening the menu.
+
+## Python Controller 0.5.32 (b143) — 2025-12-16
+
+- Motion: Added a kinematic “Pounce” move (spider-like jump attack sequence) runnable from the Posture tab.
+
+## Python Controller 0.5.31 (b142) — 2025-12-16
+
+- Menu: Reordered menu tab stack so INFO and SYS appear first; servo voltage and servo temperature metrics are shown only on INFO.
+
+## Python Controller 0.5.30 (b141) — 2025-12-16
+
+- Telemetry: Display rendering now prefers structured telemetry for gait/disabled/contact indicators; safety overlay text now prefers structured safety telemetry.
+
+## Python Controller 0.5.29 (b140) — 2025-12-16
+
+- Telemetry: Finished wiring structured telemetry objects into INFO menu updates, enable gating (menu/gait/posture), and display-thread robot_enabled reporting.
+
+## Python Controller 0.5.28 (b139) — 2025-12-16
+
+- Telemetry: Added lightweight structured telemetry containers (system/servo/leg/safety) and updated S1–S5 parsers to populate them alongside the existing list-based state.
+
+## Python Controller 0.5.27 (b138) — 2025-12-15
+
+- Version/docs: Startup banner firmware version string updated to match current firmware (0.2.36/b152); updated `docs/USER_MANUAL.md` revision line accordingly.
+
+## Python Controller 0.5.26 (b137) — 2025-12-15
+
+- Docs/cleanup: Updated `docs/USER_MANUAL.md` revision/tabs to match current controller; removed an accidentally-added `controller-arachnotron.py` file.
+
+## Python Controller 0.5.26 (b136) — 2025-12-15
+
+- Menu: Persist PID/IMP/EST values to `controller.ini` (`[pid]`, `[imp]`, `[est]`) when edited so they restore on controller restart.
+
+## Python Controller 0.5.25 (b135) — 2025-12-15
+
+- Menu: Added dedicated PID/IMP/EST tabs that display current firmware values by polling/parsing `PID LIST`, `IMP LIST`, and `EST LIST`, and allow editing all exposed fields from the menu.
+
+## Python Controller 0.5.24 (b134) — 2025-12-14
+
+- Menu: Added SYSTEM controls for PID/IMP/EST that send firmware commands (enable/mode + key parameters).
+
+## Python Controller 0.5.23 (b133) — 2025-12-13
+
+- Menu: If battery voltage telemetry is missing/0, INFO “Battery” shows average servo bus voltage from S3.
+
+## Python Controller 0.5.22 (b132) — 2025-12-13
+
+- Menu: Battery voltage now displays whenever present (0.0V renders as 0.0V, not `---`).
+
+## Python Controller 0.5.21 (b131) — 2025-12-13
+
+- Menu: Fix INFO/System telemetry formatting so valid values (e.g., `0.00A`) don’t display as `---`.
+- Menu: Fix servo temperature stats to use S3 telemetry schema (`[voltage_V, temp_C, enabled]`).
+
+## Python Controller 0.5.20 (b130) — 2025-12-13
+### Fixed
+- Ripple gait translation: Adjusted `RippleGait` stance phase distribution so selecting Ripple gait produces forward translation instead of marching in place.
+
+## Python Controller 0.5.19 (b129) — 2025-12-13
+### Fixed
+- Wave gait translation: Adjusted `WaveGait` stance phase distribution so selecting Wave gait produces forward translation instead of marching in place.
+
+## Python Controller 0.5.18 (b128) — 2025-12-12
+### Added
+- Safety overrides from menu: Extended the Safety tab with explicit actions that send `SAFETY OVERRIDE <ALL|TEMP|COLLISION|NONE>` commands to the Teensy, alongside the existing `SAFETY CLEAR` action, so safety causes can be selectively overridden directly from the touchscreen/gamepad UI while still mirroring firmware state from S5 telemetry.
+
+## Python Controller 0.5.17 (b127) — 2025-12-12
+### Changed
+- Tab page indicator placement: Moved the tab page indicator above the tab stacks so it no longer competes with tab labels and remains readable, keeping tabs full-height on each page.
+- LCARS-styled indicator: Restyled the LCARS page indicator as a small LCARS-style pill integrated into the left frame so it visually matches the rest of the LCARS interface.
+
+## Python Controller 0.5.16 (b126) — 2025-12-12
+### Changed
+- Menu tab pagination: Updated `MarsMenu` to show tabs in fixed, touch-friendly sizes by paging them when more than five categories exist; only the current page of tabs is rendered at once, with navigation handled by the existing tab controls (keyboard/gamepad/touch on the visible group).
+
+## Python Controller 0.5.15 (b125) — 2025-12-12
+### Added
+- Safety telemetry and UI: Parse new firmware S5 safety telemetry segment (lockout, cause/override masks, clearance, soft-limit and collision toggles, temp threshold), maintain a shared safety state, and expose it in a dedicated Safety tab (state, causes, overrides, clearance, soft limits, collision, temp lock) with a `SAFETY CLEAR` action.
+### Changed
+- Safety behavior and overlays: On new firmware safety lockout, immediately stop any active Python gait, issue `LEG ALL DISABLE` + `DISABLE`, block subsequent enables/gaits/postures while lockout is active, and render a full-screen safety-yellow overlay with cause text in place of the normal eye display.
+
+## Python Controller 0.5.14 (b124) — 2025-12-12
+### Fixed
+- Left-stick gait speed & eyes: Restored the left-stick Y mapping for gait speed (forward/back step size) and the associated eye intensity behavior (pupil dilation and red fade) while keeping right-stick Y dedicated to configurable turn rate via `turn_max_deg_s`.
+
+## Python Controller 0.5.13 (b123) — 2025-12-12
+### Fixed
+- Right-stick turn handler: Resolved a NameError in the right-stick Y analog path by driving eye intensity from the tracked gait speed input instead of an undefined local variable, restoring stable behavior when turning while walking.
+
+## Python Controller 0.5.12 (b122) — 2025-12-11
+### Added
+- Configurable turning gain: Added a `Turn Rate` slider to the MARS Gait tab and a new `[gait] turn_max_deg_s` key in `controller.ini`, allowing the maximum yaw rate (deg/s) driven by right-stick Y to be tuned to avoid leg collisions while still permitting tight turns at full deflection.
+
+## Python Controller 0.5.11 (b121) — 2025-12-10
+### Fixed
+- Strafe direction: Reversed joystick X → heading mapping so pushing the stick left/right produces matching left/right crab-walk motion, without changing turn-rate or forward/backward gait behavior.
+
+## Python Controller 0.5.10 (b120) — 2025-12-10
+### Changed
+- Eyes Spacing granularity: Reduced Eyes tab `Spacing` slider step from 5% to 1%, allowing much finer control over horizontal eye spacing while preserving the existing 10–45% range and `human_eye_spacing_pct` mapping.
+
+## Python Controller 0.5.9 (b119) — 2025-12-10
+### Fixed
+- Eyes V Center wiring: Eyes tab "V Center" slider now drives the `SimpleEyes.eye_vertical_offset` baseline and the display thread's vertical look offset. Vertical eye position changes are visibly reflected on the LCD and persist via a new `[eyes] vertical_offset` key in `controller.ini`.
+
+## Firmware 0.2.38 (b154) — 2025-12-16
+### Added
+- Telemetry: Extended binary S1 payload to include battery/current/IMU fields (battery derived from average servo bus voltage when available; current/IMU reserved when not instrumented).
+
+## Firmware 0.2.41 (b157) — 2025-12-17
+### Added
+- Telemetry: Re-introduced S4 segment (leg contact flags, 6 values in canonical leg order). Currently stubbed to 0 for all legs until foot contact sensing is implemented.
+
+## Firmware 0.2.40 (b156) — 2025-12-17
+### Fixed
+- TEST mode config persistence: `TEST CYCLE/HEIGHT/BASEX/STEPLEN/LIFT/OVERLAP` now updates `/config.txt` (`test.trigait.*`) so `CONFIG` reflects changes and values survive reboot.
+
+## Firmware 0.2.39 (b155) — 2025-12-17
+### Fixed
+- STAND: Clamp neutral IK stance to a reachable workspace (and fall back to a conservative default) so STAND does not fail with `ERR 1 IK_FAIL` when test gait base parameters are tuned out-of-range.
+
+## Firmware 0.2.37 (b153) — 2025-12-16
+### Added
+- Telemetry: Added `TELEM` format-selection command. When `TELEM BIN 1` is set and `Y 1` is enabled, firmware emits compact binary framed telemetry (S1/S2/S3/S5) instead of the ASCII telemetry stream.
+### Compatibility
+- `Y 1` / `Y 0` remains the master telemetry enable/disable switch.
+
+## Firmware 0.2.36 (b152) — 2025-12-12
+### Added
+- Safety telemetry S5: Added a compact S5 telemetry segment streaming detailed safety state (lockout flag, cause/override masks, clearance, soft-limit and collision toggles, and temperature lockout threshold) once per tick so the Python controller can render a Safety tab and enforce hard lockout behavior without parsing `SAFETY LIST` text.
+
+## Firmware 0.2.35 (b151) — 2025-12-09
+### Fixed
+- Float formatting in config: Replaced `snprintf` with `dtostrf()` for float config values (test gait params, safety clearance, rate limit, cart deadband). Teensy's `snprintf` doesn't support `%f` format, causing float values to be written as empty strings.
+
+## Firmware 0.2.34 (b150) — 2025-12-09
+### Fixed
+- Missing extern declarations: Added `extern volatile bool g_log_rotate` and `extern volatile uint32_t g_log_max_bytes` in `functions.ino`. Fixes `configWriteDefaults()` failing to persist test parameters and logging settings due to undefined symbols.
+
+## Firmware 0.2.33 (b149) — 2025-12-09
+### Added
+- Auto-generate missing config keys on boot: Added `configWriteDefaults()` called after `configLoad()` in `setup()` to ensure all known config keys exist in `/config.txt` with their code-default values. Missing keys (TUCK, PID, safety, test gait, logging, impedance, compliance, estimator, etc.) are now auto-populated on first boot or after config file reset.
+
+## Firmware 0.2.32 (b148) — 2025-12-09
+### Fixed
+- Config persistence fix v2: Rewrote `configSetKeyValue` to use a streaming temp-file pattern (read line-by-line, write to `/config.tmp`, then atomic rename) instead of a fixed 32-line in-memory buffer. This removes the line limit and prevents data loss when config files exceed 32 lines.
+
+## Firmware 0.2.31 (b147) — 2025-12-09
+### Fixed
+- Config persistence bug: `configSetKeyValue` was corrupting non-matching config lines during key search (destructive `*eq = 0`), and `FILE_WRITE` was appending instead of truncating. Now uses non-destructive key comparison and `SD.remove` before rewrite. Fixes TUCK SET parameters (and other runtime config changes) not persisting across reboot.
+
+## Firmware 0.2.30 (b146) — 2025-12-08
+### Added
+- `TUCK SET <PARAM> <VAL>` now updates tuck parameters at runtime (`TIBIA`, `FEMUR`, `COXA`, `TOL_TIBIA`, `TOL_OTHER`, `TIMEOUT`) and persists them to `/config.txt`.
+- `TUCK PARAMS` prints the current `tuck.*` configuration values to aid debugging tuck convergence (e.g., front-right leg).
+
+## Python Controller 0.5.8 (b118) — 2025-12-08
+### Added
+- Mirror window keyboard mapping: OpenCV mirror window now mirrors MarsMenu keyboard controls (tab navigation, item navigation, value adjustment, select, and close) when the menu is visible.
+- Startup banner now prints Teensy firmware and controller version/build to stdout for easier log correlation.
+
+## Python Controller 0.5.7 (b117) — 2025-12-08
+### Changed
+- Controller branding updated to M.A.R.S. — Modular Autonomous Robotic System: LCD ASCII logo and OpenCV mirror window title now use the new project name.
+
+## Python Controller 0.5.6 (b116) — 2025-12-08
+### Added
+- System tab now includes an "Avg Servo Temp" telemetry field, showing the average of all valid servo temperature readings from S2.
+
+## Python Controller 0.5.5 (b115) — 2025-12-08
+### Fixed
+- TUCK auto-disable now uses a reason-aware scheduler: tuck timeouts are canceled when superseded by later posture/gait commands, preventing unexpected DISABLE during subsequent motion.
+
+## Python Controller 0.5.4 (b114) — 2025-12-08
+### Fixed
+- Gait menu Cycle Time slider now updates the active gait engine `cycle_ms`, persists to `controller.ini`, and initializes new gaits and the menu from the saved value.
+
+## Python Controller 0.5.3 (b113) — 2025-12-08
+### Fixed
+- Eye intensity now responds symmetrically to both forward and reverse gait speed (left stick Y), so walking backward still drives visual intensity.
+
+## Python Controller 0.5.2 (b112) — 2025-12-08
+### Fixed
+- Reverse gait direction: joystick Y backward now correctly commands reverse walking instead of forward.
+
+## Python Controller 0.5.1 (b111) — 2025-12-07
+### Fixed
+- Gait callbacks now use `_savedGaitLiftMm`/`_savedGaitWidthMm` globals instead of non-existent `_gaitLiftMm` when wiring touchscreen gait menu.
+
+## Python Controller 0.5.0 (b110) — 2025-12-07
+### Added - Touchscreen Config Menu Complete (TODO #4)
+- **System menu**: Added Auto-Disable timeout setting (0-30s)
+- **Gait menu**: 
+  - Start Gait / Stop Gait action buttons
+  - Step Height, Step Length, Cycle Time parameters wired to gait engine
+  - Gait Type selector (Tripod ready, others placeholder)
+- **Posture menu**: Stand, Tuck, Home action buttons (hides menu after triggering)
+- **INFO menu**: Live telemetry updates from Teensy
+  - Battery voltage, Current draw, Loop time
+  - IMU Pitch/Roll, Max servo temperature
+  - Controller version display
+- **update_menu_info()**: Syncs telemetry to INFO menu when visible
+
+### Changed
+- Simplified System menu (removed placeholder Servo/Leg Calib, Diagnostics)
+- Posture menu now has direct action buttons instead of parameter editors
+- Gait menu replaces Smoothing with Start/Stop actions
+
+## Python Controller 0.4.43 (b109) — 2025-12-07
+### Fixed
+- **First-tap ignore v3**: Changed counter from 2 to 1
+  - Only requires one finger lift (the wake touch) before menu responds
+  - Previous version required 2 lifts which was too many
+
+## Python Controller 0.4.42 (b108) — 2025-12-07
+### Fixed
+- **First-tap ignore v2**: Simplified to counter-based approach
+  - `show()` sets `_ignore_touches = 2`
+  - Counter decrements each time finger is lifted
+  - Touches ignored while counter > 0
+  - More reliable than state-machine approach
+
+## Python Controller 0.4.41 (b107) — 2025-12-07
+### Fixed
+- **First-tap ignore fix**: Now properly tracks finger lift after wake
+  - Uses two-phase state: `_just_woke` and `_wake_finger_lifted`
+  - Wake tap is ignored until finger is lifted AND a new touch occurs
+  - Fixes issue where all taps were being ignored after wake
+
+## Python Controller 0.4.40 (b106) — 2025-12-07
+### Changed
+- **LCARS color variety**: Frame now uses distinct colors for top sweep, bottom sweep, and vertical bar
+  - Each palette defines: `frame_top`, `frame_bottom`, `frame_bar`, `accent_alt`
+  - Tabs use full 5-color palette with more variety
+  - Item values and selection indicators alternate colors for visual interest
+  - Right-edge accent bar uses alternate accent color
+
+### Fixed
+- **First-tap ignore**: Tapping the screen to wake up the menu now ignores that first tap
+  - Prevents accidental menu actions when bringing up the display
+  - Menu shows but first tap is consumed; subsequent taps work normally
+  - Flag clears when finger is lifted, ready for next intentional tap
+
+## Python Controller 0.4.39 (b105) — 2025-12-07
+### Fixed
+- **LCARS tab touch alignment**: Touch zones now match actual LCARS tab positions
+  - Tabs start at y=32 (after top frame sweep)
+  - Each tab is 22px tall with 3px gap
+  - Touch ignores gaps between tabs
+  - MARS theme still uses even height division
+
+## Python Controller 0.4.38 (b104) — 2025-12-07
+### Improved
+- **LCARS frame structure**: Added bottom-left swept corner matching top-left
+- **Vertical bar placement**: Now spans only between the two swept corners (top sweep bottom to bottom sweep top)
+- **Proper L-bracket**: Both corners curve outward with thick-to-thin transitions
+
+## Python Controller 0.4.37 (b103) — 2025-12-07
+### Fixed
+- **LCARS tab/frame overlap**: Tabs now start at x=14 (after 12px frame bar + gap)
+- **Continuous left frame**: Vertical bar extends full height alongside tabs
+- **Bottom bar alignment**: Starts at x=12 to connect with vertical frame bar
+
+## Python Controller 0.4.36 (b102) — 2025-12-07
+### Improved
+- **LCARS design guidelines applied** (based on lcars-terminal.de tutorial):
+  - Thick-to-thin frame transitions at swept corners (never same thickness)
+  - Proper LCARS swept corner element (quarter-circle with inner cutout)
+  - Rounded caps used correctly as terminators and buttons
+  - Consistent spacing grid throughout interface
+  - 3 font sizes only: Main Title, Sub Header, Normal Data
+  - Selection indicator bars instead of filled backgrounds
+  - Improved scroll bar with proper rounded caps
+
+## Python Controller 0.4.35 (b101) — 2025-12-07
+### Added
+- **Eye V Center**: New menu option to adjust vertical eye position (±30px), saved to config
+- **Config persistence**: Menu theme, LCARS palette, and eye V center now saved to `controller.ini`
+- **Save functions**: `save_menu_settings()`, `save_eye_center_offset()` for persistent storage
+
+## Python Controller 0.4.34 (b100) — 2025-12-07
+### Fixed
+- **LCARS L-bracket**: Curve now faces outward (bottom-right) as in authentic LCARS design
+- **Tab sizing**: Reduced to 24px height with 3px gaps to fit all 5 tabs on 170px display
+
+### Added
+- **LCARS color palettes** (from TheLCARS.com):
+  - **Classic**: TNG/DS9 orange, peach, violet, gold
+  - **Nemesis**: Cool blues, ghost, midnight
+  - **LwrDecks**: Warm oranges, harvest gold, butter
+  - **PADD**: Arctic blues, radioactive cyan
+- **Palette selector**: System menu > Palette option to switch between palettes
+
+## Python Controller 0.4.33 (b99) — 2025-12-07
+### Added
+- **LCARS theme**: Star Trek inspired menu visual style with:
+  - Pill-shaped tabs with rounded ends
+  - Orange/peach/lavender/blue color palette on black
+  - L-shaped corner bracket decorations
+  - Selection indicator bars instead of filled backgrounds
+- **Theme selector**: System menu now has Theme option to switch between MARS (default) and LCARS
+
+## Python Controller 0.4.32 (b98) — 2025-12-07
+### Added
+- **Touch close button**: X button in top-right corner of menu to close via touchscreen
+
+## Python Controller 0.4.31 (b97) — 2025-12-07
+### Improved
+- **Functional scroll bar**: Tap above/below the thumb to scroll up/down by one page
+- **Wider scroll bar**: Increased from 20px to 30px track width for easier touch interaction
+- **Arrow placement**: Moved value arrows further left (x=265) to avoid scroll bar overlap
+
+## Python Controller 0.4.30 (b96) — 2025-12-07
+### Fixed
+- **Touch handling reworked**: `touched()` now returns current touch state; debouncing moved inside `handle_touch()` so value adjustments are debounced but touch detection works continuously
+- **Scroll bar overlap**: Moved value arrows and action indicators left (from x=305 to x=285) to avoid overlapping with 20px scroll bar
+
+## Python Controller 0.4.29 (b95) — 2025-12-07
+### Fixed
+- **Touch debouncing**: Now uses `_marsMenu.touched()` for proper debouncing (was incorrectly using legacy menu's touch detection, causing rapid value changes)
+- **Wider scroll bar**: Increased from 5px to 20px track width, 25px minimum thumb height for easier touch interaction
+
+## Python Controller 0.4.28 (b94) — 2025-12-07
+### Improved
+- **Menu UX enhancements**:
+  - Touch debouncing: single value change per touch (must lift finger to change again)
+  - Visual scroll bar for menus with more items than fit on screen
+  - Larger fonts (11→14px) and taller items (22→34px) for easier touch
+  - Fixed touch coordinate rotation for 270° rotated display
+  - Immediate display refresh after any input (moved display update after input phases)
+  - Replaced Unicode arrows with ASCII for font compatibility
+
+## Python Controller 0.4.27 (b93) — 2025-12-06
+### Added
+- **MARS menu system**: Complete rebuild of on-screen menu:
+  - New `MarsMenu.py` replaces legacy GUIMenu with tabbed interface
+  - Categories: Eyes, Gait, Posture, Info, System
+  - Controller support: DPAD navigates items, LB/RB switch tabs, A selects, B closes, Start toggles
+  - Touch support: Tap tabs, tap items, left/right zones adjust values
+  - Safety gate: Menu only opens when robot is disabled and not in motion
+  - Touch E-STOP still active: touch during gait immediately stops robot
+  - Eye settings: Style (9 types), Human Color, Size, Spacing, CRT Effect
+  - System settings: Brightness, Verbose mode, Mirror Display, Save All, Shutdown
+  - Info display: Firmware version, Controller version, Battery, Status
+- New `handle_button()` method in MarsMenu for clean controller integration
+
+## Python Controller 0.4.13 (b79) — 2025-12-04
+### Added
+- **Walking turn**: Yaw while walking for arc motion:
+  - Right stick Y controls turn rate: up = CCW (left turn), down = CW (right turn)
+  - Maximum turn rate: ±60 deg/s (configurable)
+  - Differential stride: legs on outside of turn take longer strides, inside legs shorter
+  - Works with all gait types (Tripod, Wave, Ripple)
+  - Pure rotation (speed=0, turn≠0) rotates in place
+  - Combined with strafe (right stick X) for full omni-directional control
+- Added `LEG_HIP_X` and `LEG_HIP_Z` constants for leg position geometry
+
+## Python Controller 0.4.12 (b78) — 2025-12-04
+### Added
+- **Phase-locked gait transitions**: Smooth switching between gait types:
+  - RB button now triggers phase-locked transition instead of instant switch
+  - Waits for current gait's phase boundary before transitioning
+  - Blends foot positions between old and new gait over 500ms
+  - Cosine interpolation for smooth acceleration/deceleration at blend boundaries
+  - New `GaitTransition` class in gait_engine.py manages the state machine
+  - States: IDLE → WAITING (for phase) → BLENDING → COMPLETE
+
+## Python Controller 0.4.11 (b77) — 2025-12-04
+### Added
+- **Wave and Ripple gaits**: Two new gait patterns for different terrain/speed needs:
+  - WaveGait: One leg swings at a time (6 phases) — maximum stability, slow speed
+  - RippleGait: Two diagonal legs swing together (3 phases) — good speed/stability balance
+  - RB button now cycles: Tripod → Wave → Ripple → Stationary → Tripod
+- Removed STRAFE_DEBUG_LOG file writing
+
 ## Python Controller 0.4.0 (b65) — 2025-12-04
 ### Added
 - **Display thread**: Background thread for eye animation and LCD updates:

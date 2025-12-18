@@ -9,6 +9,9 @@
 extern volatile uint8_t  g_leg_enabled_mask;
 extern volatile uint32_t g_joint_enabled_mask;
 
+// Config write helper (implemented in functions.ino)
+void configSetKeyValue(const char* key, const char* val);
+
 // Token -> index helpers
 static inline int legIndexFromToken(const char* t) {
   if (!t) return -1;
