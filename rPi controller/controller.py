@@ -177,11 +177,12 @@
 # 2025-12-18  v0.5.46 b158: Modularization Phase 6: Extracted input_handler.py (407 lines) with keyboard, gamepad, Teensy I/O, XboxButton/XboxAxis constants. controller.py: 3946→3838 (-108 lines).
 # 2025-12-18  v0.5.47 b159: Modularization Phase 7: Final cleanup — removed duplicate get_font, consolidated imports. controller.py: 3838→3825 lines. Total reduction: 4844→3825 (~21%).
 # 2025-12-18  v0.5.48 b160: Modularization complete — added __all__ exports to all modules, updated MODULARIZATION_PLAN.md.
+# 2025-12-18  v0.5.49 b161: Architecture: Unified telemetry parser (binary/ASCII via telemetry.py); added is_robot_enabled property and ensure_enabled() method to Controller.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.5.48"
+CONTROLLER_VERSION = "0.5.49"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 160
+CONTROLLER_BUILD = 161
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -235,9 +236,12 @@ from telemetry import (
     IDX_ROLL_DEG, IDX_YAW_DEG, IDX_GAIT, IDX_MODE, IDX_SAFETY, IDX_ROBOT_ENABLED,
     TELEM_SYNC,
     SystemTelemetry, ServoTelemetry, LegTelemetry, SafetyTelemetry,
+    BinaryS1Result, BinaryS5Result, TelemetryFrame,
     create_servo_telemetry_array, create_leg_telemetry_array,
     processTelemS1, processTelemS2, processTelemS3, processTelemS4, processTelemS5,
-    get_safety_overlay_text, getGait, GAIT_NAMES as GAIT_NUM_NAMES,
+    parseBinaryS1, parseBinaryS2, parseBinaryS3, parseBinaryS4, parseBinaryS5,
+    applyBinaryS1ToState, applyBinaryS5ToState, decodeBinaryFrame,
+    get_safety_overlay_text, getGait, GAIT_NUM_NAMES,
 )
 
 # import config_manager module (Phase 2 modularization)
@@ -386,6 +390,37 @@ class Controller:
         self.servo_telem = [ServoTelemetry() for _ in range(18)]
         self.leg_telem = [LegTelemetry() for _ in range(6)]
         self.safety_telem = SafetyTelemetry()
+
+    @property
+    def is_robot_enabled(self) -> bool:
+        """Check if robot is currently enabled (replaces magic index 9 checks).
+        
+        Prefers structured telemetry when valid; falls back to legacy state array.
+        """
+        if self.system_telem.valid:
+            return self.system_telem.robot_enabled
+        if self.state and len(self.state) > IDX_ROBOT_ENABLED:
+            return self.state[IDX_ROBOT_ENABLED] == 1.0
+        return False
+
+    def ensure_enabled(self) -> bool:
+        """Send enable commands if robot is not currently enabled.
+        
+        Consolidates the repeated pattern of:
+            send_cmd(b'LEG ALL ENABLE', force=True)
+            send_cmd(b'ENABLE', force=True)
+            
+        Returns:
+            True if enable commands were sent, False if already enabled.
+        """
+        if self.is_robot_enabled:
+            return False
+        try:
+            send_cmd(b'LEG ALL ENABLE', force=True)
+            send_cmd(b'ENABLE', force=True)
+            return True
+        except Exception:
+            return False
 
     @classmethod
     def from_current_globals(cls):
@@ -590,153 +625,65 @@ class Controller:
                         self._telem_rx_buf = buf[1:]
                         continue
 
-                    # Valid frame
+                    # Valid frame - use unified binary parsers from telemetry module
                     if ver == 1:
                         if telem_type == 1 and ln in (7, 17):
-                            if ln == 7:
-                                # Legacy binary S1 payload (FW <= 0.2.37)
-                                loop_us, = struct.unpack_from('<H', payload, 0)
-                                battery_v = 0.0
-                                current_a = 0.0
-                                pitch_deg = 0.0
-                                roll_deg = 0.0
-                                yaw_deg = 0.0
-                                mode_is_test = int(payload[2])
-                                test_phase = int(payload[3])
-                                rr_index = int(payload[4])
-                                lockout = int(payload[5])
-                                enabled = int(payload[6])
-                            else:
-                                # Extended binary S1 payload (FW >= 0.2.38)
-                                loop_us, batt_mV, current_mA, pitch_cdeg, roll_cdeg, yaw_cdeg = struct.unpack_from('<HHhhhh', payload, 0)
-                                battery_v = float(batt_mV) / 1000.0
-                                current_a = float(current_mA) / 1000.0
-                                pitch_deg = float(pitch_cdeg) / 100.0
-                                roll_deg = float(roll_cdeg) / 100.0
-                                yaw_deg = float(yaw_cdeg) / 100.0
-                                mode_is_test = int(payload[12])
-                                test_phase = int(payload[13])
-                                rr_index = int(payload[14])
-                                lockout = int(payload[15])
-                                enabled = int(payload[16])
-
-                            # Controller-visible mapping matches ASCII S1 meaning.
-                            self.state[IDX_LOOP_US] = float(loop_us)
-                            self.state[IDX_BATTERY_V] = float(battery_v)
-                            self.state[IDX_CURRENT_A] = float(current_a)
-                            self.state[IDX_PITCH_DEG] = float(pitch_deg)
-                            self.state[IDX_ROLL_DEG] = float(roll_deg)
-                            self.state[IDX_YAW_DEG] = float(yaw_deg)
-                            self.state[IDX_GAIT] = float(0 if mode_is_test else 7)
-                            self.state[IDX_MODE] = float(test_phase if mode_is_test else 0)
-                            self.state[IDX_SAFETY] = float(rr_index)
-                            self.state[IDX_ROBOT_ENABLED] = float(1 if enabled else 0)
-
-                            self.system_telem.loop_us = int(loop_us)
-                            self.system_telem.battery_v = float(battery_v)
-                            self.system_telem.current_a = float(current_a)
-                            self.system_telem.pitch_deg = float(pitch_deg)
-                            self.system_telem.roll_deg = float(roll_deg)
-                            self.system_telem.yaw_deg = float(yaw_deg)
-                            self.system_telem.gait = int(self.state[IDX_GAIT])
-                            self.system_telem.mode = int(self.state[IDX_MODE])
-                            self.system_telem.safety = int(self.state[IDX_SAFETY])
-                            self.system_telem.robot_enabled = (enabled == 1)
-                            self.system_telem.valid = True
-
-                            self.lastTelemetryTime = now
-                            self.telemetryRetryDeadline = None
-                            self.lastS1MonoTime = time.monotonic()
-                            if 1000 <= loop_us <= 50000:
-                                self.teensyLoopUs = int(loop_us)
-                                self.telemSyncActive = True
-                            self.telemBinActive = True
+                            # Parse S1 using unified parser
+                            s1_result = parseBinaryS1(payload, ln)
+                            if s1_result is not None and s1_result.valid:
+                                applyBinaryS1ToState(s1_result, self.state, self.system_telem)
+                                self.lastTelemetryTime = now
+                                self.telemetryRetryDeadline = None
+                                self.lastS1MonoTime = time.monotonic()
+                                if 1000 <= s1_result.loop_us <= 50000:
+                                    self.teensyLoopUs = s1_result.loop_us
+                                    self.telemSyncActive = True
+                                self.telemBinActive = True
 
                         elif telem_type == 2 and ln == 18:
-                            for idx in range(18):
-                                en = int(payload[idx])
-                                self.servo[idx][2] = en
-                                self.servo_telem[idx].enabled = bool(en)
-                                self.servo_telem[idx].valid_s2 = True
-                            self.lastTelemetryTime = now
-                            self.telemetryRetryDeadline = None
-                            self.telemBinActive = True
+                            # Parse S2 using unified parser
+                            if parseBinaryS2(payload, ln, self.servo, self.servo_telem):
+                                self.lastTelemetryTime = now
+                                self.telemetryRetryDeadline = None
+                                self.telemBinActive = True
 
                         elif telem_type == 3 and ln == 54:
-                            # 18*u16 mV then 18*u8 temp_C
-                            for idx in range(18):
-                                mv, = struct.unpack_from('<H', payload, idx * 2)
-                                self.servo[idx][0] = float(mv) / 1000.0
-                            base = 18 * 2
-                            for idx in range(18):
-                                temp_c = int(payload[base + idx])
-                                self.servo[idx][1] = temp_c
-                                self.servo_telem[idx].voltage_v = float(self.servo[idx][0])
-                                self.servo_telem[idx].temp_c = temp_c
-                                self.servo_telem[idx].valid_s3 = True
-                            self.lastTelemetryTime = now
-                            self.telemetryRetryDeadline = None
-                            self.telemBinActive = True
+                            # Parse S3 using unified parser
+                            if parseBinaryS3(payload, ln, self.servo, self.servo_telem):
+                                self.lastTelemetryTime = now
+                                self.telemetryRetryDeadline = None
+                                self.telemBinActive = True
 
                         elif telem_type == 4 and ln == 6:
-                            # 6*u8 contact flags (0/1), canonical leg order: LF,LM,LR,RF,RM,RR
-                            for idx in range(6):
-                                contact = 1 if int(payload[idx]) != 0 else 0
-                                try:
-                                    self.legs[idx][0] = contact
-                                except Exception:
-                                    # Legs list may not be initialized early in startup; ignore.
-                                    pass
-                                if idx < len(self.leg_telem):
-                                    self.leg_telem[idx].contact = bool(contact)
-                                    self.leg_telem[idx].valid = True
-                            self.lastTelemetryTime = now
-                            self.telemetryRetryDeadline = None
-                            self.telemBinActive = True
+                            # Parse S4 using unified parser
+                            if parseBinaryS4(payload, ln, self.legs, self.leg_telem):
+                                self.lastTelemetryTime = now
+                                self.telemetryRetryDeadline = None
+                                self.telemBinActive = True
 
                         elif telem_type == 5 and ln == 11:
-                            lockout = bool(payload[0])
-                            cause_mask, = struct.unpack_from('<H', payload, 1)
-                            override_mask, = struct.unpack_from('<H', payload, 3)
-                            clearance_mm, = struct.unpack_from('<h', payload, 5)
-                            soft_limits = bool(payload[7])
-                            collision = bool(payload[8])
-                            temp_c, = struct.unpack_from('<h', payload, 9)
-
+                            # Parse S5 using unified parser
                             prev_lockout = _safety_state.get("lockout", False)
-                            _safety_state["lockout"] = lockout
-                            _safety_state["cause_mask"] = int(cause_mask)
-                            _safety_state["override_mask"] = int(override_mask)
-                            _safety_state["clearance_mm"] = int(clearance_mm)
-                            _safety_state["soft_limits"] = bool(soft_limits)
-                            _safety_state["collision"] = bool(collision)
-                            _safety_state["temp_c"] = int(temp_c)
+                            s5_result = parseBinaryS5(payload, ln)
+                            if s5_result is not None and s5_result.valid:
+                                applyBinaryS5ToState(s5_result, _safety_state, self.safety_telem)
+                                self.lastTelemetryTime = now
+                                self.telemetryRetryDeadline = None
+                                self.telemBinActive = True
 
-                            self.safety_telem.lockout = lockout
-                            self.safety_telem.cause_mask = int(cause_mask)
-                            self.safety_telem.override_mask = int(override_mask)
-                            self.safety_telem.clearance_mm = int(clearance_mm)
-                            self.safety_telem.soft_limits = bool(soft_limits)
-                            self.safety_telem.collision = bool(collision)
-                            self.safety_telem.temp_c = int(temp_c)
-                            self.safety_telem.valid = True
-
-                            self.lastTelemetryTime = now
-                            self.telemetryRetryDeadline = None
-                            self.telemBinActive = True
-
-                            if lockout and not prev_lockout:
-                                if _gaitActive and _gaitEngine is not None:
-                                    _gaitEngine.stop()
-                                _gaitActive = False
-                                try:
-                                    send_cmd(b'LEG ALL DISABLE', force=True)
-                                    send_cmd(b'DISABLE', force=True)
-                                except Exception:
-                                    pass
-                                if self.verbose:
-                                    print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
-                            _last_safety_lockout = lockout
+                                # Handle lockout transition
+                                if s5_result.lockout and not prev_lockout:
+                                    if _gaitActive and _gaitEngine is not None:
+                                        _gaitEngine.stop()
+                                    _gaitActive = False
+                                    try:
+                                        send_cmd(b'LEG ALL DISABLE', force=True)
+                                        send_cmd(b'DISABLE', force=True)
+                                    except Exception:
+                                        pass
+                                    if self.verbose:
+                                        print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
+                                _last_safety_lockout = s5_result.lockout
 
                     # Consume frame
                     self._telem_rx_buf = buf[total:]

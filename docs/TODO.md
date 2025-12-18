@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-12-18 (Modularization complete: Controller 0.5.48 b160; 4844→3826 lines, ~21% reduction; all modules have __all__ exports)
+Last updated: 2025-12-18 (Controller 0.5.49 b161: unified telemetry parser, is_robot_enabled/ensure_enabled() helpers)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -34,12 +34,13 @@ Conventions
      - [x] Phase 5: display_thread.py extracted (2025-06-18, v0.5.45 b157) — DisplayThread, UpdateDisplay, getColor, drawLogo, drawMarsSplash, get_font (520 lines). controller.py: 4422→3946 (-476 lines).
      - [x] Phase 6: input_handler.py extracted (2025-12-18, v0.5.46 b158) — keyboard/gamepad/Teensy I/O, XboxButton/XboxAxis constants (407 lines). controller.py: 3946→3838 (-108 lines).
      - [x] Phase 7: Final cleanup (2025-12-18, v0.5.47 b159) — removed duplicates, consolidated imports. controller.py: 3838→3825 lines.
- - [ ] Unify ASCII/binary telemetry parser interface
-   - Goal: Create single parser interface that handles both formats transparently.
-   - Priority: Medium.
- - [ ] Complete global state migration into Controller class
-   - Goal: Move remaining `_foo` globals into Controller instance or dedicated state classes.
-   - Priority: Medium.
+ - [x] Unify ASCII/binary telemetry parser interface (2025-12-18, v0.5.49 b161)
+   - Added parseBinaryS1..S5, applyBinaryS1ToState, applyBinaryS5ToState, decodeBinaryFrame to telemetry.py.
+   - Controller.read_telemetry() now uses unified parsers from telemetry module.
+ - [x] Complete global state migration into Controller class (2025-12-18, v0.5.49 b161) — PARTIAL
+   - Added `is_robot_enabled` property (replaces magic index 9 checks).
+   - Added `ensure_enabled()` method (consolidates 9x repeated enable patterns).
+   - Remaining: full migration of ~100 globals deferred to future work; foundation complete.
 
 ## Open tasks (firmware)
 
