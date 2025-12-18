@@ -25,6 +25,7 @@ extern bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t
 extern int16_t readServoPosCdSync(uint8_t leg, uint8_t joint);
 extern int nextToken(const char* s, int start, int len, int* tokStart, int* tokLen);
 extern void printERR(uint8_t code, const char* msg);
+extern void configSetKeyValue(const char* key, const char* val);
 extern uint8_t servoId(uint8_t leg, uint8_t joint);
 extern void setServoTorqueNow(uint8_t leg, uint8_t joint, bool on);
 extern bool fk_leg_body(uint8_t leg, int16_t coxa_cd, int16_t femur_cd, int16_t tibia_cd,
@@ -84,6 +85,7 @@ extern File              g_log_file;
 extern volatile uint16_t g_loop_hz;
 extern void configApplyLoopHz(uint16_t hz);
 extern volatile uint8_t  g_telem_enabled;
+extern volatile uint8_t  g_telem_bin_enabled;
 // PID/EST globals
 extern volatile bool     g_pid_enabled;
 extern volatile uint16_t g_pid_kp_milli[3];
@@ -153,6 +155,7 @@ CommandType parseCommandType(const char* cmd) {
   if (!strcmp(cmd, "EST")) return CMD_EST;
   if (!strcmp(cmd, "LIMITS")) return CMD_LIMITS;
   if (!strcmp(cmd, "CONFIG")) return CMD_CONFIG;
+  if (!strcmp(cmd, "TELEM")) return CMD_TELEM;
   return CMD_UNKNOWN;
 }
 
@@ -192,6 +195,42 @@ void processCmdY(const char* line, int s, int len)
   for (int i = 0; i < nv; ++i) vb[i] = (char)toupper(vb[i]);
   bool on = (!strcmp(vb, "1") || !strcmp(vb, "ON") || !strcmp(vb, "TRUE"));
   g_telem_enabled = on ? 1 : 0;
+}
+
+// TELEM <ASCII|BIN> [0|1|ON|OFF|TRUE|FALSE]
+// Select telemetry stream format. Master enable remains controlled by Y 1/Y 0.
+// - TELEM ASCII          -> force ASCII segments (S1..S5)
+// - TELEM BIN 1|0        -> enable/disable binary framed telemetry
+void processCmdTELEM(const char* line, int s, int len)
+{
+  int ts, tl;
+  s = nextToken(line, s, len, &ts, &tl);
+  if (tl <= 0) { printERR(1, "BAD_ARG"); return; }
+
+  char modeb[8] = {0};
+  int nm = (tl < 7) ? tl : 7;
+  memcpy(modeb, line + ts, nm);
+  for (int i = 0; i < nm; ++i) modeb[i] = (char)toupper(modeb[i]);
+
+  if (!strcmp(modeb, "ASCII") || !strcmp(modeb, "TEXT")) {
+    g_telem_bin_enabled = 0;
+    return;
+  }
+
+  if (!strcmp(modeb, "BIN") || !strcmp(modeb, "BINARY")) {
+    int vs, vl;
+    s = nextToken(line, s, len, &vs, &vl);
+    if (vl <= 0) { printERR(1, "BAD_ARG"); return; }
+    char vb[8] = {0};
+    int nv = (vl < 7) ? vl : 7;
+    memcpy(vb, line + vs, nv);
+    for (int i = 0; i < nv; ++i) vb[i] = (char)toupper(vb[i]);
+    bool on = (!strcmp(vb, "1") || !strcmp(vb, "ON") || !strcmp(vb, "TRUE"));
+    g_telem_bin_enabled = on ? 1 : 0;
+    return;
+  }
+
+  printERR(1, "BAD_ARG");
 }
 
 // CONFIG DUMP — stream /config.txt contents to the console (read-only)
@@ -702,6 +741,17 @@ void processCmdT(const char* line, int s, int len) {
   modeSetTest();
 }
 
+static void persistTrigaitIntKey(const char* key, long value)
+{
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%ld", value);
+  configSetKeyValue(key, buf);
+#else
+  (void)key; (void)value;
+#endif
+}
+
 void processCmdTEST(const char* line, int s, int len)
 {
   int ts, tl;
@@ -720,67 +770,34 @@ void processCmdTEST(const char* line, int s, int len)
   void processCmdIMP(const char* line, int s, int len);
   if (!strcmp(sub, "CYCLE")) {
     long ms = atol(vb); if (ms < 750) ms = 750; if (ms > 10000) ms = 10000;
-    g_test_cycle_ms = (uint32_t)ms; return;
+    g_test_cycle_ms = (uint32_t)ms;
+    persistTrigaitIntKey("test.trigait.cycle_ms", ms);
+    return;
   }
   if (!strcmp(sub, "HEIGHT")) {
     g_test_base_y_mm = atof(vb);
+    persistTrigaitIntKey("test.trigait.height_mm", lroundf(g_test_base_y_mm));
     return;
   }
   if (!strcmp(sub, "BASEX"))  {
     g_test_base_x_mm = atof(vb);
+    persistTrigaitIntKey("test.trigait.basex_mm", lroundf(g_test_base_x_mm));
     return;
   }
   if (!strcmp(sub, "STEPLEN")) {
-    float v = atof(vb); if (v < 0.0f) v = 0.0f; g_test_step_len_mm = v; return;
+    float v = atof(vb); if (v < 0.0f) v = 0.0f; g_test_step_len_mm = v;
+    persistTrigaitIntKey("test.trigait.steplen_mm", lroundf(g_test_step_len_mm));
+    return;
   }
   if (!strcmp(sub, "LIFT"))    {
-    float v = atof(vb); if (v < 0.0f) v = 0.0f; g_test_lift_y_mm = v; return;
+    float v = atof(vb); if (v < 0.0f) v = 0.0f; g_test_lift_y_mm = v;
+    persistTrigaitIntKey("test.trigait.lift_mm", lroundf(g_test_lift_y_mm));
+    return;
   }
   if (!strcmp(sub, "OVERLAP")) {
     float v = atof(vb); if (v < 0.0f) v = 0.0f; if (v > 25.0f) v = 25.0f; g_test_overlap_pct = v;
-#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-    if (!SD.begin(BUILTIN_SDCARD)) {
-      printERR(2, "NO_SD");
-      return;
-    }
-    File fin = SD.open("/config.txt", FILE_READ);
-    File fout = SD.open("/config.tmp", FILE_WRITE);
-    if (!fout) {
-      if (fin) fin.close();
-      printERR(2, "SD_WRITE_FAIL");
-      return;
-    }
-    bool replaced = false;
-    if (fin) {
-      static char linebuf[256]; int llen = 0;
-      while (fin.available()) {
-        int ch2 = fin.read(); if (ch2 < 0) break; if (ch2 == '\r') continue;
-        if (ch2 == '\n') {
-          linebuf[llen] = 0;
-          const char* p = linebuf; while (*p == ' ' || *p == '\t') ++p;
-          const char* key = "test.trigait.overlap_pct="; size_t klen = strlen(key);
-          if (strncmp(p, key, klen) == 0) {
-            fout.print(key); long iv = lroundf(g_test_overlap_pct); fout.print((int)iv); fout.print('\n');
-            replaced = true;
-          } else {
-            fout.print(linebuf); fout.print('\n');
-          }
-          llen = 0;
-        } else if (llen + 1 < (int)sizeof(linebuf)) {
-          linebuf[llen++] = (char)ch2;
-        } else {
-          linebuf[llen] = 0; fout.print(linebuf); fout.print('\n'); llen = 0;
-        }
-      }
-      fin.close();
-    }
-    if (!replaced) {
-      fout.print("test.trigait.overlap_pct="); long iv = lroundf(g_test_overlap_pct); fout.print((int)iv); fout.print('\n');
-    }
-    fout.close(); SD.remove("/config.txt"); SD.rename("/config.tmp", "/config.txt"); return;
-#else
-    printERR(2, "NO_SD"); return;
-#endif
+    persistTrigaitIntKey("test.trigait.overlap_pct", lroundf(g_test_overlap_pct));
+    return;
   }
 
   printERR(1, "BAD_ARG");
@@ -793,15 +810,34 @@ void processCmdSTAND(const char* line, int s, int len)
   // Force MODE IDLE semantics before updating foot targets / IK.
   modeSetIdle();
 
-  const float BASE_Y = g_test_base_y_mm;
-  const float BASE_X = g_test_base_x_mm;
+  // NOTE: Historically STAND reused the TEST gait base parameters (g_test_base_*).
+  // If a user tunes TEST width/height aggressively, that can make the (x=BASE_X,z=0)
+  // stance unreachable and STAND would fail with IK_FAIL. Clamp to a reachable
+  // workspace and fall back to a conservative default if needed.
+  float base_y = g_test_base_y_mm;
+  float base_x = g_test_base_x_mm;
+
+  // Enforce the sign convention used by our IK: negative y is down.
+  if (base_y > 0.0f) base_y = -base_y;
+  if (base_y > -1.0f) base_y = -120.0f;
+
+  // Ensure y is within the 2-link reach envelope.
+  const float reach = (FEMUR_LENGTH + TIBIA_LENGTH) - 1.0f; // 1mm margin
+  if (fabsf(base_y) > reach) base_y = -reach;
+
+  // For z=0, clamp x so D <= (a+b). Derived from:
+  //   D^2 = (max(0, x-COXA))^2 + y^2 <= reach^2
+  float max_x = COXA_LENGTH;
+  float under = (reach * reach) - (base_y * base_y);
+  if (under > 0.0f) max_x += sqrtf(under);
+  if (base_x > max_x) base_x = max_x;
+  if (base_x < 0.0f) base_x = 0.0f;
+
+  bool any_fail = false;
   for (int L = 0; L < 6; ++L) {
     int16_t out[3];
-    bool ok = calculateIK((uint8_t)L, BASE_X, BASE_Y, 0.0f, out);
-    if (!ok) {
-      printERR(1, "IK_FAIL");
-      return;
-    }
+    bool ok = calculateIK((uint8_t)L, base_x, base_y, 0.0f, out);
+    if (!ok) { any_fail = true; break; }
     bool isRight = (L >= 3);
     if (isRight) {
       g_cmd_cd[L][0] = out[0];
@@ -812,8 +848,34 @@ void processCmdSTAND(const char* line, int s, int len)
       g_cmd_cd[L][1] = (int16_t)(2 * g_home_cd[L][1] - out[1]);
       g_cmd_cd[L][2] = (int16_t)(2 * g_home_cd[L][2] - out[2]);
     }
-    g_foot_target_x_mm[L] = BASE_X;
+    g_foot_target_x_mm[L] = base_x;
     g_foot_target_z_mm[L] = 0.0f;
+  }
+
+  if (any_fail) {
+    // Conservative fallback stance (known-good across typical geometry).
+    base_x = 130.0f;
+    base_y = -120.0f;
+    for (int L = 0; L < 6; ++L) {
+      int16_t out[3];
+      bool ok = calculateIK((uint8_t)L, base_x, base_y, 0.0f, out);
+      if (!ok) {
+        printERR(1, "IK_FAIL");
+        return;
+      }
+      bool isRight = (L >= 3);
+      if (isRight) {
+        g_cmd_cd[L][0] = out[0];
+        g_cmd_cd[L][1] = out[1];
+        g_cmd_cd[L][2] = out[2];
+      } else {
+        g_cmd_cd[L][0] = (int16_t)(2 * g_home_cd[L][0] - out[0]);
+        g_cmd_cd[L][1] = (int16_t)(2 * g_home_cd[L][1] - out[1]);
+        g_cmd_cd[L][2] = (int16_t)(2 * g_home_cd[L][2] - out[2]);
+      }
+      g_foot_target_x_mm[L] = base_x;
+      g_foot_target_z_mm[L] = 0.0f;
+    }
   }
 }
 
@@ -1803,9 +1865,11 @@ void processCmdSAFETY(const char* line, int s, int len)
   printERR(1, "BAD_ARG");
 }
 
-// TUCK <SET|CLEAR> [LEG]
-//   SET   – arm the tuck sequence for one leg or all enabled legs
-//   CLEAR – cancel any active tuck sequence
+// TUCK <SET|CLEAR|PARAMS> [LEG]
+//   SET            – arm the tuck sequence for one leg or all enabled legs
+//   CLEAR          – cancel any active tuck sequence
+//   SET <PARAM> <VAL> – update tuck.* params (TIBIA|FEMUR|COXA|TOL_TIBIA|TOL_OTHER|TIMEOUT) and persist to /config.txt
+//   PARAMS         – print current tuck.* parameter values
 void processCmdTUCK(const char* line, int s, int len)
 {
   extern volatile uint8_t  g_tuck_active;
@@ -1813,6 +1877,11 @@ void processCmdTUCK(const char* line, int s, int len)
   extern volatile uint8_t  g_tuck_done_mask;
   extern volatile uint32_t g_tuck_start_ms;
   extern volatile int16_t  g_tuck_tibia_cd;
+  extern volatile int16_t  g_tuck_femur_cd;
+  extern volatile int16_t  g_tuck_coxa_cd;
+  extern volatile int16_t  g_tuck_tol_tibia_cd;
+  extern volatile int16_t  g_tuck_tol_other_cd;
+  extern volatile uint16_t g_tuck_timeout_ms;
 
   int ts, tl;
   s = nextToken(line, s, len, &ts, &tl);
@@ -1836,8 +1905,102 @@ void processCmdTUCK(const char* line, int s, int len)
     return;
   }
 
-  // TUCK SET [LEG]
+  // TUCK PARAMS: print current tuck parameter values
+  if (!strcmp(sub, "PARAMS")) {
+    Serial.print(F("tuck.tibia_cd="));      Serial.println(g_tuck_tibia_cd);
+    Serial.print(F("tuck.femur_cd="));      Serial.println(g_tuck_femur_cd);
+    Serial.print(F("tuck.coxa_cd="));       Serial.println(g_tuck_coxa_cd);
+    Serial.print(F("tuck.tol_tibia_cd="));  Serial.println(g_tuck_tol_tibia_cd);
+    Serial.print(F("tuck.tol_other_cd="));  Serial.println(g_tuck_tol_other_cd);
+    Serial.print(F("tuck.timeout_ms="));    Serial.println(g_tuck_timeout_ms);
+    return;
+  }
+
+  // TUCK SET [LEG]   or   TUCK SET <PARAM> <VAL>
   if (!strcmp(sub, "SET")) {
+    // Peek next token to decide if this is a LEG or PARAM form
+    int ts2, tl2;
+    int s_after_sub = nextToken(line, s, len, &ts2, &tl2);
+
+    // LEG form: TUCK SET [LEG]
+    bool isLegForm = false;
+    if (tl2 <= 0) {
+      isLegForm = true;  // no extra token -> all enabled legs
+    } else {
+      char tbuf[8] = {0};
+      int n = min(tl2, 7);
+      memcpy(tbuf, line + ts2, n);
+      for (int i = 0; i < n; ++i) tbuf[i] = (char)toupper(tbuf[i]);
+      // Recognize LEG tokens (LF/LM/LR/RF/RM/RR/ALL) by mapping via legIndexFromToken
+      int leg_test = legIndexFromToken(tbuf);
+      if (leg_test >= 0 || !strcmp(tbuf, "ALL")) {
+        isLegForm = true;
+      }
+    }
+
+    if (!isLegForm) {
+      // PARAM form: TUCK SET <PARAM> <VAL>
+      if (tl2 <= 0) {
+        printERR(1, "BAD_ARG");
+        return;
+      }
+
+      char pbuf[16] = {0};
+      int pn = min(tl2, 15);
+      memcpy(pbuf, line + ts2, pn);
+      for (int i = 0; i < pn; ++i) pbuf[i] = (char)toupper(pbuf[i]);
+
+      // Read value token
+      int ts3, tl3;
+      nextToken(line, s_after_sub, len, &ts3, &tl3);
+      if (tl3 <= 0) {
+        printERR(1, "BAD_ARG");
+        return;
+      }
+      char vbuf[16] = {0};
+      int vn = min(tl3, 15);
+      memcpy(vbuf, line + ts3, vn);
+      vbuf[vn] = '\0';
+      long v = atol(vbuf);
+
+      // Clamp and apply based on PARAM
+      if (!strcmp(pbuf, "TIBIA")) {
+        if (v < 0) v = 0; if (v > 24000) v = 24000;
+        g_tuck_tibia_cd = (int16_t)v;
+        configSetKeyValue("tuck.tibia_cd", vbuf);
+      } else if (!strcmp(pbuf, "FEMUR")) {
+        if (v < 0) v = 0; if (v > 24000) v = 24000;
+        g_tuck_femur_cd = (int16_t)v;
+        configSetKeyValue("tuck.femur_cd", vbuf);
+      } else if (!strcmp(pbuf, "COXA")) {
+        // coxa is logical center; force 12000
+        v = 12000; strcpy(vbuf, "12000");
+        g_tuck_coxa_cd = (int16_t)v;
+        configSetKeyValue("tuck.coxa_cd", vbuf);
+      } else if (!strcmp(pbuf, "TOL_TIBIA")) {
+        if (v < 10) v = 10; if (v > 5000) v = 5000;
+        g_tuck_tol_tibia_cd = (int16_t)v;
+        configSetKeyValue("tuck.tol_tibia_cd", vbuf);
+      } else if (!strcmp(pbuf, "TOL_OTHER")) {
+        if (v < 10) v = 10; if (v > 5000) v = 5000;
+        g_tuck_tol_other_cd = (int16_t)v;
+        configSetKeyValue("tuck.tol_other_cd", vbuf);
+      } else if (!strcmp(pbuf, "TIMEOUT")) {
+        if (v < 250) v = 250; if (v > 10000) v = 10000;
+        g_tuck_timeout_ms = (uint16_t)v;
+        configSetKeyValue("tuck.timeout_ms", vbuf);
+      } else {
+        printERR(1, "BAD_ARG");
+        return;
+      }
+
+      return;
+    }
+
+    // --- Original TUCK SET [LEG] behavior ---
+    // TUCK is a supervisory motion; ensure we are in MODE IDLE
+    // so that test gait or other planners are not concurrently writing targets.
+    modeSetIdle();
     // TUCK is a supervisory motion; ensure we are in MODE IDLE
     // so that test gait or other planners are not concurrently writing targets.
     modeSetIdle();

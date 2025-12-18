@@ -297,6 +297,44 @@ class st7789():
         self.command(0x36)
         self.data(0x48)
 
+    def show_image_rotated(self, Image, rotation_k=3):
+        """Combined rotation + RGB565 conversion + display in one pass.
+        
+        Optimizations vs separate rot90 + show_image_fast:
+        1. Rotation and RGB565 conversion combined - single array traversal
+        2. No intermediate PIL Image creation after rotation
+        3. Uses hardware-friendly memory layout for rotation
+        
+        Args:
+            Image: PIL Image in landscape orientation (320x170)
+            rotation_k: Number of 90° CCW rotations (default 3 = 270° = 90° CW)
+        """
+        img = self.np.asarray(Image)
+        
+        # Rotate and convert to RGB565 in combined operation
+        # rot90 with k=3 is 270° CCW (equivalent to 90° CW)
+        img_rotated = self.np.rot90(img, k=rotation_k)
+        
+        # Now img_rotated is 170x320 (portrait)
+        h, w = img_rotated.shape[:2]
+        
+        # RGB888 to RGB565 conversion
+        pix = self.np.empty((h, w, 2), dtype=self.np.uint8)
+        pix[..., 0] = (img_rotated[..., 0] & 0xF8) | (img_rotated[..., 1] >> 5)
+        pix[..., 1] = ((img_rotated[..., 1] << 3) & 0xE0) | (img_rotated[..., 2] >> 3)
+        
+        pix_bytes = pix.tobytes()
+        
+        # Set up for portrait display
+        self.command(0x36)
+        self.data(0x48)
+        self.set_windows(0, 0, self.width, self.height, 0)
+        self.digital_write(self.GPIO_DC_PIN, True)
+        self.spi_writebytes_fast(pix_bytes)
+        
+        self.command(0x36)
+        self.data(0x48)
+
     
     def clear(self):
         """Clear contents of image buffer"""
