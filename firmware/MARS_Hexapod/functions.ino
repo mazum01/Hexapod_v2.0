@@ -190,6 +190,7 @@ void telemetryPrintS1(uint8_t leg, uint16_t loop_us, uint8_t lockout, uint8_t mo
 // en = legEnabled AND jointEnabled.
 extern bool jointEnabled(uint8_t leg, uint8_t joint); // provided by main sketch
 extern bool legEnabled(uint8_t leg);                   // provided by main sketch
+extern uint8_t footContactState(uint8_t leg);          // provided by main sketch (future sensor)
 void telemetryPrintS2()
 {
   if (!Serial) return;
@@ -236,6 +237,22 @@ void telemetryPrintS3()
   Serial.print('\n');
 }
 
+// Prints compact S4 segment for leg contact state (one flag per leg).
+// Format:
+//   S4:<c0>,<c1>,<c2>,<c3>,<c4>,<c5>
+// Ordering: LF,LM,LR,RF,RM,RR.
+// NOTE: footContactState() is currently stubbed to 0 until contact sensing is implemented.
+void telemetryPrintS4()
+{
+  if (!Serial) return;
+  Serial.print(F("S4:"));
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    Serial.print((int)(footContactState(leg) ? 1 : 0));
+    if (leg != 5) Serial.print(',');
+  }
+  Serial.print('\n');
+}
+
 // Prints compact S5 segment with detailed safety state and config.
 // Format:
 //   S5:<lockout>,<cause_mask>,<override_mask>,<clearance_mm>,<soft_limits>,<collision>,<temp_C>
@@ -272,6 +289,177 @@ void telemetryPrintS5()
   Serial.print(temp_C);
   Serial.print('\n');
 }
+
+// -----------------------------------------------------------------------------
+// Binary framed telemetry (more efficient + robust parsing)
+// Frame format (little-endian payloads):
+//   0xA5 0x5A  ver(1)  type  seq  len  <payload bytes>  cksum
+// cksum = XOR of bytes [ver..payload]
+// Types:
+//   1 = S1 (17 bytes)
+//   2 = S2 (18 bytes)
+//   3 = S3 (18*u16 mV + 18*u8 tempC = 54 bytes)
+//   5 = S5 (11 bytes)
+// NOTE: Master enable remains g_telem_enabled (Y 1/Y 0). Format select is g_telem_bin_enabled.
+// -----------------------------------------------------------------------------
+
+static uint8_t g_telem_bin_seq = 0;
+
+static inline void _telem_put_u16_le(uint8_t* dst, uint16_t v) {
+  dst[0] = (uint8_t)(v & 0xFFu);
+  dst[1] = (uint8_t)((v >> 8) & 0xFFu);
+}
+
+static inline void _telem_put_i16_le(uint8_t* dst, int16_t v) {
+  _telem_put_u16_le(dst, (uint16_t)v);
+}
+
+static inline uint8_t _telem_xor(const uint8_t* p, uint8_t n) {
+  uint8_t x = 0;
+  for (uint8_t i = 0; i < n; ++i) x ^= p[i];
+  return x;
+}
+
+static inline void _telem_write_frame(uint8_t type, const uint8_t* payload, uint8_t len) {
+  if (!Serial) return;
+  const uint8_t ver = 1;
+  uint8_t hdr[6];
+  hdr[0] = 0xA5;
+  hdr[1] = 0x5A;
+  hdr[2] = ver;
+  hdr[3] = type;
+  hdr[4] = g_telem_bin_seq++;
+  hdr[5] = len;
+  Serial.write(hdr, sizeof(hdr));
+  if (payload && len) Serial.write(payload, len);
+  uint8_t cksum = 0;
+  cksum ^= ver;
+  cksum ^= type;
+  cksum ^= hdr[4];
+  cksum ^= len;
+  if (payload && len) cksum ^= _telem_xor(payload, len);
+  Serial.write(&cksum, 1);
+}
+
+// Binary S1: packed “system” telemetry fields.
+// Payload layout (17 bytes):
+//   u16 loop_us
+//   u16 battery_mV       (derived: average of non-zero servo vin readings)
+//   i16 current_mA       (reserved; 0 when not instrumented)
+//   i16 pitch_cdeg       (reserved; 0 when no IMU)
+//   i16 roll_cdeg        (reserved; 0 when no IMU)
+//   i16 yaw_cdeg         (reserved; 0 when no IMU)
+//   u8  mode_is_test (0/1)
+//   u8  test_phase
+//   u8  rr_index
+//   u8  lockout (0/1)
+//   u8  enabled (0/1)
+void telemetryBinS1(uint16_t loop_us, uint8_t lockout, uint8_t mode, uint8_t test_phase, uint8_t rr_index, uint8_t enabled)
+{
+  uint16_t batt_mV = 0;
+  {
+    uint32_t sum_mV = 0;
+    uint16_t cnt = 0;
+    for (uint8_t leg = 0; leg < 6; ++leg) {
+      for (uint8_t j = 0; j < 3; ++j) {
+        uint16_t mv = g_meas_vin_mV[leg][j];
+        if (mv > 0) {
+          sum_mV += mv;
+          ++cnt;
+        }
+      }
+    }
+    if (cnt > 0) batt_mV = (uint16_t)(sum_mV / (uint32_t)cnt);
+  }
+
+  const int16_t current_mA = 0;
+  const int16_t pitch_cdeg = 0;
+  const int16_t roll_cdeg = 0;
+  const int16_t yaw_cdeg = 0;
+
+  uint8_t p[17];
+  _telem_put_u16_le(&p[0], loop_us);
+  _telem_put_u16_le(&p[2], batt_mV);
+  _telem_put_i16_le(&p[4], current_mA);
+  _telem_put_i16_le(&p[6], pitch_cdeg);
+  _telem_put_i16_le(&p[8], roll_cdeg);
+  _telem_put_i16_le(&p[10], yaw_cdeg);
+  p[12] = (mode == 1) ? 1 : 0;
+  p[13] = (mode == 1) ? test_phase : 0;
+  p[14] = rr_index;
+  p[15] = lockout ? 1 : 0;
+  p[16] = enabled ? 1 : 0;
+  _telem_write_frame(1, p, (uint8_t)sizeof(p));
+}
+
+// Binary S2: enable flags for all 18 servos (18 bytes, 0/1 each)
+void telemetryBinS2()
+{
+  uint8_t p[18];
+  uint8_t idx = 0;
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    uint8_t leg_en = legEnabled(leg) ? 1 : 0;
+    for (uint8_t j = 0; j < 3; ++j) {
+      uint8_t en = (leg_en && (jointEnabled(leg, j) ? 1 : 0)) ? 1 : 0;
+      p[idx++] = en;
+    }
+  }
+  _telem_write_frame(2, p, (uint8_t)sizeof(p));
+}
+
+// Binary S3: 18x vin_mV (u16 LE) then 18x temp_C (u8)
+void telemetryBinS3()
+{
+  uint8_t p[54];
+  uint8_t off = 0;
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    for (uint8_t j = 0; j < 3; ++j) {
+      _telem_put_u16_le(&p[off], g_meas_vin_mV[leg][j]);
+      off += 2;
+    }
+  }
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    for (uint8_t j = 0; j < 3; ++j) {
+      p[off++] = g_meas_temp_C[leg][j];
+    }
+  }
+  _telem_write_frame(3, p, (uint8_t)sizeof(p));
+}
+
+// Binary S4: leg contact flags (6 bytes, 0/1)
+void telemetryBinS4()
+{
+  uint8_t p[6];
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    p[leg] = footContactState(leg) ? 1 : 0;
+  }
+  _telem_write_frame(4, p, (uint8_t)sizeof(p));
+}
+
+// Binary S5: detailed safety state/config snapshot
+// Payload layout (11 bytes):
+//   u8  lockout
+//   u16 cause_mask
+//   u16 override_mask
+//   i16 clearance_mm
+//   u8  soft_limits
+//   u8  collision
+//   i16 temp_C_threshold
+void telemetryBinS5()
+{
+  uint8_t p[11];
+  p[0] = g_lockout ? 1 : 0;
+  _telem_put_u16_le(&p[1], (uint16_t)g_lockout_causes);
+  _telem_put_u16_le(&p[3], (uint16_t)g_override_mask);
+  int16_t clr_mm = (int16_t)lroundf(g_safety_clearance_mm);
+  _telem_put_i16_le(&p[5], clr_mm);
+  p[7] = g_safety_soft_limits_enabled ? 1 : 0;
+  p[8] = g_safety_collision_enabled ? 1 : 0;
+  int16_t temp_C = (int16_t)(g_safety_temp_lockout_c10 / 10);
+  _telem_put_i16_le(&p[9], temp_C);
+  _telem_write_frame(5, p, (uint8_t)sizeof(p));
+}
+
 
 static inline char* ltrim(char* s)
 {
@@ -440,6 +628,7 @@ extern void processCmdMODE(const char* line, int s, int len);
 extern void processCmdI(const char* line, int s, int len);
 extern void processCmdT(const char* line, int s, int len);
 extern void processCmdY(const char* line, int s, int len);
+extern void processCmdTELEM(const char* line, int s, int len);
 extern void processCmdTEST(const char* line, int s, int len);
 extern void processCmdSTAND(const char* line, int s, int len);
 extern void processCmdTUCK(const char* line, int s, int len);
@@ -508,6 +697,7 @@ void handleLine(const char* line) {
     case CMD_I:         processCmdI(line, s, len); break;
     case CMD_T:         processCmdT(line, s, len); break;
     case CMD_Y:         processCmdY(line, s, len); break;
+    case CMD_TELEM:     processCmdTELEM(line, s, len); break;
     case CMD_TEST:      processCmdTEST(line, s, len); break;
     case CMD_STAND:     processCmdSTAND(line, s, len); break;
     case CMD_TUCK:      processCmdTUCK(line, s, len); break;
@@ -2245,6 +2435,8 @@ void printHELP() {
   Serial.print(F("  CONFIG                    Dump /config.txt contents (when SD present)\r\n"));
   Serial.print(F("  LOOP <hz>                 Set control loop frequency (50..500 Hz, persists loop_hz when SD enabled)\r\n"));
   Serial.print(F("  Y <1|0>                   Master toggle for compact telemetry streams (S1/S2/S3)\r\n"));
+  Serial.print(F("  TELEM ASCII               Force ASCII telemetry format (S1/S2/S3/S5)\r\n"));
+  Serial.print(F("  TELEM BIN <1|0>           Enable/disable binary framed telemetry (more efficient)\r\n"));
 
   // Enable / disable
   Serial.print(F("[ENABLE]\r\n"));

@@ -4,6 +4,16 @@
 # CHANGE LOG (Python Controller)
 # Format: YYYY-MM-DD  Summary
 # REMINDER: Update CONTROLLER_VERSION below with every behavioral change, feature addition, or bug fix!
+# 2025-12-18  v0.5.40 b152: UX: Use real Mars photo (ESA/Rosetta, CC BY-SA 3.0 IGO) for startup splash instead of a procedural drawing.
+# 2025-12-17  v0.5.39 b151: UX: Replace LCD startup banner with a Mars splash image (black background) and overlay firmware/controller versions.
+# 2025-12-17  v0.5.38 b150: Version/docs: Update startup banner firmware version string to match current firmware (0.2.41/b157).
+# 2025-12-17  v0.5.37 b149: Telemetry: Added binary S4 parsing (type=4, 6 leg contact flags) to match new firmware S4 frames.
+# 2025-12-16  v0.5.36 b148: Telemetry: Extended binary S1 parsing to include battery/current/IMU fields (when present) so INFO matches ASCII mode.
+# 2025-12-16  v0.5.35 b147: Telemetry: Added binary framed telemetry support (TELEM BIN 1) while keeping Y 1/Y 0 as master enable.
+# 2025-12-16  v0.5.34 b146: Telemetry perf: reduced parse-path allocations and gated debug I/O/copies.
+# 2025-12-16  v0.5.33 b145: Motion/UI: Added Posture menu tuning params for Pounce, persisted to controller.ini; added launch shortcuts.
+# 2025-12-16  v0.5.32 b143: Motion: Added a kinematic "Pounce" move (spider-like jump attack) runnable from Posture menu.
+# 2025-12-16  v0.5.31 b142: Menu: Reordered tab stack (INFO/SYS first); show servo voltage/temp only on INFO.
 # 2025-11-22  Added structured in-file change log block.
 # 2025-11-22  Normalized Teensy command protocol: LF only, removed semicolons.
 # 2025-11-22  A button toggles enable/disable (LEG ALL ENABLE + ENABLE / DISABLE).
@@ -156,25 +166,28 @@
 # 2025-12-15  v0.5.26 b136: PID/IMP/EST menu: Persist edits to controller.ini ([pid]/[imp]/[est]) so values restore on restart.
 # 2025-12-15  v0.5.26 b137: Docs/cleanup: Updated USER_MANUAL revision/tabs; removed accidental controller-arachnotron file.
 # 2025-12-15  v0.5.27 b138: Version/docs: Startup banner firmware version string updated to match current firmware (0.2.36/b152).
+# 2025-12-16  v0.5.28 b139: Telemetry: Added lightweight structured telemetry containers (S1-S5) for clarity; parsers now populate both legacy lists and typed objects.
+# 2025-12-16  v0.5.29 b140: Telemetry: Finished wiring structured telemetry into menu updates, enable gating, and display-thread robot_enabled checks.
+# 2025-12-16  v0.5.30 b141: Telemetry: Display path now prefers structured telemetry for gait/disabled/contact; safety overlay helper prefers structured safety state.
+# 2025-12-18  v0.5.41 b153: Modularization Phase 1: Extracted telemetry.py with dataclasses, IDX_* constants, processTelemS1-S5, and helpers.
+# 2025-12-18  v0.5.42 b154: Modularization Phase 2: Extracted config_manager.py with save functions and config dataclasses; shared config state via set_config_state().
+# 2025-06-18  v0.5.43 b155: Modularization Phase 3: Extracted posture.py with ensure_enabled, apply_posture, start_pounce_move (281 lines); wrapper pattern retains original API.
+# 2025-06-18  v0.5.44 b156: Modularization Phase 4: Created mars_state.py with state container dataclasses (366 lines); foundation for global state consolidation.
+# 2025-06-18  v0.5.45 b157: Modularization Phase 5: Extracted display_thread.py (520 lines) with DisplayThread, UpdateDisplay, getColor, drawLogo, drawMarsSplash. controller.py: 4422→3946 (-476 lines).
+# 2025-12-18  v0.5.46 b158: Modularization Phase 6: Extracted input_handler.py (407 lines) with keyboard, gamepad, Teensy I/O, XboxButton/XboxAxis constants. controller.py: 3946→3838 (-108 lines).
+# 2025-12-18  v0.5.47 b159: Modularization Phase 7: Final cleanup — removed duplicate get_font, consolidated imports. controller.py: 3838→3825 lines. Total reduction: 4844→3825 (~21%).
+# 2025-12-18  v0.5.48 b160: Modularization complete — added __all__ exports to all modules, updated MODULARIZATION_PLAN.md.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.5.27"
+CONTROLLER_VERSION = "0.5.48"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 138
+CONTROLLER_BUILD = 160
 #----------------------------------------------------------------------------------------------------------------------
-# Telemetry index constants (S1 schema)
-# These named constants prevent magic numbers and make schema changes explicit.
-#----------------------------------------------------------------------------------------------------------------------
-IDX_LOOP_US = 0          # S1[0]: Teensy loop period in microseconds
-IDX_BATTERY_V = 1        # S1[1]: Battery voltage
-IDX_CURRENT_A = 2        # S1[2]: Current draw (amps)
-IDX_PITCH_DEG = 3        # S1[3]: IMU pitch angle
-IDX_ROLL_DEG = 4         # S1[4]: IMU roll angle
-IDX_YAW_DEG = 5          # S1[5]: IMU yaw angle
-IDX_GAIT = 6             # S1[6]: Current gait mode (0-9)
-IDX_MODE = 7             # S1[7]: Operational mode
-IDX_SAFETY = 8           # S1[8]: Safety status flags
-IDX_ROBOT_ENABLED = 9    # S1[9]: Robot enable flag (1.0 = enabled, 0.0 = disabled)
+
+# Firmware version string for UI/banner display.
+# Keep this in sync with the Teensy firmware you have flashed.
+FW_VERSION_BANNER = "0.2.42/b158"
+# Telemetry index constants moved to telemetry.py module
 #----------------------------------------------------------------------------------------------------------------------
 #    Import all required libraries
 #----------------------------------------------------------------------------------------------------------------------
@@ -182,9 +195,11 @@ import sys
 import os
 import configparser
 import time
+import struct
 import curses
 import numpy as np
 import threading
+from dataclasses import dataclass
 from queue import Queue, Empty
 #import os
 #import math
@@ -214,6 +229,59 @@ from SteeringMode import SteeringMode
 from gait_engine import (GaitEngine, TripodGait, WaveGait, RippleGait, 
                          StationaryPattern, GaitParams, GaitTransition)
 
+# import telemetry module (Phase 1 modularization)
+from telemetry import (
+    IDX_LOOP_US, IDX_BATTERY_V, IDX_CURRENT_A, IDX_PITCH_DEG,
+    IDX_ROLL_DEG, IDX_YAW_DEG, IDX_GAIT, IDX_MODE, IDX_SAFETY, IDX_ROBOT_ENABLED,
+    TELEM_SYNC,
+    SystemTelemetry, ServoTelemetry, LegTelemetry, SafetyTelemetry,
+    create_servo_telemetry_array, create_leg_telemetry_array,
+    processTelemS1, processTelemS2, processTelemS3, processTelemS4, processTelemS5,
+    get_safety_overlay_text, getGait, GAIT_NAMES as GAIT_NUM_NAMES,
+)
+
+# import config_manager module (Phase 2 modularization)
+from config_manager import (
+    set_config_state,
+    save_gait_settings, save_pounce_settings, save_eye_shape,
+    save_human_eye_settings, save_eye_center_offset, save_eye_vertical_offset,
+    save_menu_settings, save_pid_settings, save_imp_settings, save_est_settings,
+)
+
+# import posture module (Phase 3 modularization)
+import posture as posture_module
+
+# import mars_state module (Phase 4 modularization)
+# State container dataclasses for future global state consolidation
+from mars_state import (
+    MarsControllerState, LoopTimingState, TeensyState, GaitState, MoveState,
+    DisplayState, EyeSettings, PounceSettings, MenuSettings, SafetyState,
+    AutoDisableState, DebugState, TelemetryArrays,
+    create_default_state, create_gait_state_from_config,
+    create_eye_settings_from_config, create_pounce_settings_from_config,
+)
+
+# import display_thread module (Phase 5 modularization)
+from display_thread import (
+    DisplayThread, UpdateDisplay as UpdateDisplayModule,
+    getColor, drawLogo, drawMarsSplash,
+    get_font, reset_frame_hash,
+    POWER_COLOR_PALETTE, TEMPERATURE_COLOR_PALETTE,
+)
+
+# import input_handler module (Phase 6 modularization)
+from input_handler import (
+    init_keyboard, cleanup_keyboard, poll_keyboard, getkey,
+    find_gamepad, testForGamePad,
+    find_teensy as find_teensy_module,
+    read_teensy as read_teensy_module,
+    read_teensy_bytes as read_teensy_bytes_module,
+    reset_teensy_buffer,
+    XboxButton, XboxAxis,
+    normalize_joystick, normalize_trigger,
+    JOYSTICK_CENTER, JOYSTICK_RANGE, TRIGGER_MAX, JOYSTICK_MIN_FOR_STICK,
+)
+
 # Gait type cycling order (RB button)
 GAIT_TYPES = [TripodGait, WaveGait, RippleGait, StationaryPattern]
 GAIT_NAMES = ["Tripod", "Wave", "Ripple", "Stationary"]
@@ -227,26 +295,15 @@ import cst816d
 from PIL import Image, ImageDraw, ImageFont
 import spidev as SPI
 
+# Telemetry dataclasses (SystemTelemetry, ServoTelemetry, LegTelemetry, SafetyTelemetry)
+# are now imported from telemetry.py module
+
 #----------------------------------------------------------------------------------------------------------------------
 #
 #    Define all helper functions here
 #
 #----------------------------------------------------------------------------------------------------------------------
-# Font cache to avoid reloading TTF every frame
-FONT_PATH = "/usr/share/fonts/truetype/freefont/FreeMonoBold.ttf"
-_font_cache = {}
-
-def get_font(size: int):
-    try:
-        key = int(size)
-        f = _font_cache.get(key)
-        if f is None:
-            f = ImageFont.truetype(FONT_PATH, key)
-            _font_cache[key] = f
-        return f
-    except (OSError, IOError):
-        # Font file missing or unreadable - use default
-        return ImageFont.load_default()
+# Note: get_font is now imported from display_thread.py (Phase 5 modularization)
 
 
 class Controller:
@@ -310,6 +367,12 @@ class Controller:
         self.teensyLoopUs = 6024  # Teensy loop period in microseconds (default 166Hz)
         self.lastS1MonoTime = None  # monotonic timestamp of last S1 receipt
         self.telemSyncActive = False  # True when actively syncing to Teensy telemetry
+
+        # Binary telemetry (optional): firmware frames start with 0xA5 0x5A
+        self.telemBinDesired = _preferBinaryTelemetry
+        self.telemBinActive = False
+        self._telem_rx_buf = b""
+        self._telem_ascii_buf = ""
         # Gait control inputs (analog sticks)
         self._gaitStrafeInput = 0.0  # Left stick X: -1 (left) to +1 (right)
         self._gaitSpeedInput = 0.0   # Left stick Y: -1 (back) to +1 (forward)
@@ -317,6 +380,12 @@ class Controller:
         self._leftStickHeld = False  # True when left stick button is held
         self._gaitWidthMm = _savedGaitWidthMm   # Current gait width (lateral offset from body center)
         self._gaitLiftMm = _savedGaitLiftMm     # Current lift height during swing phase
+
+        # Structured telemetry mirrors (in addition to legacy list-of-lists state)
+        self.system_telem = SystemTelemetry()
+        self.servo_telem = [ServoTelemetry() for _ in range(18)]
+        self.leg_telem = [LegTelemetry() for _ in range(6)]
+        self.safety_telem = SafetyTelemetry()
 
     @classmethod
     def from_current_globals(cls):
@@ -420,7 +489,10 @@ class Controller:
         try:
             if self.eyes.update() or self.forceDisplayUpdate:
                 telemetry_stale = (self.teensy is not None and self.lastTelemetryTime is None)
-                robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if len(self.state) > IDX_ROBOT_ENABLED else True
+                if self.system_telem.valid:
+                    robot_enabled = self.system_telem.robot_enabled
+                else:
+                    robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if (self.state and len(self.state) > IDX_ROBOT_ENABLED) else True
                 safety_active, safety_text = get_safety_overlay_state()
                 UpdateDisplay(self.disp, self.eyes.display_image, self.menu._image, 
                               self.servo, self.legs, self.state, self.mirror, self.menuState,
@@ -441,12 +513,16 @@ class Controller:
     def poll_teensy(self):
         """Read and parse telemetry from Teensy, updating instance state.
         Returns raw data string (may contain multiple lines) or None."""
+        global _safety_state, _last_safety_lockout, _gaitActive, _gaitEngine
         if self.teensy is None:
             return None
         teensyData = None
         hadError = False
         try:
-            teensyData = readTeensy(self.teensy, self.verbose)
+            if self.telemBinDesired or self.telemBinActive:
+                teensyData = readTeensyBytes(self.teensy, self.verbose)
+            else:
+                teensyData = readTeensy(self.teensy, self.verbose)
         except Exception as e:
             if self.verbose:
                 print(f"Read exception: {e}", end="\r\n")
@@ -465,6 +541,283 @@ class Controller:
         # Skip parsing if no data available (normal case, not an error)
         if teensyData is None:
             return None
+
+        # Binary framed telemetry path
+        if isinstance(teensyData, (bytes, bytearray)):
+            try:
+                now = time.time()
+                self._telem_rx_buf += bytes(teensyData)
+                ascii_out = bytearray()
+
+                # Demux: remove valid binary frames; everything else is treated as ASCII (command replies / LIST lines)
+                while True:
+                    buf = self._telem_rx_buf
+                    if not buf:
+                        break
+                    i = buf.find(_TELEM_SYNC)
+                    if i == -1:
+                        # Keep last byte if it could be the start of a split sync sequence
+                        if buf.endswith(_TELEM_SYNC[:1]):
+                            ascii_out += buf[:-1]
+                            self._telem_rx_buf = buf[-1:]
+                        else:
+                            ascii_out += buf
+                            self._telem_rx_buf = b""
+                        break
+                    if i > 0:
+                        ascii_out += buf[:i]
+                        self._telem_rx_buf = buf[i:]
+                        continue
+
+                    # i == 0: attempt to parse a frame
+                    if len(buf) < 7:
+                        break
+                    ver = buf[2]
+                    telem_type = buf[3]
+                    seq = buf[4]
+                    ln = buf[5]
+                    total = 6 + ln + 1
+                    if len(buf) < total:
+                        break
+                    payload = buf[6:6 + ln]
+                    cksum = buf[6 + ln]
+                    calc = (ver ^ telem_type ^ seq ^ ln) & 0xFF
+                    for b in payload:
+                        calc ^= b
+                    if calc != cksum:
+                        # Bad checksum: drop one byte to resync
+                        ascii_out += buf[:1]
+                        self._telem_rx_buf = buf[1:]
+                        continue
+
+                    # Valid frame
+                    if ver == 1:
+                        if telem_type == 1 and ln in (7, 17):
+                            if ln == 7:
+                                # Legacy binary S1 payload (FW <= 0.2.37)
+                                loop_us, = struct.unpack_from('<H', payload, 0)
+                                battery_v = 0.0
+                                current_a = 0.0
+                                pitch_deg = 0.0
+                                roll_deg = 0.0
+                                yaw_deg = 0.0
+                                mode_is_test = int(payload[2])
+                                test_phase = int(payload[3])
+                                rr_index = int(payload[4])
+                                lockout = int(payload[5])
+                                enabled = int(payload[6])
+                            else:
+                                # Extended binary S1 payload (FW >= 0.2.38)
+                                loop_us, batt_mV, current_mA, pitch_cdeg, roll_cdeg, yaw_cdeg = struct.unpack_from('<HHhhhh', payload, 0)
+                                battery_v = float(batt_mV) / 1000.0
+                                current_a = float(current_mA) / 1000.0
+                                pitch_deg = float(pitch_cdeg) / 100.0
+                                roll_deg = float(roll_cdeg) / 100.0
+                                yaw_deg = float(yaw_cdeg) / 100.0
+                                mode_is_test = int(payload[12])
+                                test_phase = int(payload[13])
+                                rr_index = int(payload[14])
+                                lockout = int(payload[15])
+                                enabled = int(payload[16])
+
+                            # Controller-visible mapping matches ASCII S1 meaning.
+                            self.state[IDX_LOOP_US] = float(loop_us)
+                            self.state[IDX_BATTERY_V] = float(battery_v)
+                            self.state[IDX_CURRENT_A] = float(current_a)
+                            self.state[IDX_PITCH_DEG] = float(pitch_deg)
+                            self.state[IDX_ROLL_DEG] = float(roll_deg)
+                            self.state[IDX_YAW_DEG] = float(yaw_deg)
+                            self.state[IDX_GAIT] = float(0 if mode_is_test else 7)
+                            self.state[IDX_MODE] = float(test_phase if mode_is_test else 0)
+                            self.state[IDX_SAFETY] = float(rr_index)
+                            self.state[IDX_ROBOT_ENABLED] = float(1 if enabled else 0)
+
+                            self.system_telem.loop_us = int(loop_us)
+                            self.system_telem.battery_v = float(battery_v)
+                            self.system_telem.current_a = float(current_a)
+                            self.system_telem.pitch_deg = float(pitch_deg)
+                            self.system_telem.roll_deg = float(roll_deg)
+                            self.system_telem.yaw_deg = float(yaw_deg)
+                            self.system_telem.gait = int(self.state[IDX_GAIT])
+                            self.system_telem.mode = int(self.state[IDX_MODE])
+                            self.system_telem.safety = int(self.state[IDX_SAFETY])
+                            self.system_telem.robot_enabled = (enabled == 1)
+                            self.system_telem.valid = True
+
+                            self.lastTelemetryTime = now
+                            self.telemetryRetryDeadline = None
+                            self.lastS1MonoTime = time.monotonic()
+                            if 1000 <= loop_us <= 50000:
+                                self.teensyLoopUs = int(loop_us)
+                                self.telemSyncActive = True
+                            self.telemBinActive = True
+
+                        elif telem_type == 2 and ln == 18:
+                            for idx in range(18):
+                                en = int(payload[idx])
+                                self.servo[idx][2] = en
+                                self.servo_telem[idx].enabled = bool(en)
+                                self.servo_telem[idx].valid_s2 = True
+                            self.lastTelemetryTime = now
+                            self.telemetryRetryDeadline = None
+                            self.telemBinActive = True
+
+                        elif telem_type == 3 and ln == 54:
+                            # 18*u16 mV then 18*u8 temp_C
+                            for idx in range(18):
+                                mv, = struct.unpack_from('<H', payload, idx * 2)
+                                self.servo[idx][0] = float(mv) / 1000.0
+                            base = 18 * 2
+                            for idx in range(18):
+                                temp_c = int(payload[base + idx])
+                                self.servo[idx][1] = temp_c
+                                self.servo_telem[idx].voltage_v = float(self.servo[idx][0])
+                                self.servo_telem[idx].temp_c = temp_c
+                                self.servo_telem[idx].valid_s3 = True
+                            self.lastTelemetryTime = now
+                            self.telemetryRetryDeadline = None
+                            self.telemBinActive = True
+
+                        elif telem_type == 4 and ln == 6:
+                            # 6*u8 contact flags (0/1), canonical leg order: LF,LM,LR,RF,RM,RR
+                            for idx in range(6):
+                                contact = 1 if int(payload[idx]) != 0 else 0
+                                try:
+                                    self.legs[idx][0] = contact
+                                except Exception:
+                                    # Legs list may not be initialized early in startup; ignore.
+                                    pass
+                                if idx < len(self.leg_telem):
+                                    self.leg_telem[idx].contact = bool(contact)
+                                    self.leg_telem[idx].valid = True
+                            self.lastTelemetryTime = now
+                            self.telemetryRetryDeadline = None
+                            self.telemBinActive = True
+
+                        elif telem_type == 5 and ln == 11:
+                            lockout = bool(payload[0])
+                            cause_mask, = struct.unpack_from('<H', payload, 1)
+                            override_mask, = struct.unpack_from('<H', payload, 3)
+                            clearance_mm, = struct.unpack_from('<h', payload, 5)
+                            soft_limits = bool(payload[7])
+                            collision = bool(payload[8])
+                            temp_c, = struct.unpack_from('<h', payload, 9)
+
+                            prev_lockout = _safety_state.get("lockout", False)
+                            _safety_state["lockout"] = lockout
+                            _safety_state["cause_mask"] = int(cause_mask)
+                            _safety_state["override_mask"] = int(override_mask)
+                            _safety_state["clearance_mm"] = int(clearance_mm)
+                            _safety_state["soft_limits"] = bool(soft_limits)
+                            _safety_state["collision"] = bool(collision)
+                            _safety_state["temp_c"] = int(temp_c)
+
+                            self.safety_telem.lockout = lockout
+                            self.safety_telem.cause_mask = int(cause_mask)
+                            self.safety_telem.override_mask = int(override_mask)
+                            self.safety_telem.clearance_mm = int(clearance_mm)
+                            self.safety_telem.soft_limits = bool(soft_limits)
+                            self.safety_telem.collision = bool(collision)
+                            self.safety_telem.temp_c = int(temp_c)
+                            self.safety_telem.valid = True
+
+                            self.lastTelemetryTime = now
+                            self.telemetryRetryDeadline = None
+                            self.telemBinActive = True
+
+                            if lockout and not prev_lockout:
+                                if _gaitActive and _gaitEngine is not None:
+                                    _gaitEngine.stop()
+                                _gaitActive = False
+                                try:
+                                    send_cmd(b'LEG ALL DISABLE', force=True)
+                                    send_cmd(b'DISABLE', force=True)
+                                except Exception:
+                                    pass
+                                if self.verbose:
+                                    print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
+                            _last_safety_lockout = lockout
+
+                    # Consume frame
+                    self._telem_rx_buf = buf[total:]
+
+                # Process any ASCII recovered from between frames (command replies / LIST lines)
+                if ascii_out:
+                    try:
+                        chunk = ascii_out.decode('utf-8', errors='ignore')
+                    except Exception:
+                        chunk = ""
+                    if chunk:
+                        chunk = chunk.replace('\r\n', '\n').replace('\r', '\n')
+                        self._telem_ascii_buf += chunk
+                        lines = self._telem_ascii_buf.split('\n')
+                        if not self._telem_ascii_buf.endswith('\n'):
+                            self._telem_ascii_buf = lines[-1]
+                            lines = lines[:-1]
+                        else:
+                            self._telem_ascii_buf = ""
+
+                        for line in lines:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if line.startswith('PID '):
+                                _parse_pid_list_line(line)
+                                continue
+                            if line.startswith('IMP '):
+                                _parse_imp_list_line(line)
+                                continue
+                            if line.startswith('EST '):
+                                _parse_est_list_line(line)
+                                continue
+                            # Fallback: accept ASCII telemetry even while in binary mode
+                            segments = line.split('|')
+                            for segment in segments:
+                                if not segment:
+                                    continue
+                                header = segment[:3]
+                                payload = segment[3:]
+                                elements = payload.split(',') if payload else []
+                                if header == 'S1:':
+                                    processTelemS1(elements, self.state, self.system_telem)
+                                    self.lastTelemetryTime = now
+                                    self.telemetryRetryDeadline = None
+                                elif header == 'S2:':
+                                    processTelemS2(elements, self.servo, self.servo_telem)
+                                    self.lastTelemetryTime = now
+                                    self.telemetryRetryDeadline = None
+                                elif header == 'S3:':
+                                    processTelemS3(elements, self.servo, self.servo_telem)
+                                    self.lastTelemetryTime = now
+                                    self.telemetryRetryDeadline = None
+                                elif header == 'S4:':
+                                    processTelemS4(elements, self.legs, self.leg_telem)
+                                    self.lastTelemetryTime = now
+                                    self.telemetryRetryDeadline = None
+                                elif header == 'S5:':
+                                    prev_lockout = _safety_state.get("lockout", False)
+                                    processTelemS5(elements, _safety_state, self.safety_telem)
+                                    self.lastTelemetryTime = now
+                                    self.telemetryRetryDeadline = None
+                                    lockout = _safety_state.get("lockout", False)
+                                    if lockout and not prev_lockout:
+                                        if _gaitActive and _gaitEngine is not None:
+                                            _gaitEngine.stop()
+                                        _gaitActive = False
+                                        try:
+                                            send_cmd(b'LEG ALL DISABLE', force=True)
+                                            send_cmd(b'DISABLE', force=True)
+                                        except Exception:
+                                            pass
+                                        if self.verbose:
+                                            print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
+                                    _last_safety_lockout = lockout
+
+                return teensyData
+            except Exception as e:
+                if self.verbose:
+                    print(f"Binary telemetry parse error: {e}", end="\r\n")
+                return teensyData
         
         try:
             dataLines = teensyData.splitlines()
@@ -482,46 +835,49 @@ class Controller:
                 if line.startswith('EST '):
                     _parse_est_list_line(line)
                     continue
+                now = time.time()
                 segments = line.split('|')
                 for segment in segments:
-                    elements = segment.split(',')
-                    header = elements[0][0:3]
-                    elements[0] = elements[0][3:]
+                    if not segment:
+                        continue
+                    header = segment[:3]
+                    payload = segment[3:]
+                    elements = payload.split(',') if payload else []
                     if header == 'S1:':
-                        self.lastRawS1 = segment
-                        processTelemS1(elements, self.state)
-                        self.lastParsedS1 = list(self.state)
-                        self.lastTelemetryTime = time.time()
+                        if _debugTelemetry:
+                            self.lastRawS1 = segment
+                        processTelemS1(elements, self.state, self.system_telem)
+                        if _debugTelemetry:
+                            self.lastParsedS1 = list(self.state)
+                        self.lastTelemetryTime = now
                         self.telemetryRetryDeadline = None
                         # Update telemetry-sync timing from S1 loop_us (index 0)
                         self.lastS1MonoTime = time.monotonic()
-                        if len(elements) > 0:
-                            try:
-                                loop_us = int(float(elements[0]))
-                                if 1000 <= loop_us <= 50000:  # sanity: 20Hz..1000Hz
-                                    self.teensyLoopUs = loop_us
-                                    self.telemSyncActive = True
-                            except ValueError:
-                                pass
+                        loop_us = self.system_telem.loop_us if self.system_telem.valid else 0
+                        if loop_us:
+                            if 1000 <= loop_us <= 50000:  # sanity: 20Hz..1000Hz
+                                self.teensyLoopUs = loop_us
+                                self.telemSyncActive = True
                     elif header == 'S2:':
-                        self.lastRawS2 = segment
-                        processTelemS2(elements, self.servo)
-                        self.lastParsedS2 = [int(self.servo[i][2]) for i in range(18)]
-                        self.lastTelemetryTime = time.time()
+                        if _debugTelemetry:
+                            self.lastRawS2 = segment
+                        processTelemS2(elements, self.servo, self.servo_telem)
+                        if _debugTelemetry:
+                            self.lastParsedS2 = [int(self.servo[i][2]) for i in range(18)]
+                        self.lastTelemetryTime = now
                         self.telemetryRetryDeadline = None
                     elif header == 'S3:':
-                        processTelemS3(elements, self.servo)
-                        self.lastTelemetryTime = time.time()
+                        processTelemS3(elements, self.servo, self.servo_telem)
+                        self.lastTelemetryTime = now
                         self.telemetryRetryDeadline = None
                     elif header == 'S4:':
-                        processTelemS4(elements, self.legs)
-                        self.lastTelemetryTime = time.time()
+                        processTelemS4(elements, self.legs, self.leg_telem)
+                        self.lastTelemetryTime = now
                         self.telemetryRetryDeadline = None
                     elif header == 'S5:':
-                        global _safety_state, _last_safety_lockout, _gaitActive, _gaitEngine
                         prev_lockout = _safety_state.get("lockout", False)
-                        processTelemS5(elements, _safety_state)
-                        self.lastTelemetryTime = time.time()
+                        processTelemS5(elements, _safety_state, self.safety_telem)
+                        self.lastTelemetryTime = now
                         self.telemetryRetryDeadline = None
                         lockout = _safety_state.get("lockout", False)
                         if lockout and not prev_lockout:
@@ -577,7 +933,8 @@ class Controller:
         try:
             events = self.controller.read()
             for event in events:
-                print(event, end="\r\n")  # Debug print of raw event
+                if self.verbose and _debugTelemetry:
+                    print(event, end="\r\n")  # Debug print of raw event
                 if event.type == 1:  # button
                     if event.code == 158 and event.value == 1:  # mirror toggle
                         if self.verbose:
@@ -588,7 +945,10 @@ class Controller:
                         if self.verbose:
                             print("\nStart button pressed (menu)", end="\r\n")
                         # Only allow menu when robot is disabled and not in motion
-                        robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if len(self.state) > IDX_ROBOT_ENABLED else False
+                        if self.system_telem.valid:
+                            robot_enabled = self.system_telem.robot_enabled
+                        else:
+                            robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if (self.state and len(self.state) > IDX_ROBOT_ENABLED) else False
                         if _marsMenu.visible:
                             # Always allow closing menu
                             _marsMenu.hide()
@@ -600,6 +960,10 @@ class Controller:
                         else:
                             if self.verbose:
                                 print("  Menu blocked: disable robot first", end="\r\n")
+                    elif event.code == 314:  # Back/Select button (used as a modifier)
+                        self._backHeld = (event.value == 1)
+                        if self.verbose and event.value == 1:
+                            print("\nBack/Select pressed", end="\r\n")
                     elif event.code == 172 and event.value == 1:  # power
                         if self.verbose:
                             print("\npower button pressed", end="\r\n")
@@ -649,7 +1013,10 @@ class Controller:
                     elif event.code == 307 and event.value == 1:  # Y tuck (BTN_NORTH)
                         if self.verbose:
                             print("\nY button pressed (Tuck)", end="\r\n")
-                        if self.teensy is not None and not _safety_state.get("lockout", False):
+                        if not _marsMenu.visible and getattr(self, '_backHeld', False):
+                            # Shortcut: Back + Y = Pounce
+                            start_pounce_move(source="pad")
+                        elif self.teensy is not None and not _safety_state.get("lockout", False):
                             apply_posture(b'TUCK', auto_disable_s=4.0)
                         elif self.teensy is not None and _safety_state.get("lockout", False) and self.verbose:
                             print("  Tuck blocked: firmware safety lockout is active.", end="\r\n")
@@ -691,7 +1058,8 @@ class Controller:
                             # Switch Teensy to IDLE mode (stop any built-in gait)
                             send_cmd(b'MODE IDLE', force=True)
                             # Enable robot if needed
-                            if self.state[IDX_ROBOT_ENABLED] != 1.0:
+                            enabled_now = self.system_telem.robot_enabled if self.system_telem.valid else (self.state[IDX_ROBOT_ENABLED] == 1.0 if (self.state and len(self.state) > IDX_ROBOT_ENABLED) else False)
+                            if not enabled_now:
                                 ensure_enabled()
                             # Create tripod gait with config params - speed starts at 0 (step in place)
                             params = GaitParams(
@@ -981,6 +1349,8 @@ class Controller:
                         print("No telemetry detected after grace; sending 'LEG ALL ENABLE' + 'Y 1'.", end="\r\n")
                     # Enable all legs so telemetry includes valid data from all servos
                     send_cmd(b'LEG ALL ENABLE', force=True)
+                    if self.telemBinDesired:
+                        send_cmd(b'TELEM BIN 1', force=True)
                     send_cmd(b'Y 1', force=True)
                     self.telemetryStartedByScript = True
                     self.telemetryRetryDeadline = now + self.telemetryRetrySeconds
@@ -993,6 +1363,8 @@ class Controller:
                 if self.verbose:
                     print("Telemetry still silent; retrying 'LEG ALL ENABLE' + 'Y 1' once.", end="\r\n")
                 send_cmd(b'LEG ALL ENABLE', force=True)
+                if self.telemBinDesired:
+                    send_cmd(b'TELEM BIN 1', force=True)
                 send_cmd(b'Y 1', force=True)
                 self.telemetryRetryCount = 1
                 self.telemetryRetryDeadline = None
@@ -1018,689 +1390,93 @@ class Controller:
             if self.verbose:
                 print(f"Housekeeping serial error: {e}", end="\r\n")
         return None
-# find_teensy scnas the available serial ports and looks for a Teensy device.
-# return: serial port device or none if not found
-def find_teensy(_verbose = False):
-    # List all available serial ports
-    returnPort = None
-    if _verbose:
-        print("Searching for Teensy...", end="\r\n")
-    ports = serial.tools.list_ports.comports()
-    for port in ports:
-        # Check if the device description matches a Teensy
-        if _verbose:
-            print( port.description, port.device, "-", port.manufacturer, "-", port.product, end="\r\n")
-        if "teensy" in port.manufacturer.lower() and "0" in port.device:
-            if _verbose:
-                print(f"Teensy found on port: {port.device}", end="\r\n")
-            return port
-    if _verbose:
-        print("No Teensy found.", end="\r\n")
-    return None
 
-# readTeensy reads the Teensy device and returns the data
-# Persistent buffer for incomplete lines across reads
-_teensy_read_buffer = ""
+#----------------------------------------------------------------------------------------------------------------------
+# Input I/O functions delegated to input_handler module (Phase 6 modularization)
+# find_teensy, readTeensy, readTeensyBytes, testForGamePad, keyboard functions
+# are now imported from input_handler.py. These wrappers maintain compatibility.
+#----------------------------------------------------------------------------------------------------------------------
+
+# Binary telemetry framing (firmware: TELEM BIN 1)
+# Use TELEM_SYNC imported from telemetry.py; alias for local compatibility
+_TELEM_SYNC = TELEM_SYNC
+_preferBinaryTelemetry = True
+
+
+def find_teensy(_verbose=False):
+    """Wrapper for input_handler.find_teensy()."""
+    return find_teensy_module(verbose=_verbose)
+
 
 def readTeensy(teensy, _verbose=False):
-    """Reads the Teensy device with batched I/O and incomplete line buffering.
-    Returns complete lines only; partial lines are buffered for next call."""
-    global _teensy_read_buffer
-    if teensy is None:
-        if _verbose:
-            print("No Teensy device found.", end="\r\n")
-        return None
-    try:
-        # Batch read all available bytes at once (much faster than byte-by-byte)
-        waiting = teensy.in_waiting
-        if waiting == 0:
-            return None
-        raw = teensy.read(waiting)
-        try:
-            chunk = raw.decode('utf-8', errors='ignore')
-        except Exception:
-            chunk = ""
-        
-        # Append to persistent buffer
-        _teensy_read_buffer += chunk
-        
-        # Normalize all newlines to \n
-        _teensy_read_buffer = _teensy_read_buffer.replace('\r\n', '\n').replace('\r', '\n')
-        
-        # Split into lines; last element may be incomplete
-        lines = _teensy_read_buffer.split('\n')
-        
-        # If buffer doesn't end with newline, last element is incomplete - keep it
-        if not _teensy_read_buffer.endswith('\n'):
-            _teensy_read_buffer = lines[-1]  # Save incomplete line for next read
-            lines = lines[:-1]               # Return only complete lines
-        else:
-            _teensy_read_buffer = ""         # All lines complete
-        
-        # Join complete lines and return
-        if lines:
-            return '\n'.join(lines)
-        return None
-    except serial.SerialException as e:
-        if _verbose:
-            print(f"Error reading from Teensy: {e}", end="\r\n")
-        return None
-    
-# Gait number to string mapping
-_GAIT_NAMES = {
-    0: "TRI",
-    1: "RIPPLE",
-    2: "WAV",
-    3: "QUAD",
-    4: "BI",
-    5: "HOP",
-    6: "TRANS",
-    7: "STILL",
-    8: "HOME",
-    9: "NONE",
-}
-
-def getGait(gait):
-    """Convert gait number to string representation."""
-    return _GAIT_NAMES.get(gait, "UNKNOWN")
-
-# testForGamePad checks for the presence of an Xbox controller and returns its path if found
-def testForGamePad(verbose=False):
-    controller = None
-    #if verbose:
-        #print('Connecting to xbox controller...', end="\r\n")
-    found = False
-    devices = [InputDevice(path) for path in list_devices()]
-    for device in devices:
-        #if verbose:
-        #    print(device.path, device.name, end="\r\n")
-
-        if str.lower(device.name) == 'xbox wireless controller':
-            if verbose:
-                print("Xbox controller found at:", device.path, end="\r\n")
-            controller = device
-            found = True
-            break
-    #if not found:
-       # if verbose:
-        #    print("No Xbox controller found.", end="\r\n")  
-    return controller
-
-# Persistent curses state for keyboard input (avoids per-loop wrapper overhead)
-_stdscr = None
-
-def init_keyboard():
-    """Initialize persistent curses for non-blocking keyboard input."""
-    global _stdscr
-    if _stdscr is None:
-        _stdscr = curses.initscr()
-        curses.noecho()
-        curses.cbreak()
-        _stdscr.nodelay(True)  # non-blocking
-        _stdscr.keypad(True)
-    return _stdscr
-
-def cleanup_keyboard():
-    """Restore terminal settings on exit."""
-    global _stdscr
-    if _stdscr is not None:
-        _stdscr.keypad(False)
-        curses.nocbreak()
-        curses.echo()
-        #curses.endwin()
-        _stdscr = None
-
-def poll_keyboard():
-    """Non-blocking keyboard poll using persistent stdscr."""
-    global _stdscr
-    if _stdscr is None:
-        init_keyboard()
-    try:
-        return _stdscr.getch()
-    except curses.error:
-        return -1
-
-# Legacy getkey function (deprecated - use poll_keyboard instead)
-def getkey(stdscr):
-    """checking for keypress"""
-    stdscr.nodelay(True)  # do not wait for input when calling getch
-    return stdscr.getch()
-
-def getColor(min_val, max_val, value, color_palette):
-    """Returns a color based on the value and the color palette"""
-    if value < min_val:
-        return color_palette[0]  # return the first color in the palette
-    elif value > max_val:
-        return color_palette[len(color_palette)-1]  # return the last color in the palette
-    else:
-        # calculate the index based on the value
-        # Calculate the position in the palette
-        scaled = (value - min_val) / (max_val - min_val) * (len(color_palette) - 1)
-        lower_idx = max(0,int(np.floor(scaled)))
-        upper_idx = min(len(color_palette) - 1, lower_idx + 1)  # ensure
-        if lower_idx == upper_idx:
-            return color_palette[lower_idx]
-        # Linear interpolation between the two colors
-        ratio = scaled - lower_idx
-        color1 = np.array(color_palette[lower_idx])
-        color2 = np.array(color_palette[upper_idx])
-        interp_color = (1 - ratio) * color1 + ratio * color2
-        #print(min_val, max_val, value, scaled, lower_idx, upper_idx, ratio, color1, color2, interp_color,tuple(interp_color.astype(int, end="\r\n")))
-        return tuple(interp_color.astype(int))
+    """Wrapper for input_handler.read_teensy()."""
+    return read_teensy_module(teensy, verbose=_verbose)
 
 
-def drawLogo(disp):
-    """Draws a logo on the display"""
-    # Create a new image with a white background
-    image = Image.new("RGB", (disp.height, disp.width), "BLACK")
-    draw = ImageDraw.Draw(image)
+def readTeensyBytes(teensy, _verbose=False):
+    """Wrapper for input_handler.read_teensy_bytes()."""
+    return read_teensy_bytes_module(teensy, verbose=_verbose)
 
-    # Draw a simple logo (a blue rectangle with text)
-    fontMICR = get_font(12)
-    Color = "WHITE"
-    Top = 10
-    lineHeight = 8
-    draw.text((20, Top), u"  __  __    _    ____   ____   ____  \n", fill = Color, font=fontMICR)
-    draw.text((20, Top + lineHeight), u" |  \\/  |  / \\  |  _ \\ / ___| / ___|\n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 2*lineHeight), u" | |\\/| | / _ \\ | |_) | |  _  \\___ \\ \n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 3*lineHeight), u" | |  | |/ ___ \\|  __/| |_| | ___) |\n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 4*lineHeight), u" |_|  |_/_/   \\_\\_|    \\____||____/ \n", fill = Color, font=fontMICR)
-    draw.text((20, Top + 5*lineHeight), u"   Modular Autonomous Robotic System\n", fill = Color, font=fontMICR)
-    #image=image.rotate(180, expand=True)  # rotate the image to fit the display
 
-    # Show the image on the display
-    UpdateDisplay(disp, image, None)
+# Gait number to string mapping moved to telemetry.py (GAIT_NAMES, getGait)
+# Use GAIT_NUM_NAMES (imported as GAIT_NAMES alias) or getGait() directly
+
+# testForGamePad, keyboard functions are now imported from input_handler.py
+# The imports provide: testForGamePad, init_keyboard, cleanup_keyboard, poll_keyboard, getkey
+
+#----------------------------------------------------------------------------------------------------------------------
+# Display functions delegated to display_thread module (Phase 5 modularization)
+# The getColor, drawLogo, drawMarsSplash, UpdateDisplay, and DisplayThread
+# are now imported from display_thread.py. These wrappers maintain compatibility.
+#----------------------------------------------------------------------------------------------------------------------
 
 # Frame change detection for display optimization
 _last_frame_hash = None
 
-def UpdateDisplay(disp, image, menu, servo=None, legs = None, state = None,
+
+def UpdateDisplay(disp, image, menu, servo=None, legs=None, state=None,
                   mirror=False, menuState=None,
                   teensy_connected=True, controller_connected=True,
                   telemetry_stale=False, robot_enabled=True,
                   safety_active=False, safety_text=""):
     """Updates the display with the given image.
-    
-    Optimizations applied:
-    - Frame change detection: skips SPI write if frame unchanged (via hash)
-    - Combined rotation + RGB565: single-pass show_image_rotated()
-    - Avoids unnecessary copy when no overlay drawing needed
-    
-    Args:
-        teensy_connected: If False, draws 'NO TEENSY' watermark overlay
-        controller_connected: If False, draws 'NO CONTROLLER' watermark overlay
-        telemetry_stale: If True, draws 'NO TELEMETRY' watermark overlay
-        robot_enabled: If False, draws 'DISABLED' watermark overlay
+    Wrapper around display_thread.UpdateDisplay for backward compatibility.
     """
+    global _forceDisplayUpdate
     
-    # Safety overlay: replace normal content with full-screen safety view
-    if safety_active:
-        imageCopy = Image.new("RGB", (disp.height, disp.width), (255, 230, 0))
-        draw = ImageDraw.Draw(imageCopy)
-        font = get_font(26)
-        text = safety_text if safety_text else "SAFETY LOCKOUT"
-        # Center text
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-        x = (disp.height - text_width) // 2
-        y = (disp.width - text_height) // 2
-        # Shadow + text
-        draw.text((x + 2, y + 2), text, fill="BLACK", font=font)
-        draw.text((x, y), text, fill="BLACK", font=font)
-    else:
-        # Only copy if we need to draw overlays
-        has_status_overlay = (not teensy_connected or not controller_connected or
-                              telemetry_stale or not robot_enabled)
-        needs_overlay = (servo is not None and (_menuState == "data" or _menuState == "settings")) or has_status_overlay
-        if needs_overlay:
-            imageCopy = image.copy()
-        else:
-            imageCopy = image  # Use original directly if no modifications needed
-        
-        # Draw connection/status overlays
-        overlay_texts = []  # List of (text, color) tuples
-        if not teensy_connected:
-            overlay_texts.append(("NO TEENSY", "RED"))
-        elif telemetry_stale:
-            # Only show stale if teensy connected but no data
-            overlay_texts.append(("NO TELEMETRY", "ORANGE"))
-        if not controller_connected:
-            overlay_texts.append(("NO CONTROLLER", "RED"))
-        
-        # DISABLED is shown separately at bottom
-        show_disabled = not robot_enabled and teensy_connected and not telemetry_stale
-
-        if overlay_texts:
-            draw = ImageDraw.Draw(imageCopy)
-            font = get_font(28)
-            # Calculate total height for vertical centering
-            line_height = 36  # font size + spacing
-            total_height = len(overlay_texts) * line_height
-            start_y = (disp.width - total_height) // 2
-            
-            for i, (text, color) in enumerate(overlay_texts):
-                # Get text bounding box for horizontal centering
-                bbox = draw.textbbox((0, 0), text, font=font)
-                text_width = bbox[2] - bbox[0]
-                x = (disp.height - text_width) // 2
-                y = start_y + i * line_height
-                # Draw shadow for visibility
-                draw.text((x + 2, y + 2), text, fill="BLACK", font=font)
-                # Draw text in color
-                draw.text((x, y), text, fill=color, font=font)
-        
-        # Draw DISABLED at bottom of screen
-        if show_disabled:
-            draw = ImageDraw.Draw(imageCopy)
-            font = get_font(28)
-            text = "DISABLED"
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_width = bbox[2] - bbox[0]
-            x = (disp.height - text_width) // 2
-            y = disp.width - 40  # Near bottom
-            draw.text((x + 2, y + 2), text, fill="BLACK", font=font)
-            draw.text((x, y), text, fill="YELLOW", font=font)
+    def _force_update_callback():
+        global _forceDisplayUpdate
+        _forceDisplayUpdate = True
     
-    # add in the leg/servo visualization (suppressed when in safety overlay)
-    if servo is not None and not safety_active:
-        # create a draw object to draw on the image
-        draw = ImageDraw.Draw(imageCopy)
-
-        if _menuState == "data":
-            # draw the gait text on the image
-            if state is not None:
-                gait = getGait(int(state[IDX_GAIT]))
-                # Check robot enable flag
-                if state[IDX_ROBOT_ENABLED] == 0:
-                    gait = "DISABLED"
-                font24 = get_font(24)
-                textSize = draw.textbbox(((disp.height / 2), disp.width - 24), gait, font=font24, anchor="mt")
-                center = disp.height / 2
-                blackoutSpace = 70
-                draw.rectangle((center - blackoutSpace, disp.width - 24, center + blackoutSpace, disp.width), fill="BLACK")
-                draw.text((textSize[0], textSize[1]), gait, fill="WHITE", font=font24)
-
-            for idx, (voltage, temperature, enable) in enumerate(servo):
-                #print(f"Servo {idx}: Voltage: {voltage}, Temperature: {temperature}", end="\r\n")
-                # draw the servo telemetry data on the image
-                vColor = "GRAY"
-                tColor = "GRAY"            
-                width = 10
-                height = 10
-                gap = 79.5
-                leg = int(idx / 3)
-                left = (idx - (leg*3)) * (width + 2)
-                top = gap * (2-leg)
-                dir = 1
-                borderColor = "WHITE"
-                if legs[leg][0] == 0:
-                    borderColor = "RED"
-                if enable == 1:
-                    vColor = getColor(10.5,12.5, voltage, _powercolorPalette)
-                    tColor = getColor(20, 75, temperature, _temperatureColorPalette)
-                    #print(idx, vColor, tColor, end="\r\n")
-                leg = int(idx / 3)
-                left = (idx - (leg*3)) * (width + 2)
-                top = int(gap * (2-leg))
-                dir = 1
-                if leg >= 3:
-                    leg -= 3
-                    dir = -1
-                    left = disp.height - left
-                    top = int(gap * leg)
-                draw.rectangle((left, top, left + dir*4, top + height), tColor)
-                draw.rectangle((left + dir*5, top, left + dir*9, top + height), vColor)
-                draw.rectangle((left,top, left + dir*width, top + height), outline=borderColor, width=1)
-        elif _menuState == "settings":
-            imageCopy = Image.blend(imageCopy, menu, 0.6)  # blend the menu image onto the display image
+    _ctrl = globals().get('ctrl', None)
     
-    # MARS menu overlay (takes priority over old menu system)
-    if _marsMenu is not None and _marsMenu.visible:
-        _marsMenu.render()
-        imageCopy = _marsMenu.image.copy()
-    if mirror:
-        image2 = np.array(imageCopy)                        
-        height, width = image2.shape[:2]
-        image2 = cv.resize(cv.cvtColor(image2, cv.COLOR_RGB2BGR), (width*2, height*2), interpolation=cv.INTER_LANCZOS4)
-        cv.imshow("M.A.R.S. — Modular Autonomous Robotic System", image2)
-        # When mirror window has focus, route keys to MarsMenu
-        key = cv.waitKey(1) & 0xFF
-        if key != 255 and _marsMenu is not None and _marsMenu.visible:
-            # Mirror MarsMenu keyboard semantics for the curses path:
-            # - Arrow keys / WASD: item navigation
-            # - Tab / Shift+Tab: tab navigation
-            # - Left/Right (or J/L): value decrement/increment
-            # - Enter/Space: select/activate
-            # - Esc/Q: close menu
-            if key in (ord('w'), ord('W'), 82):  # up or arrow up
-                _marsMenu.nav_up()
-            elif key in (ord('s'), ord('S'), 84):  # down or arrow down
-                _marsMenu.nav_down()
-            elif key in (ord('a'), ord('A'), 81):  # left or arrow left
-                _marsMenu.nav_left()
-            elif key in (ord('d'), ord('D'), 83):  # right or arrow right
-                _marsMenu.nav_right()
-            elif key in (9,):  # TAB cycles tabs forward
-                _marsMenu.handle_button('RB')
-            elif key in (353,):  # Shift+TAB cycles tabs backward (if available)
-                _marsMenu.handle_button('LB')
-            elif key in (ord('j'), ord('J')):
-                _marsMenu.decrement()
-            elif key in (ord('l'), ord('L')):
-                _marsMenu.increment()
-            elif key in (10, 13, ord(' ')):
-                _marsMenu.select()
-            elif key in (27, ord('q'), ord('Q')):  # ESC or Q closes menu
-                _marsMenu.hide()
-            # Force display refresh after any menu key
-            global _forceDisplayUpdate
-            _forceDisplayUpdate = True
-    else:
-        cv.destroyAllWindows()
-    
-    # Frame change detection: compute fast hash and skip SPI write if unchanged
-    # Uses tobytes() hash which is very fast for numpy arrays
-    global _last_frame_hash
-    img_array = np.asarray(imageCopy)
-    # Sample every 16th pixel for fast approximate hash (320*170/16 = ~3400 samples)
-    frame_hash = hash(img_array[::4, ::4, :].tobytes())
-    
-    if frame_hash != _last_frame_hash:
-        _last_frame_hash = frame_hash
-        # Use combined rotation + RGB565 conversion for optimal performance
-        # show_image_rotated does rot90 + RGB565 in one pass, avoiding intermediate PIL image
-        disp.show_image_rotated(imageCopy, rotation_k=3)
-
-#----------------------------------------------------------------------------------------------------------------------
-# DisplayThread: Background thread for eye animation and LCD updates
-#----------------------------------------------------------------------------------------------------------------------
-class DisplayThread(threading.Thread):
-    """Background thread for eye animation and LCD display updates.
-    
-    Runs at configurable Hz (default 15), independently of main loop timing.
-    Owns the SimpleEyes instance and performs SPI writes to the display.
-    Main thread communicates state changes via thread-safe shared state.
-    """
-    
-    def __init__(self, disp, eyes, menu, target_hz: float = 15.0,
-                 look_range_x: float = 20.0, look_range_y: float = 10.0,
-                 blink_frame_divisor: int = 2):
-        super().__init__(daemon=True, name="DisplayThread")
-        self.disp = disp
-        self.eyes = eyes
-        self.menu = menu
-        self.blink_frame_divisor = max(1, blink_frame_divisor)  # At least 1 (no skip)
-        self.target_hz = target_hz
-        self.period_s = 1.0 / target_hz
-        
-        # Thread control
-        self._stop_event = threading.Event()
-        self._lock = threading.Lock()
-        
-        # Shared state (protected by lock)
-        self._servo = [[0, 0, 0]] * 18  # Servo telemetry: (voltage, temp, enable)
-        self._legs = [[0, 0, 0]] * 6    # Leg status
-        self._state = [0.0] * 10        # S1 telemetry state
-        self._mirror = False
-        self._menu_state = None
-        self._force_update = False
-        self._verbose = False
-        # Eye look direction: -1.0 to +1.0 (left/right, up/down)
-        self._look_x = 0.0
-        self._look_y = 0.0
-        # Connection/status for overlays
-        self._teensy_connected = True
-        self._controller_connected = True
-        self._telemetry_stale = False
-        self._robot_enabled = True
-        self._safety_active = False
-        self._safety_text = ""
-        # Configurable look range (pixels of eye offset at max input)
-        self.look_range_x = look_range_x
-        self.look_range_y = look_range_y
-        # Base eye offsets (from config)
-        self._base_center_offset = self.eyes.eye_center_offset
-        self._base_vertical_offset = self.eyes.eye_vertical_offset
-
-    def set_base_vertical_offset(self, offset: float):
-        """Update the baseline vertical eye offset used for joystick look."""
-        with self._lock:
-            self._base_vertical_offset = offset
-        
-    def update_state(self, servo=None, legs=None, state=None, mirror=None, 
-                     menu_state=None, force_update=False, verbose=None,
-                     look_x=None, look_y=None, teensy_connected=None,
-                     controller_connected=None, telemetry_stale=None,
-                     robot_enabled=None, safety_active=None,
-                     safety_text=None):
-        """Thread-safe update of display state from main thread."""
-        with self._lock:
-            if servo is not None:
-                self._servo = servo
-            if legs is not None:
-                self._legs = legs
-            if state is not None:
-                self._state = state
-            if mirror is not None:
-                self._mirror = mirror
-            if menu_state is not None:
-                self._menu_state = menu_state
-            if force_update:
-                self._force_update = True
-            if verbose is not None:
-                self._verbose = verbose
-            if look_x is not None:
-                self._look_x = look_x
-            if look_y is not None:
-                self._look_y = look_y
-            if teensy_connected is not None:
-                self._teensy_connected = teensy_connected
-            if controller_connected is not None:
-                self._controller_connected = controller_connected
-            if telemetry_stale is not None:
-                self._telemetry_stale = telemetry_stale
-            if robot_enabled is not None:
-                self._robot_enabled = robot_enabled
-            if safety_active is not None:
-                self._safety_active = safety_active
-            if safety_text is not None:
-                self._safety_text = safety_text
-    
-    def stop(self):
-        """Signal thread to stop and wait for it to finish."""
-        self._stop_event.set()
-        self.join(timeout=1.0)
-    
-    def run(self):
-        """Main thread loop: update eyes and display at target Hz.
-        
-        Uses os.nice() to lower priority so gait loop gets CPU preference.
-        During blink animation, skips frames based on blink_frame_divisor to reduce CPU load.
-        """
-        import os
-        try:
-            os.nice(5)  # Lower priority (higher nice = lower priority)
-        except (OSError, AttributeError):
-            pass  # nice() may fail on some systems
-        
-        next_tick = time.monotonic()
-        last_look_x = 0.0
-        last_look_y = 0.0
-        blink_frame_counter = 0  # Counter for frame skipping during blink
-        # Track for change detection (force render on status change)
-        last_teensy_connected = True
-        last_controller_connected = True
-        last_telemetry_stale = False
-        last_robot_enabled = True
-        last_safety_active = False
-        last_safety_text = ""
-        
-        while not self._stop_event.is_set():
-            try:
-                # Get current state snapshot
-                with self._lock:
-                    servo = self._servo
-                    legs = self._legs
-                    state = self._state
-                    mirror = self._mirror
-                    menu_state = self._menu_state
-                    force = self._force_update
-                    self._force_update = False
-                    look_x = self._look_x
-                    look_y = self._look_y
-                    teensy_connected = self._teensy_connected
-                    controller_connected = self._controller_connected
-                    telemetry_stale = self._telemetry_stale
-                    robot_enabled = self._robot_enabled
-                    safety_active = self._safety_active
-                    safety_text = self._safety_text
-                
-                # Detect status changes - force immediate render
-                status_changed = (teensy_connected != last_teensy_connected or 
-                                 controller_connected != last_controller_connected or
-                                 telemetry_stale != last_telemetry_stale or
-                                 robot_enabled != last_robot_enabled or
-                                 safety_active != last_safety_active or
-                                 safety_text != last_safety_text)
-                if status_changed:
-                    last_teensy_connected = teensy_connected
-                    last_controller_connected = controller_connected
-                    last_telemetry_stale = telemetry_stale
-                    last_robot_enabled = robot_enabled
-                    last_safety_active = safety_active
-                    last_safety_text = safety_text
-                
-                # Detect look direction change (threshold to avoid noise)
-                look_changed = (abs(look_x - last_look_x) > 0.05 or 
-                               abs(look_y - last_look_y) > 0.05)
-                if look_changed:
-                    last_look_x = look_x
-                    last_look_y = look_y
-                
-                # Apply eye look direction based on joystick input
-                # Only override eye position if we have actual look input (gait active)
-                # When look values are zero, let other code (gamepad handler) control eyes
-                if abs(last_look_x) > 0.01 or abs(last_look_y) > 0.01:
-                    self.eyes.eye_center_offset = self._base_center_offset + last_look_x * self.look_range_x
-                    self.eyes.eye_vertical_offset = self._base_vertical_offset + last_look_y * self.look_range_y
-                
-                # Update eye animation (handles blink timing internally)
-                needs_render = self.eyes.update(force_update=look_changed or status_changed)
-                
-                # During blink animation, skip frames based on divisor to reduce CPU/SPI load
-                # divisor=1: no skip, divisor=2: render every other, divisor=3: render every third
-                # BLINKSTATE: OPEN=0, CLOSED=1, BLINKING=2, WAITING=3
-                # Skip during BLINKING (closing) and CLOSED (opening) phases
-                is_blinking = (self.eyes.blinkState == 1 or self.eyes.blinkState == 2)  # CLOSED or BLINKING
-                if is_blinking and self.blink_frame_divisor > 1:
-                    blink_frame_counter = (blink_frame_counter + 1) % self.blink_frame_divisor
-                    if blink_frame_counter != 0:
-                        needs_render = False  # Skip this frame
-                else:
-                    blink_frame_counter = 0  # Reset counter when not blinking
-                
-                if needs_render or force or look_changed or status_changed:
-                    # Render and send to display
-                    UpdateDisplay(self.disp, self.eyes.display_image, 
-                                 self.menu._image if self.menu else None,
-                                 servo, legs, state, mirror, menu_state,
-                                 teensy_connected=teensy_connected,
-                                 controller_connected=controller_connected,
-                                 telemetry_stale=telemetry_stale,
-                                 robot_enabled=robot_enabled,
-                                 safety_active=safety_active,
-                                 safety_text=safety_text)
-                
-            except (AttributeError, TypeError, OSError) as e:
-                # Display/SPI errors - log but don't crash thread
-                pass  # Thread should continue; errors are transient
-            
-            # Maintain target frame rate
-            next_tick += self.period_s
-            sleep_time = next_tick - time.monotonic()
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-            else:
-                # Fell behind; reset timing
-                next_tick = time.monotonic()
+    UpdateDisplayModule(
+        disp=disp,
+        image=image,
+        menu=menu,
+        servo=servo,
+        legs=legs,
+        state=state,
+        mirror=mirror,
+        menuState=menuState,
+        teensy_connected=teensy_connected,
+        controller_connected=controller_connected,
+        telemetry_stale=telemetry_stale,
+        robot_enabled=robot_enabled,
+        safety_active=safety_active,
+        safety_text=safety_text,
+        mars_menu=_marsMenu,
+        force_display_update_callback=_force_update_callback,
+        power_palette=_powercolorPalette,
+        temperature_palette=_temperatureColorPalette,
+        ctrl=_ctrl,
+    )
 
 
-def processTelemS1(elements, state):
-    """Processes the S1 telemetry data.
-    Expected: 10 numeric fields (indices 0..9). Warn if shorter; ignore extras if longer."""
-    expected = 10
-    count = len(elements)
-    if count < expected:
-        if _verbose:
-            print(f"WARN S1 length {count} < expected {expected}, skipping.", end="\r\n")
-        return
-    if count > expected and _verbose:
-        print(f"WARN S1 length {count} > expected {expected}, truncating.", end="\r\n")
-    try:
-        # Only use first expected elements
-        for i in range(expected):
-            state[i] = float(elements[i])
-    except ValueError as e:
-        print(f"Error processing S1 telemetry data: {e}", end="\r\n")
+# Telemetry parsing functions (processTelemS1-S5) and get_safety_overlay_state
+# are now imported from telemetry.py module
 
-def processTelemS2(elements, servo):
-    """Processes the S2 telemetry data (servo enable states).
-    Expected: 18 enable integers."""
-    expected = 18
-    count = len(elements)
-    if count < expected:
-        if _verbose:
-            print(f"WARN S2 length {count} < expected {expected}, skipping.", end="\r\n")
-        return
-    if count > expected and _verbose:
-        print(f"WARN S2 length {count} > expected {expected}, truncating.", end="\r\n")
-
-    try:
-        for idx in range(expected):
-            servo[idx][2] = int(elements[idx])
-    except ValueError as e:
-        print(f"Error processing S1 telemetry data: {e}", end="\r\n")
-
-def processTelemS3(elements, servo):
-    """Processes the S3 telemetry data (servo voltage + temperature).
-    Expected: 36 numeric entries: 18 voltages then 18 temperatures."""
-    expected = 36
-    count = len(elements)
-    if count < expected:
-        if _verbose:
-            print(f"WARN S3 length {count} < expected {expected}, skipping.", end="\r\n")
-        return
-    if count > expected and _verbose:
-        print(f"WARN S3 length {count} > expected {expected}, truncating.", end="\r\n")
-
-    try:
-        for idx in range(18):
-            servo[idx][0] = float(elements[idx])
-            servo[idx][1] = int(elements[idx + 18])
-    except ValueError as e:
-        print(f"Error processing S3 telemetry data: {e}", end="\r\n")
-
-def processTelemS4(elements, leg):
-    """Processes the S4 telemetry data (leg contact states).
-    Expected: 6 integers (one per leg)."""
-    expected = 6
-    count = len(elements)
-    if count < expected:
-        if _verbose:
-            print(f"WARN S4 length {count} < expected {expected}, skipping.", end="\r\n")
-        return
-    if count > expected and _verbose:
-        print(f"WARN S4 length {count} > expected {expected}, truncating.", end="\r\n")
-
-    try:
-        for idx in range(expected):
-            leg[idx][0] = int(elements[idx])
-    except ValueError as e:
-        print(f"Error processing S4 telemetry data: {e}", end="\r\n")
-
-
-# Safety telemetry (S5) and overlay helpers
+# Safety state dict kept for legacy compatibility - used by processTelemS5
 _safety_state = {
     "lockout": False,
     "cause_mask": 0,
@@ -1713,49 +1489,20 @@ _safety_state = {
 _last_safety_lockout = False
 
 
-def processTelemS5(elements, safety_state):
-    """Process S5 safety telemetry.
-
-    Expected format (7 fields):
-        lockout, cause_mask, override_mask, clearance_mm, soft_limits,
-        collision, temp_c
-    """
-    expected = 7
-    count = len(elements)
-    if count < expected:
-        if _verbose:
-            print(f"WARN S5 length {count} < expected {expected}, skipping.", end="\r\n")
-        return
-    if count > expected and _verbose:
-        print(f"WARN S5 length {count} > expected {expected}, truncating.", end="\r\n")
-    try:
-        safety_state["lockout"] = bool(int(elements[0]))
-        safety_state["cause_mask"] = int(elements[1])
-        safety_state["override_mask"] = int(elements[2])
-        safety_state["clearance_mm"] = int(elements[3])
-        safety_state["soft_limits"] = bool(int(elements[4]))
-        safety_state["collision"] = bool(int(elements[5]))
-        safety_state["temp_c"] = int(elements[6])
-    except ValueError as e:
-        print(f"Error processing S5 telemetry data: {e}", end="\r\n")
-
-
 def get_safety_overlay_state():
-    """Return (active, text) tuple for safety overlay rendering."""
-    active = _safety_state.get("lockout", False)
+    """Return (active, text) tuple for safety overlay rendering.
+    Wrapper around telemetry.get_safety_overlay_text() for compatibility."""
+    _ctrl = globals().get('ctrl', None)
+    _safety_telem = getattr(_ctrl, 'safety_telem', None) if _ctrl is not None else None
+    if _safety_telem is not None and getattr(_safety_telem, 'valid', False):
+        active = bool(getattr(_safety_telem, 'lockout', False))
+        mask = int(getattr(_safety_telem, 'cause_mask', 0) or 0)
+    else:
+        active = _safety_state.get("lockout", False)
+        mask = _safety_state.get("cause_mask", 0)
     if not active:
         return False, ""
-    mask = _safety_state.get("cause_mask", 0)
-    labels = []
-    # Bit mapping from firmware LockoutCauseBits
-    if mask & 0x01:
-        labels.append("TEMP")
-    if mask & 0x02:
-        labels.append("COLLISION")
-    if not labels:
-        labels.append("UNKNOWN")
-    base = "SAFETY LOCKOUT: " + "/".join(labels)
-    return True, base
+    return True, get_safety_overlay_text(mask)
 
 
 # PID/IMP/EST LIST state (parsed from firmware text responses)
@@ -1971,6 +1718,12 @@ _gaitTickCount = 0      # Tick counter for rate limiting FEET sends
 _gaitSendDivisor = 3    # Send FEET every N ticks (2 = 83Hz, 3 = 55Hz)
 _gaitTransition = GaitTransition(blend_ms=500)  # Transition manager for smooth gait switching
 
+# Kinematic move state (non-cyclic sequences that send FEET)
+_moveEngine = None
+_moveActive = False
+_moveTickCount = 0
+_moveSendDivisor = 1  # Send FEET every tick while a kinematic move is active
+
 # create the Teensy serial object
 _teensy = None
 # create the Xbox controller object
@@ -2045,6 +1798,19 @@ _humanEyeColorDarkBrown = (50, 30, 20)    # Dark brown
 # Menu settings (saved to config)
 _menuTheme = 0      # 0=MARS, 1=LCARS
 _menuPalette = 0    # LCARS palette: 0=Classic, 1=Nemesis, 2=LowerDecks, 3=PADD
+
+# Pounce move settings (persisted to controller.ini [pounce])
+_pouncePrepMs = 400
+_pounceRearMs = 250
+_pounceLungeMs = 250
+_pounceRecoverMs = 500
+_pounceBack1Z = 55.0
+_pounceBack2Z = 75.0
+_pouncePushZ = -60.0
+_pounceStrikeZ = 140.0
+_pounceCrouchDy = 55.0
+_pounceLiftDy = 110.0
+_pounceFrontZ = 20.0
 
 
 def _parse_ini_triplet_int(s):
@@ -2178,6 +1944,21 @@ try:
         _bezierP2Height = _cfg.getfloat('gait', 'bezier_p2_height', fallback=_bezierP2Height)
         _bezierP3Height = _cfg.getfloat('gait', 'bezier_p3_height', fallback=_bezierP3Height)
         _bezierP3Overshoot = _cfg.getfloat('gait', 'bezier_p3_overshoot', fallback=_bezierP3Overshoot)
+
+    # Load pounce settings
+    if 'pounce' in _cfg:
+        _pouncePrepMs = _cfg.getint('pounce', 'prep_ms', fallback=_pouncePrepMs)
+        _pounceRearMs = _cfg.getint('pounce', 'rear_ms', fallback=_pounceRearMs)
+        _pounceLungeMs = _cfg.getint('pounce', 'lunge_ms', fallback=_pounceLungeMs)
+        _pounceRecoverMs = _cfg.getint('pounce', 'recover_ms', fallback=_pounceRecoverMs)
+        _pounceBack1Z = _cfg.getfloat('pounce', 'back1_z_mm', fallback=_pounceBack1Z)
+        _pounceBack2Z = _cfg.getfloat('pounce', 'back2_z_mm', fallback=_pounceBack2Z)
+        _pouncePushZ = _cfg.getfloat('pounce', 'push_z_mm', fallback=_pouncePushZ)
+        _pounceStrikeZ = _cfg.getfloat('pounce', 'strike_z_mm', fallback=_pounceStrikeZ)
+        _pounceCrouchDy = _cfg.getfloat('pounce', 'crouch_dy_mm', fallback=_pounceCrouchDy)
+        _pounceLiftDy = _cfg.getfloat('pounce', 'lift_dy_mm', fallback=_pounceLiftDy)
+        _pounceFrontZ = _cfg.getfloat('pounce', 'front_z_mm', fallback=_pounceFrontZ)
+
     # Load eye settings
     if 'eyes' in _cfg:
         _eyeSpacingOffset = _cfg.getint('eyes', 'spacing_offset', fallback=_eyeSpacingOffset)
@@ -2219,6 +2000,8 @@ try:
         _humanEyeColorHazel = parse_rgb(_cfg.get('eyes', 'human_color_hazel', fallback='140,110,60'), _humanEyeColorHazel)
         _humanEyeColorBrown = parse_rgb(_cfg.get('eyes', 'human_color_brown', fallback='100,60,30'), _humanEyeColorBrown)
         _humanEyeColorDarkBrown = parse_rgb(_cfg.get('eyes', 'human_color_darkbrown', fallback='50,30,20'), _humanEyeColorDarkBrown)
+    # Share config state with config_manager module for save functions
+    set_config_state(_cfg, _cfg_path)
 except (configparser.Error, ValueError, KeyError) as e:
     print(f"Config load error (using defaults): {e}", end="\r\n")
     _savedGaitWidthMm = 100.0
@@ -2228,199 +2011,10 @@ except (configparser.Error, ValueError, KeyError) as e:
     _gaitLiftMinMm = 20.0
     _gaitLiftMaxMm = 100.0
 
-def save_gait_settings(width_mm: float, lift_mm: float, cycle_ms: int = None, turn_max_deg_s: float = None) -> bool:
-    """Save gait parameters to controller.ini [gait] section.
-
-    width_mm and lift_mm are always persisted; cycle_ms is optional and
-    only written when provided to avoid clobbering existing config
-    unexpectedly."""
-    global _cfg, _cfg_path
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'gait' not in _cfg:
-            _cfg.add_section('gait')
-        _cfg.set('gait', 'width_mm', f'{width_mm:.1f}')
-        _cfg.set('gait', 'lift_mm', f'{lift_mm:.1f}')
-        if cycle_ms is not None:
-            _cfg.set('gait', 'cycle_ms', str(int(cycle_ms)))
-        if turn_max_deg_s is not None:
-            _cfg.set('gait', 'turn_max_deg_s', f'{turn_max_deg_s:.1f}')
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error) as e:
-        print(f"Failed to save gait settings: {e}", end="\r\n")
-        return False
-
-def save_eye_shape(shape: int) -> bool:
-    """Save eye shape to controller.ini [eyes] section."""
-    global _cfg, _cfg_path
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'eyes' not in _cfg:
-            _cfg.add_section('eyes')
-        _cfg.set('eyes', 'shape', str(shape))
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error) as e:
-        print(f"Failed to save eye shape: {e}", end="\r\n")
-        return False
-
-def save_human_eye_settings(size: int = None, color_idx: int = None) -> bool:
-    """Save human eye settings to controller.ini [eyes] section."""
-    global _cfg, _cfg_path
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'eyes' not in _cfg:
-            _cfg.add_section('eyes')
-        if size is not None:
-            _cfg.set('eyes', 'human_eye_size', str(size))
-        if color_idx is not None:
-            _cfg.set('eyes', 'human_eye_color', str(color_idx))
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error) as e:
-        print(f"Failed to save human eye settings: {e}", end="\r\n")
-        return False
-
-def save_eye_center_offset(offset: int) -> bool:
-    """Save eye horizontal center offset to controller.ini [eyes] section."""
-    global _cfg, _cfg_path
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'eyes' not in _cfg:
-            _cfg.add_section('eyes')
-        _cfg.set('eyes', 'center_offset', str(offset))
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error) as e:
-        print(f"Failed to save eye center offset: {e}", end="\r\n")
-        return False
-
-def save_eye_vertical_offset(offset: int) -> bool:
-    """Save eye vertical center offset to controller.ini [eyes] section."""
-    global _cfg, _cfg_path
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'eyes' not in _cfg:
-            _cfg.add_section('eyes')
-        _cfg.set('eyes', 'vertical_offset', str(offset))
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error) as e:
-        print(f"Failed to save eye vertical offset: {e}", end="\r\n")
-        return False
-
-def save_menu_settings(theme: int = None, palette: int = None) -> bool:
-    """Save menu theme and palette to controller.ini [menu] section."""
-    global _cfg, _cfg_path, _menuTheme, _menuPalette
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'menu' not in _cfg:
-            _cfg.add_section('menu')
-        if theme is not None:
-            _cfg.set('menu', 'theme', str(theme))
-            _menuTheme = theme
-        if palette is not None:
-            _cfg.set('menu', 'palette', str(palette))
-            _menuPalette = palette
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error) as e:
-        print(f"Failed to save menu settings: {e}", end="\r\n")
-        return False
-
-
-def _fmt_triplet(tri):
-    try:
-        if tri is None or len(tri) != 3:
-            return None
-        return f"{int(tri[0])}/{int(tri[1])}/{int(tri[2])}"
-    except Exception:
-        return None
-
-
-def save_pid_settings() -> bool:
-    """Persist current PID tab values to controller.ini [pid]."""
-    global _cfg, _cfg_path
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'pid' not in _cfg:
-            _cfg.add_section('pid')
-        if _pid_state.get('enabled') is not None:
-            _cfg.set('pid', 'enabled', 'true' if _pid_state['enabled'] else 'false')
-        if _pid_state.get('mode') is not None:
-            _cfg.set('pid', 'mode', str(_pid_state['mode']))
-        if _pid_state.get('shadow_hz') is not None:
-            _cfg.set('pid', 'shadow_hz', str(int(_pid_state['shadow_hz'])))
-        for k in ('kp', 'ki', 'kd', 'kdalph'):
-            s = _fmt_triplet(_pid_state.get(k))
-            if s is not None:
-                _cfg.set('pid', k, s)
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error, ValueError, TypeError):
-        return False
-
-
-def save_imp_settings() -> bool:
-    """Persist current IMP tab values to controller.ini [imp]."""
-    global _cfg, _cfg_path
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'imp' not in _cfg:
-            _cfg.add_section('imp')
-        if _imp_state.get('enabled') is not None:
-            _cfg.set('imp', 'enabled', 'true' if _imp_state['enabled'] else 'false')
-        if _imp_state.get('mode') is not None:
-            _cfg.set('imp', 'mode', str(_imp_state['mode']))
-        if _imp_state.get('scale') is not None:
-            _cfg.set('imp', 'scale', str(int(_imp_state['scale'])))
-        for k in ('jspring', 'jdamp', 'cspring', 'cdamp'):
-            s = _fmt_triplet(_imp_state.get(k))
-            if s is not None:
-                _cfg.set('imp', k, s)
-        if _imp_state.get('jdb_cd') is not None:
-            _cfg.set('imp', 'jdb_cd', str(int(_imp_state['jdb_cd'])))
-        if _imp_state.get('cdb_mm') is not None:
-            _cfg.set('imp', 'cdb_mm', f"{float(_imp_state['cdb_mm']):.3f}")
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error, ValueError, TypeError):
-        return False
-
-
-def save_est_settings() -> bool:
-    """Persist current EST tab values to controller.ini [est]."""
-    global _cfg, _cfg_path
-    if _cfg is None or _cfg_path is None:
-        return False
-    try:
-        if 'est' not in _cfg:
-            _cfg.add_section('est')
-        for k in ('cmd_alpha_milli', 'meas_alpha_milli', 'meas_vel_alpha_milli'):
-            if _est_state.get(k) is not None:
-                _cfg.set('est', k, str(int(_est_state[k])))
-        with open(_cfg_path, 'w') as f:
-            _cfg.write(f)
-        return True
-    except (IOError, OSError, configparser.Error, ValueError, TypeError):
-        return False
+# Save functions imported from config_manager module (Phase 2 modularization)
+# save_gait_settings, save_pounce_settings, save_eye_shape, save_human_eye_settings,
+# save_eye_center_offset, save_eye_vertical_offset, save_menu_settings are imported
+# directly. save_pid_settings, save_imp_settings, save_est_settings require state dict param.
 
 # initialize the display and start logging to it
 #_disp = LCD_1inch9.LCD_1inch9()
@@ -2439,13 +2033,12 @@ _backGroundImage = Image.new("RGB", (_disp.width, _disp.height), "BLACK")  # cre
 #_backGroundImage = _backGroundImage.rotate(270, expand=True)  # rotate the image to fit the display
 #_backGroundImage = _backGroundImage.convert("BGR")  # convert the image to RGB
 #_backGroundImage = _backGroundImage.resize((_disp.width, _disp.height), Image.Resampling.LANCZOS)  # resize the image to fit the display
-UpdateDisplay(_disp, _backGroundImage, None, _servo, _legs, _state, _mirrorDisplay)  # display the blank image
-drawLogo(_disp)  # draw the logo on the display
-time.sleep(5)
+drawMarsSplash(_disp, FW_VERSION_BANNER, CONTROLLER_VERSION, CONTROLLER_BUILD)
+time.sleep(3)
 
 # Startup banner (printed to stdout for logs/USB serial capture)
 print("MARS - Modular Autonomous Robotic System", end="\r\n")
-print(f"Firmware 0.2.36/b152 · Controller {CONTROLLER_VERSION}/b{CONTROLLER_BUILD}", end="\r\n")
+print(f"Firmware {FW_VERSION_BANNER} · Controller {CONTROLLER_VERSION}/b{CONTROLLER_BUILD}", end="\r\n")
 
 # initizlizxe the touch screen
 _touch = cst816d.cst816d()
@@ -2597,7 +2190,7 @@ def _setup_mars_menu():
     def on_pid_enabled_change(val):
         try:
             _pid_state['enabled'] = (val == 1)
-            save_pid_settings()
+            save_pid_settings(_pid_state)
             send_cmd(b'PID ENABLE' if val == 1 else b'PID DISABLE', force=True)
             _kick_list_poll('PID')
         except Exception:
@@ -2606,7 +2199,7 @@ def _setup_mars_menu():
     def on_pid_mode_change(val):
         try:
             _pid_state['mode'] = 'active' if val == 0 else 'shadow'
-            save_pid_settings()
+            save_pid_settings(_pid_state)
             send_cmd(b'PID MODE ACTIVE' if val == 0 else b'PID MODE SHADOW', force=True)
             _kick_list_poll('PID')
         except Exception:
@@ -2615,7 +2208,7 @@ def _setup_mars_menu():
     def on_pid_shadow_hz_change(val):
         try:
             _pid_state['shadow_hz'] = int(val)
-            save_pid_settings()
+            save_pid_settings(_pid_state)
             send_cmd(f"PID SHADOW_RATE {int(val)}".encode('ascii'), force=True)
             _kick_list_poll('PID')
         except Exception:
@@ -2631,7 +2224,7 @@ def _setup_mars_menu():
                 idx = 0 if joint == 'COXA' else (1 if joint == 'FEMUR' else 2)
                 arr[idx] = int(val)
                 _pid_state[key] = arr
-                save_pid_settings()
+                save_pid_settings(_pid_state)
                 send_cmd(f"PID {kind} {joint} {int(val)}".encode('ascii'), force=True)
                 _kick_list_poll('PID')
             except Exception:
@@ -2647,7 +2240,7 @@ def _setup_mars_menu():
                 idx = 0 if joint == 'COXA' else (1 if joint == 'FEMUR' else 2)
                 arr[idx] = int(val)
                 _pid_state['kdalph'] = arr
-                save_pid_settings()
+                save_pid_settings(_pid_state)
                 send_cmd(f"PID KDALPHA {joint} {int(val)}".encode('ascii'), force=True)
                 _kick_list_poll('PID')
             except Exception:
@@ -2658,7 +2251,7 @@ def _setup_mars_menu():
     def on_imp_enabled_change(val):
         try:
             _imp_state['enabled'] = (val == 1)
-            save_imp_settings()
+            save_imp_settings(_imp_state)
             send_cmd(b'IMP ENABLE' if val == 1 else b'IMP DISABLE', force=True)
             _kick_list_poll('IMP')
         except Exception:
@@ -2667,7 +2260,7 @@ def _setup_mars_menu():
     def on_imp_mode_change(val):
         try:
             _imp_state['mode'] = 'joint' if val == 1 else ('cart' if val == 2 else 'off')
-            save_imp_settings()
+            save_imp_settings(_imp_state)
             if val == 1:
                 cmd = b'IMP MODE JOINT'
             elif val == 2:
@@ -2682,7 +2275,7 @@ def _setup_mars_menu():
     def on_imp_scale_change(val):
         try:
             _imp_state['scale'] = int(val)
-            save_imp_settings()
+            save_imp_settings(_imp_state)
             send_cmd(f"IMP SCALE {int(val)}".encode('ascii'), force=True)
             _kick_list_poll('IMP')
         except Exception:
@@ -2698,7 +2291,7 @@ def _setup_mars_menu():
                 idx = 0 if joint == 'COXA' else (1 if joint == 'FEMUR' else 2)
                 arr[idx] = int(val)
                 _imp_state[key] = arr
-                save_imp_settings()
+                save_imp_settings(_imp_state)
                 send_cmd(f"IMP {kind} {joint} {int(val)}".encode('ascii'), force=True)
                 _kick_list_poll('IMP')
             except Exception:
@@ -2715,7 +2308,7 @@ def _setup_mars_menu():
                 idx = 0 if axis == 'X' else (1 if axis == 'Y' else 2)
                 arr[idx] = int(val)
                 _imp_state[key] = arr
-                save_imp_settings()
+                save_imp_settings(_imp_state)
                 send_cmd(f"IMP {kind} {axis} {int(val)}".encode('ascii'), force=True)
                 _kick_list_poll('IMP')
             except Exception:
@@ -2725,7 +2318,7 @@ def _setup_mars_menu():
     def on_imp_jdb_change(val):
         try:
             _imp_state['jdb_cd'] = int(val)
-            save_imp_settings()
+            save_imp_settings(_imp_state)
             send_cmd(f"IMP JDB {int(val)}".encode('ascii'), force=True)
             _kick_list_poll('IMP')
         except Exception:
@@ -2734,7 +2327,7 @@ def _setup_mars_menu():
     def on_imp_cdb_change(val):
         try:
             _imp_state['cdb_mm'] = float(val)
-            save_imp_settings()
+            save_imp_settings(_imp_state)
             send_cmd(f"IMP CDB {float(val):.3f}".encode('ascii'), force=True)
             _kick_list_poll('IMP')
         except Exception:
@@ -2744,7 +2337,7 @@ def _setup_mars_menu():
     def on_est_cmd_alpha_change(val):
         try:
             _est_state['cmd_alpha_milli'] = int(val)
-            save_est_settings()
+            save_est_settings(_est_state)
             send_cmd(f"EST CMD_ALPHA {int(val)}".encode('ascii'), force=True)
             _kick_list_poll('EST')
         except Exception:
@@ -2753,7 +2346,7 @@ def _setup_mars_menu():
     def on_est_meas_alpha_change(val):
         try:
             _est_state['meas_alpha_milli'] = int(val)
-            save_est_settings()
+            save_est_settings(_est_state)
             send_cmd(f"EST MEAS_ALPHA {int(val)}".encode('ascii'), force=True)
             _kick_list_poll('EST')
         except Exception:
@@ -2762,7 +2355,7 @@ def _setup_mars_menu():
     def on_est_vel_alpha_change(val):
         try:
             _est_state['meas_vel_alpha_milli'] = int(val)
-            save_est_settings()
+            save_est_settings(_est_state)
             send_cmd(f"EST MEAS_VEL_ALPHA {int(val)}".encode('ascii'), force=True)
             _kick_list_poll('EST')
         except Exception:
@@ -2903,10 +2496,97 @@ def _setup_mars_menu():
     def on_home():
         apply_posture(b'HOME', auto_disable_s=_autoDisableS)
         _marsMenu.hide()
+
+    def on_pounce():
+        """Spider-like "pounce" attack: crouch back, front legs up, spring forward."""
+        start_pounce_move(source="menu")
     
     _marsMenu.set_callback(MenuCategory.POSTURE, "Stand", "on_select", on_stand)
     _marsMenu.set_callback(MenuCategory.POSTURE, "Tuck", "on_select", on_tuck)
     _marsMenu.set_callback(MenuCategory.POSTURE, "Home", "on_select", on_home)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "Pounce", "on_select", on_pounce)
+
+    def _persist_pounce():
+        return save_pounce_settings(
+            _pouncePrepMs,
+            _pounceRearMs,
+            _pounceLungeMs,
+            _pounceRecoverMs,
+            _pounceBack1Z,
+            _pounceBack2Z,
+            _pouncePushZ,
+            _pounceStrikeZ,
+            _pounceCrouchDy,
+            _pounceLiftDy,
+            _pounceFrontZ,
+        )
+
+    def on_p_prep(val):
+        global _pouncePrepMs
+        _pouncePrepMs = int(val)
+        _persist_pounce()
+
+    def on_p_rear(val):
+        global _pounceRearMs
+        _pounceRearMs = int(val)
+        _persist_pounce()
+
+    def on_p_lunge(val):
+        global _pounceLungeMs
+        _pounceLungeMs = int(val)
+        _persist_pounce()
+
+    def on_p_recov(val):
+        global _pounceRecoverMs
+        _pounceRecoverMs = int(val)
+        _persist_pounce()
+
+    def on_p_back1(val):
+        global _pounceBack1Z
+        _pounceBack1Z = float(val)
+        _persist_pounce()
+
+    def on_p_back2(val):
+        global _pounceBack2Z
+        _pounceBack2Z = float(val)
+        _persist_pounce()
+
+    def on_p_push(val):
+        global _pouncePushZ
+        _pouncePushZ = float(val)
+        _persist_pounce()
+
+    def on_p_strike(val):
+        global _pounceStrikeZ
+        _pounceStrikeZ = float(val)
+        _persist_pounce()
+
+    def on_p_crouch(val):
+        global _pounceCrouchDy
+        _pounceCrouchDy = float(val)
+        _persist_pounce()
+
+    def on_p_lift(val):
+        global _pounceLiftDy
+        _pounceLiftDy = float(val)
+        _persist_pounce()
+
+    def on_p_frontz(val):
+        global _pounceFrontZ
+        _pounceFrontZ = float(val)
+        _persist_pounce()
+
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Prep", "on_change", on_p_prep)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Rear", "on_change", on_p_rear)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Lunge", "on_change", on_p_lunge)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Recov", "on_change", on_p_recov)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Back1", "on_change", on_p_back1)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Back2", "on_change", on_p_back2)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Push", "on_change", on_p_push)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Strike", "on_change", on_p_strike)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Crouch", "on_change", on_p_crouch)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P Lift", "on_change", on_p_lift)
+    _marsMenu.set_callback(MenuCategory.POSTURE, "P FrontZ", "on_change", on_p_frontz)
 
     # === SAFETY callbacks ===
     def on_clear_safety():
@@ -2957,6 +2637,19 @@ def _setup_mars_menu():
     _marsMenu.set_value(MenuCategory.EYES, "V Center", _eyeVerticalOffset)
     _marsMenu.set_value(MenuCategory.EYES, "Spacing", int(_eyes.human_eye_spacing_pct * 100))
     _marsMenu.set_value(MenuCategory.EYES, "CRT Effect", 1 if _eyes.crt_mode else 0)
+
+    # Pounce defaults (from controller.ini [pounce])
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Prep", int(_pouncePrepMs))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Rear", int(_pounceRearMs))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Lunge", int(_pounceLungeMs))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Recov", int(_pounceRecoverMs))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Back1", int(round(_pounceBack1Z)))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Back2", int(round(_pounceBack2Z)))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Push", int(round(_pouncePushZ)))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Strike", int(round(_pounceStrikeZ)))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Crouch", int(round(_pounceCrouchDy)))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P Lift", int(round(_pounceLiftDy)))
+    _marsMenu.set_value(MenuCategory.POSTURE, "P FrontZ", int(round(_pounceFrontZ)))
     _marsMenu.set_value(MenuCategory.SYSTEM, "Theme", _menuTheme)
     _marsMenu.set_value(MenuCategory.SYSTEM, "Palette", _menuPalette)
     _marsMenu.set_value(MenuCategory.SYSTEM, "Brightness", _displayBrightness)
@@ -2974,19 +2667,37 @@ def _setup_mars_menu():
 
 _setup_mars_menu()
 
-def update_menu_info():
+def update_menu_info(ctrl: Controller | None = None):
     """Update INFO menu items from current telemetry data.
 
-    INFO tab shows instantaneous values; System tab can show aggregated stats
-    such as average battery voltage or servo temperature when available.
+    INFO tab shows instantaneous values and servo stats used for bring-up.
     """
     global _marsMenu, _state, _servo, _safety_state
     if _marsMenu is None:
         return
+
+    # Prefer structured telemetry when available
+    if ctrl is None:
+        ctrl = globals().get('ctrl', None)
+    system = getattr(ctrl, 'system_telem', None) if ctrl is not None else None
+    servo_telem = getattr(ctrl, 'servo_telem', None) if ctrl is not None else None
+    safety_telem = getattr(ctrl, 'safety_telem', None) if ctrl is not None else None
     
-    # Compute average servo voltage from _servo (S3 telemetry)
+    # Compute average servo voltage (prefer structured servo telemetry)
     avg_servo_v = None
-    if _servo is not None:
+    if servo_telem is not None:
+        v_sum = 0.0
+        v_count = 0
+        for s in servo_telem:
+            if s is None or not getattr(s, 'valid_s3', False):
+                continue
+            v = getattr(s, 'voltage_v', 0.0)
+            if v and v > 0:
+                v_sum += float(v)
+                v_count += 1
+        if v_count > 0:
+            avg_servo_v = v_sum / v_count
+    elif _servo is not None:
         v_sum = 0.0
         v_count = 0
         for s in _servo:
@@ -3006,29 +2717,55 @@ def update_menu_info():
         if v_count > 0:
             avg_servo_v = v_sum / v_count
 
-    # Update INFO items from _state (S1 telemetry) - instantaneous values
-    if len(_state) > IDX_BATTERY_V:
-        batt_v = _state[IDX_BATTERY_V]
-        # If battery voltage is missing/zero, fall back to average servo bus voltage.
+    # Servo voltage should be visible on INFO only.
+    _marsMenu.set_value(MenuCategory.INFO, "Servo Volt", avg_servo_v)
+
+    # Update INFO items from S1 telemetry - instantaneous values
+    if system is not None and getattr(system, 'valid', False):
+        batt_v = getattr(system, 'battery_v', None)
         if batt_v is None or batt_v <= 0:
             _marsMenu.set_value(MenuCategory.INFO, "Battery", avg_servo_v)
         else:
             _marsMenu.set_value(MenuCategory.INFO, "Battery", batt_v)
-    if len(_state) > IDX_CURRENT_A:
-        _marsMenu.set_value(MenuCategory.INFO, "Current", _state[IDX_CURRENT_A])
-    if len(_state) > IDX_LOOP_US:
-        loop_us = int(_state[IDX_LOOP_US])
+        _marsMenu.set_value(MenuCategory.INFO, "Current", getattr(system, 'current_a', None))
+        loop_us = int(getattr(system, 'loop_us', 0) or 0)
         _marsMenu.set_value(MenuCategory.INFO, "Loop Time", loop_us if loop_us > 0 else None)
-    if len(_state) > IDX_PITCH_DEG:
-        _marsMenu.set_value(MenuCategory.INFO, "IMU Pitch", _state[IDX_PITCH_DEG])
-    if len(_state) > IDX_ROLL_DEG:
-        _marsMenu.set_value(MenuCategory.INFO, "IMU Roll", _state[IDX_ROLL_DEG])
+        _marsMenu.set_value(MenuCategory.INFO, "IMU Pitch", getattr(system, 'pitch_deg', None))
+        _marsMenu.set_value(MenuCategory.INFO, "IMU Roll", getattr(system, 'roll_deg', None))
+    else:
+        if len(_state) > IDX_BATTERY_V:
+            batt_v = _state[IDX_BATTERY_V]
+            # If battery voltage is missing/zero, fall back to average servo bus voltage.
+            if batt_v is None or batt_v <= 0:
+                _marsMenu.set_value(MenuCategory.INFO, "Battery", avg_servo_v)
+            else:
+                _marsMenu.set_value(MenuCategory.INFO, "Battery", batt_v)
+        if len(_state) > IDX_CURRENT_A:
+            _marsMenu.set_value(MenuCategory.INFO, "Current", _state[IDX_CURRENT_A])
+        if len(_state) > IDX_LOOP_US:
+            loop_us = int(_state[IDX_LOOP_US])
+            _marsMenu.set_value(MenuCategory.INFO, "Loop Time", loop_us if loop_us > 0 else None)
+        if len(_state) > IDX_PITCH_DEG:
+            _marsMenu.set_value(MenuCategory.INFO, "IMU Pitch", _state[IDX_PITCH_DEG])
+        if len(_state) > IDX_ROLL_DEG:
+            _marsMenu.set_value(MenuCategory.INFO, "IMU Roll", _state[IDX_ROLL_DEG])
     
-    # Find servo temperature statistics from _servo array
+    # Find servo temperature statistics (prefer structured servo telemetry)
     max_temp = None
     temp_sum = 0.0
     temp_count = 0
-    if _servo is not None:
+    if servo_telem is not None:
+        for s in servo_telem:
+            if s is None or not getattr(s, 'valid_s3', False):
+                continue
+            tval = float(getattr(s, 'temp_c', 0) or 0)
+            if tval <= 0:
+                continue
+            temp_sum += tval
+            temp_count += 1
+            if max_temp is None or tval > max_temp:
+                max_temp = tval
+    elif _servo is not None:
         for i in range(len(_servo)):
             # _servo entries are [voltage_V, temp_C, enabled] (S3/S2)
             if len(_servo[i]) > 1:
@@ -3048,17 +2785,24 @@ def update_menu_info():
                     max_temp = tval
     # INFO tab shows max servo temperature
     _marsMenu.set_value(MenuCategory.INFO, "Servo Temp", int(max_temp) if max_temp is not None else None)
-    # SYSTEM tab can show average servo temperature when available
-    _marsMenu.set_value(MenuCategory.SYSTEM, "Avg Servo Temp", (temp_sum / temp_count) if temp_count > 0 else None)
 
     # SAFETY tab: mirror latest S5 snapshot
-    lockout = _safety_state.get("lockout", False)
-    cause_mask = _safety_state.get("cause_mask", 0)
-    override_mask = _safety_state.get("override_mask", 0)
-    clearance_mm = _safety_state.get("clearance_mm", 0)
-    soft_limits = _safety_state.get("soft_limits", False)
-    collision = _safety_state.get("collision", False)
-    temp_c = _safety_state.get("temp_c", 0)
+    if safety_telem is not None and getattr(safety_telem, 'valid', False):
+        lockout = bool(getattr(safety_telem, 'lockout', False))
+        cause_mask = int(getattr(safety_telem, 'cause_mask', 0) or 0)
+        override_mask = int(getattr(safety_telem, 'override_mask', 0) or 0)
+        clearance_mm = int(getattr(safety_telem, 'clearance_mm', 0) or 0)
+        soft_limits = bool(getattr(safety_telem, 'soft_limits', False))
+        collision = bool(getattr(safety_telem, 'collision', False))
+        temp_c = int(getattr(safety_telem, 'temp_c', 0) or 0)
+    else:
+        lockout = _safety_state.get("lockout", False)
+        cause_mask = _safety_state.get("cause_mask", 0)
+        override_mask = _safety_state.get("override_mask", 0)
+        clearance_mm = _safety_state.get("clearance_mm", 0)
+        soft_limits = _safety_state.get("soft_limits", False)
+        collision = _safety_state.get("collision", False)
+        temp_c = _safety_state.get("temp_c", 0)
 
     state_str = "LOCKOUT" if lockout else "OK"
     _marsMenu.set_value(MenuCategory.SAFETY, "State", state_str)
@@ -3194,80 +2938,131 @@ def send_cmd(cmd, force: bool = False, throttle_ms: float = None):
     return True
 
 
+# Tuck auto-disable scheduling (local state, synced with posture_module)
+_autoDisableAt = None  # when not None, time (epoch seconds) at which to send DISABLE
+_autoDisableReason = None  # string reason for pending auto-disable (e.g., 'TUCK')
+_autoDisableGen = 0  # generation counter to detect stale timers
+_lastPosture = None  # tracks last posture name sent
+
+# Posture functions delegated to posture_module (Phase 3 modularization)
+# These wrappers maintain the original API while using the extracted module.
+
 def ensure_enabled() -> bool:
     """Ensure robot is enabled by sending LEG ALL ENABLE + ENABLE if needed.
-    
-    Checks both local tracking (_enabledLocal) and telemetry state (_state[IDX_ROBOT_ENABLED]).
-    Sends enable sequence only if robot appears disabled.
-    
-    Returns:
-        True if enable commands were sent, False if already enabled or no Teensy.
+    Wrapper around posture_module.ensure_enabled().
     """
     global _enabledLocal
-    # Honor firmware safety lockout: never try to re-enable while locked out
-    if _safety_state.get("lockout", False):
-        if _verbose:
-            print("Safety lockout active; refusing ENABLE. Clear SAFETY on Teensy first.", end="\r\n")
-        return False
-    if _teensy is None:
-        return False
-    # Check both local tracking and telemetry state
-    if _enabledLocal and _state[IDX_ROBOT_ENABLED] == 1.0:
-        return False  # Already enabled
-    send_cmd(b'LEG ALL ENABLE', force=True)
-    send_cmd(b'ENABLE', force=True)
-    return True
+    _ctrl = globals().get('ctrl', None)
+    system_telem = getattr(_ctrl, 'system_telem', None) if _ctrl is not None else None
+    
+    def _send_cmd_wrapper(cmd: bytes, force: bool) -> bool:
+        return send_cmd(cmd, force=force)
+    
+    sent, new_enabled = posture_module.ensure_enabled(
+        teensy=_teensy,
+        state=_state,
+        safety_state=_safety_state,
+        system_telem=system_telem,
+        enabled_local=_enabledLocal,
+        send_cmd_fn=_send_cmd_wrapper,
+        verbose=_verbose
+    )
+    if sent:
+        _enabledLocal = new_enabled
+    return sent
 
-
-# Tuck auto-disable scheduling
-_autoDisableAt = None  # when not None, time (epoch seconds) at which to send DISABLE after posture command (tuck/stand)
-# Enable flag consumed directly from _state[IDX_ROBOT_ENABLED]; no SQ telemetry support required.
-_autoDisableReason = None  # string reason for pending auto-disable (e.g., 'TUCK')
-_autoDisableGen = 0        # generation counter to detect stale timers
-_lastPosture = None        # tracks last posture name sent (for future dynamic messaging)
 
 def apply_posture(name, auto_disable_s: float = None, require_enable: bool = True):
     """Unified posture helper (TUCK/STAND/HOME) using byte commands.
-    Auto enable sequence if required; schedules auto disable if >0.
-    Auto-disable is reason-aware: posture auto-disable will not fire if superseded
-    by a newer posture/gait command.
+    Wrapper around posture_module.apply_posture().
     """
-    global _autoDisableAt, _autoDisableReason, _autoDisableGen, _lastPosture
+    global _enabledLocal, _autoDisableAt, _autoDisableReason, _autoDisableGen, _lastPosture
     if auto_disable_s is None:
         auto_disable_s = _autoDisableS
-    if _teensy is None:
-        return False
-    # normalize posture to bytes upper
-    if isinstance(name, bytes):
-        posture = name.upper()
-    elif isinstance(name, str):
-        try:
-            posture = name.strip().upper().encode('ascii')
-        except Exception:
-            return False
-    else:
-        return False
-    if posture not in (b'TUCK', b'STAND', b'HOME'):
-        if _verbose:
-            print(f"Unknown posture '{posture}'", end="\r\n")
-        return False
-    if require_enable and _state[IDX_ROBOT_ENABLED] != 1.0:
-        ensure_enabled()
-    if send_cmd(posture, force=True):
-        _lastPosture = posture
-        # Bump generation on every successful posture command
-        _autoDisableGen += 1
-        reason = posture.decode('ascii', errors='ignore') if isinstance(posture, (bytes, bytearray)) else str(posture)
-        if auto_disable_s > 0:
-            _autoDisableAt = time.time() + auto_disable_s
-            _autoDisableReason = reason
-            if _verbose:
-                print(f"\n{posture} sequence sent. Auto DISABLE in {auto_disable_s:.0f}s (reason={reason}).", end="\r\n")
-        else:
+    
+    _ctrl = globals().get('ctrl', None)
+    system_telem = getattr(_ctrl, 'system_telem', None) if _ctrl is not None else None
+    
+    def _send_cmd_wrapper(cmd: bytes, force: bool) -> bool:
+        return send_cmd(cmd, force=force)
+    
+    (success, new_enabled, last_posture,
+     new_disable_at, new_disable_reason, new_disable_gen) = posture_module.apply_posture(
+        name=name,
+        teensy=_teensy,
+        state=_state,
+        safety_state=_safety_state,
+        system_telem=system_telem,
+        enabled_local=_enabledLocal,
+        send_cmd_fn=_send_cmd_wrapper,
+        auto_disable_at=_autoDisableAt,
+        auto_disable_reason=_autoDisableReason,
+        auto_disable_gen=_autoDisableGen,
+        auto_disable_s=auto_disable_s,
+        require_enable=require_enable,
+        verbose=_verbose
+    )
+    _enabledLocal = new_enabled
+    _lastPosture = last_posture
+    _autoDisableAt = new_disable_at
+    _autoDisableReason = new_disable_reason
+    _autoDisableGen = new_disable_gen
+    return success
+
+
+def start_pounce_move(source: str = "") -> bool:
+    """Start the kinematic Pounce move using current [pounce] settings.
+    Wrapper around posture_module.start_pounce_move().
+    """
+    global _gaitActive, _gaitEngine, _moveActive, _moveEngine, _moveTickCount, _autoDisableAt
+    
+    pounce_params = {
+        'prep_ms': _pouncePrepMs,
+        'rear_ms': _pounceRearMs,
+        'lunge_ms': _pounceLungeMs,
+        'recover_ms': _pounceRecoverMs,
+        'back1_z_mm': _pounceBack1Z,
+        'back2_z_mm': _pounceBack2Z,
+        'push_z_mm': _pouncePushZ,
+        'strike_z_mm': _pounceStrikeZ,
+        'crouch_dy_mm': _pounceCrouchDy,
+        'lift_dy_mm': _pounceLiftDy,
+        'front_z_mm': _pounceFrontZ,
+    }
+    
+    def _send_cmd_wrapper(cmd: bytes, force: bool) -> bool:
+        return send_cmd(cmd, force=force)
+    
+    def _hide_menu():
+        if _marsMenu.visible:
+            _marsMenu.hide()
+    
+    result = posture_module.start_pounce_move(
+        teensy=_teensy,
+        safety_state=_safety_state,
+        gait_active=_gaitActive,
+        gait_engine=_gaitEngine,
+        gait_transition=_gaitTransition,
+        saved_gait_width_mm=_savedGaitWidthMm,
+        gait_base_y_mm=_gaitBaseYMm,
+        pounce_params=pounce_params,
+        send_cmd_fn=_send_cmd_wrapper,
+        ensure_enabled_fn=ensure_enabled,
+        hide_menu_fn=_hide_menu,
+        verbose=_verbose,
+        source=source
+    )
+    success, new_gait_active, move_engine, move_active, clear_auto_disable = result
+    
+    if success:
+        _gaitActive = new_gait_active
+        _moveEngine = move_engine
+        _moveActive = move_active
+        _moveTickCount = 0
+        if clear_auto_disable:
             _autoDisableAt = None
-            _autoDisableReason = None
-        return True
-    return False
+    
+    return success
 
 #----------------------------------------------------------------------------------------------------------------------
 # Main Loop Phase Functions
@@ -3339,7 +3134,7 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
     """
     # Update INFO menu items from telemetry (only if menu visible to save cycles)
     if _marsMenu is not None and _marsMenu.visible:
-        update_menu_info()
+        update_menu_info(ctrl)
     
     if displayThread is not None and displayThread.is_alive():
         # Compute eye look direction from joystick inputs
@@ -3353,7 +3148,10 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
         # Determine telemetry staleness (connected but no data yet)
         telemetry_stale = (ctrl.teensy is not None and ctrl.lastTelemetryTime is None)
         # Robot enabled state from S1 telemetry
-        robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if len(ctrl.state) > IDX_ROBOT_ENABLED else True
+        if getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid:
+            robot_enabled = ctrl.system_telem.robot_enabled
+        else:
+            robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if (ctrl.state and len(ctrl.state) > IDX_ROBOT_ENABLED) else True
         safety_active, safety_text = get_safety_overlay_state()
         
         # Update thread state - it handles rendering at its own rate
@@ -3416,7 +3214,10 @@ def phase_touch_input(menu, ctrl):
             return True
         
         # If robot is disabled and not in motion, allow opening menu
-        robot_enabled = (_state[IDX_ROBOT_ENABLED] == 1.0) if len(_state) > IDX_ROBOT_ENABLED else False
+        if getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid:
+            robot_enabled = ctrl.system_telem.robot_enabled
+        else:
+            robot_enabled = (_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False
         if not robot_enabled and not _gaitActive:
             _marsMenu.show()
             ctrl.forceDisplayUpdate = True
@@ -3489,7 +3290,9 @@ def phase_keyboard_input(ctrl):
             if _verbose:
                 print("\nTest gait blocked: firmware safety lockout is active.", end="\r\n")
         else:
-            if _state[IDX_ROBOT_ENABLED] != 1.0:
+            enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
+                           else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
+            if not enabled_now:
                 ensure_enabled()
             send_cmd(b'T', force=True)
             if _verbose:
@@ -3500,7 +3303,9 @@ def phase_keyboard_input(ctrl):
             if _verbose:
                 print("\nTUCK blocked: firmware safety lockout is active.", end="\r\n")
         else:
-            if _state[IDX_ROBOT_ENABLED] != 1.0:
+            enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
+                           else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
+            if not enabled_now:
                 ensure_enabled()
             send_cmd(b'TUCK', force=True)
             _autoDisableAt = time.time() + _autoDisableS
@@ -3511,7 +3316,9 @@ def phase_keyboard_input(ctrl):
             if _verbose:
                 print("\nSTAND blocked: firmware safety lockout is active.", end="\r\n")
         else:
-            if _state[IDX_ROBOT_ENABLED] != 1.0:
+            enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
+                           else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
+            if not enabled_now:
                 ensure_enabled()
             send_cmd(b'STAND', force=True)
             _autoDisableAt = time.time() + _autoDisableS
@@ -3519,7 +3326,10 @@ def phase_keyboard_input(ctrl):
     
     elif key in (ord('n'), ord('N')):  # Menu toggle (MARS menu)
         # Mirror Start-button behavior: only allow menu when disabled & not in motion
-        robot_enabled = (_state[IDX_ROBOT_ENABLED] == 1.0) if len(_state) > IDX_ROBOT_ENABLED else False
+        if getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid:
+            robot_enabled = ctrl.system_telem.robot_enabled
+        else:
+            robot_enabled = (_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False
         if _marsMenu.visible:
             _marsMenu.hide()
             ctrl.forceDisplayUpdate = True
@@ -3575,7 +3385,9 @@ def phase_keyboard_input(ctrl):
             if _verbose:
                 print("\nGait start blocked: firmware safety lockout is active.", end="\r\n")
         elif not _gaitActive:
-            if _state[IDX_ROBOT_ENABLED] != 1.0:
+            enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
+                           else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
+            if not enabled_now:
                 ensure_enabled()
             params = GaitParams(
                 cycle_ms=2000,
@@ -3611,7 +3423,9 @@ def phase_keyboard_input(ctrl):
     
     elif key in (ord('p'), ord('P')):  # Stationary pattern
         if not _gaitActive:
-            if _state[IDX_ROBOT_ENABLED] != 1.0:
+            enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
+                           else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
+            if not enabled_now:
                 ensure_enabled()
             params = GaitParams(base_x_mm=100.0, base_y_mm=-120.0)
             _gaitEngine = StationaryPattern(params, radius_mm=15.0, period_ms=2000)
@@ -3621,6 +3435,9 @@ def phase_keyboard_input(ctrl):
                 print("\nStationary pattern STARTED", end="\r\n")
         elif _verbose:
             print("\nGait already active (press 'h' to stop first)", end="\r\n")
+
+    elif key in (ord('u'), ord('U')):  # Pounce (jump attack)
+        start_pounce_move(source="kbd")
     
     elif key in (ord('q'), ord('Q')):  # Global disable + idle
         if _gaitActive and _gaitEngine is not None:
@@ -3655,6 +3472,29 @@ def phase_gait_tick(ctrl, gaitEngine, gaitActive):
         gaitActive: Whether gait is currently active
     """
     global _gaitTickCount, _gaitEngine, _gaitTransition
+    global _moveActive, _moveEngine, _moveTickCount, _moveSendDivisor
+    global _autoDisableAt
+
+    # Kinematic move takes priority over cyclic gait
+    if _moveActive and _moveEngine is not None and _teensy is not None:
+        # Use telemetry-synced period if available, else fallback
+        if _telemSyncActive and ctrl.teensyLoopUs > 0:
+            dt_seconds = ctrl.teensyLoopUs / 1_000_000.0
+        else:
+            dt_seconds = 6.024 / 1000.0  # 166Hz fallback
+
+        _moveEngine.tick(dt_seconds)
+        _moveTickCount += 1
+        if _moveTickCount >= _moveSendDivisor:
+            _moveTickCount = 0
+            send_cmd(_moveEngine.get_feet_bytes(), force=True)
+
+        if hasattr(_moveEngine, 'is_complete') and _moveEngine.is_complete():
+            _moveActive = False
+            _moveEngine = None
+            send_cmd(b'STAND', force=True)
+            _autoDisableAt = time.time() + _autoDisableS
+        return
     
     if not gaitActive or gaitEngine is None or _teensy is None:
         return
@@ -3722,7 +3562,11 @@ def phase_auto_disable(ctrl):
         reason = getattr(ctrl, 'autoDisableReason', None)
         gen = getattr(ctrl, 'autoDisableGen', 0)
         if gen == _autoDisableGen and reason == _autoDisableReason:
-            if ctrl.teensy is not None and ctrl.state[IDX_ROBOT_ENABLED] == 1.0:
+            if getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid:
+                enabled_now = ctrl.system_telem.robot_enabled
+            else:
+                enabled_now = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if (ctrl.state and len(ctrl.state) > IDX_ROBOT_ENABLED) else False
+            if ctrl.teensy is not None and enabled_now:
                 send_cmd(b'DISABLE', force=True)
                 if ctrl.verbose:
                     print(f"\nAuto DISABLE executed (reason={reason})", end="\r\n")

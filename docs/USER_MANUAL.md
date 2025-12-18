@@ -1,6 +1,6 @@
 # MARS Hexapod User Manual
 
-Revision: Firmware 0.2.36/b152 · Controller 0.5.27/b138
+Revision: Firmware 0.2.41/b157 · Controller 0.5.39/b151
 
 > Command imperative: Whenever firmware (`FW_VERSION`/`FW_BUILD`) or controller
 > (`CONTROLLER_VERSION`/`CONTROLLER_BUILD`) behavior changes, this manual **must**
@@ -163,6 +163,7 @@ On startup the controller:
 - `t` – firmware test gait
 - `k` – TUCK posture (with auto-disable)
 - `s` – STAND posture
+- `u` – Pounce (spider-like jump attack sequence)
 - `q` – idle + `LEG ALL DISABLE` + `DISABLE` (soft E‑STOP)
 
 ### 4.3 Gamepad Controls (High Level)
@@ -170,6 +171,7 @@ On startup the controller:
 - `LB` – toggle gait (Python gait engine)
 - `RB` – cycle gait type (Tripod, Wave, Ripple, Stationary)
 - `Y` – TUCK posture
+- `Back+Y` – Pounce (safe combo; hold Back/Select, then press Y)
 - `X` – toggle firmware MODE (TEST/IDLE)
 - `A` – STAND
 - `B` – HOME
@@ -183,6 +185,8 @@ On startup the controller:
 
 Tabs:
 
+Displayed order (left sidebar): Info, Sys, Eyes, Gait, Posture, Safety, PID, IMP, EST.
+
 - **Eyes** – eye shape, color, vertical center (V Center), horizontal spacing,
   CRT effect and other visual tweaks. Eye settings persist in `controller.ini`
   under `[eyes]` (shape, colors, center_offset/vertical_offset,
@@ -190,13 +194,13 @@ Tabs:
 - **Gait** – step height, length, turn rate (max yaw deg/s), cycle time,
   start/stop
 - **Posture** – Stand, Tuck, Home
-- **Info** – Battery, current, loop time, IMU, max servo temp, versions
+- **Posture** – Stand, Tuck, Home, Pounce (spider-like jump attack sequence) + Pounce tuning sliders (timing and reach), persisted in `controller.ini` under `[pounce]`.
+- **Info** – Battery, current, loop time, IMU, servo voltage, max servo temp, versions
 - **Safety** – view of firmware safety state (OK/LOCKOUT),
   cause/override masks, clearance, soft limits, collision flag, and
   temperature lockout threshold, plus actions that send `SAFETY CLEAR`
   and `SAFETY OVERRIDE <ALL|TEMP|COLLISION|NONE>` commands to the Teensy.
-- **System** – theme, palette, brightness, auto-disable, verbosity, mirror,
-  and average servo temperature metric.
+- **System** – theme, palette, brightness, auto-disable, verbosity, mirror.
 - **PID** – firmware PID tuning and mode controls; values display live via `PID LIST` and edits persist in `controller.ini` under `[pid]`.
 - **IMP** – firmware impedance tuning (joint/cart, deadbands, scaling); values display live via `IMP LIST` and edits persist in `controller.ini` under `[imp]`.
 - **EST** – estimator tuning (alpha parameters); values display live via `EST LIST` and edits persist in `controller.ini` under `[est]`.
@@ -274,7 +278,7 @@ tab and safety overlay in sync with the Teensy.
 
 - `/config.txt` keys control loop rate, safety toggles, tuck parameters,
   test gait parameters, logging mode/rate, and more.
-- Many commands (e.g., `LOG`, `TEST OVERLAP`, `TUCK SET`, `SAFETY`) both apply
+- Many commands (e.g., `LOG`, `TEST ...`, `TUCK SET`, `SAFETY`) both apply
   changes live and write them back to `/config.txt`.
 
 ---
@@ -382,6 +386,7 @@ hard safety mode:
 - `t` – firmware TEST gait
 - `k` – TUCK posture (with auto‑disable)
 - `s` – STAND posture
+- `u` – Pounce (spider-like jump attack sequence)
 - `q` – idle + `LEG ALL DISABLE` + `DISABLE` (soft E‑STOP)
 
 ### 8.3 Mirror Window Keys (OpenCV)
@@ -407,6 +412,7 @@ control the on‑screen menu without using the terminal or gamepad:
 - `LB` – toggle Python gait
 - `RB` – cycle gait type (Tripod/Wave/Ripple/Stationary)
 - `Y` – TUCK posture
+- `Back+Y` – Pounce
 - `X` – toggle firmware MODE (TEST/IDLE)
 - `A` – STAND
 - `B` – HOME

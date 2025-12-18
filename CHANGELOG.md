@@ -1,3 +1,114 @@
+## Python Controller 0.5.48 (b160) — 2025-12-18
+
+- Added `__all__` exports to all modularized files for explicit public API.
+- Updated MODULARIZATION_PLAN.md to mark project complete with final line counts.
+- Final module sizes: telemetry (385), config_manager (663), posture (292), mars_state (385), display_thread (613), input_handler (407).
+
+## Python Controller 0.5.47 (b159) — 2025-12-18
+
+- Modularization Phase 7 (Final): Cleanup and consolidation.
+- Removed duplicate get_font function (now uses display_thread.get_font).
+- Consolidated imports and removed unused code.
+- Final result: controller.py 3838→3825 lines.
+- **Modularization complete**: 4844→3825 lines (~21% reduction). New modules: telemetry.py, config_manager.py, posture.py, mars_state.py, display_thread.py, input_handler.py.
+
+## Python Controller 0.5.46 (b158) — 2025-12-18
+
+- Modularization Phase 6: Extracted `input_handler.py` module (407 lines) with keyboard, gamepad, and Teensy I/O functions.
+- Components: init_keyboard/cleanup_keyboard/poll_keyboard, find_gamepad/testForGamePad, find_teensy/read_teensy/read_teensy_bytes.
+- Constants: XboxButton, XboxAxis classes with button/axis codes; normalize_joystick/normalize_trigger helpers.
+- Progress: controller.py 3946→3838 lines (-108 lines, ~3% reduction this phase).
+
+## Python Controller 0.5.45 (b157) — 2025-06-18
+
+- Modularization Phase 5: Extracted `display_thread.py` module (520 lines) with DisplayThread, UpdateDisplay, getColor, drawLogo, drawMarsSplash, and get_font.
+- Frame change detection and hash-based display update optimization moved to module.
+- Pattern: UpdateDisplay wrapper in controller.py injects globals (_marsMenu, ctrl, palettes) for backward compatibility.
+- Progress: controller.py 4422→3946 lines (-476 lines, ~11% reduction this phase).
+
+## Python Controller 0.5.44 (b156) — 2025-06-18
+
+- Modularization Phase 4: Created `mars_state.py` module with state container dataclasses (366 lines).
+- Containers: MarsControllerState, LoopTimingState, TeensyState, GaitState, MoveState, DisplayState, EyeSettings, PounceSettings, MenuSettings, SafetyState, AutoDisableState, DebugState, TelemetryArrays.
+- Factory functions: create_default_state(), create_gait_state_from_config(), create_eye_settings_from_config(), create_pounce_settings_from_config().
+- Foundation for gradually migrating ~150+ scattered global variables to structured containers.
+
+## Python Controller 0.5.43 (b155) — 2025-06-18
+
+- Modularization Phase 3: Extracted `posture.py` module with ensure_enabled, apply_posture, and start_pounce_move functions (281 lines).
+- Pattern: Wrappers in controller.py delegate to posture_module while preserving the original API and auto-disable state synchronization.
+- Progress: controller.py now at 4402 lines (from ~4844 original, ~9% reduction over 3 phases).
+
+## Python Controller 0.5.42 (b154) — 2025-12-18
+
+- Modularization Phase 2: Extracted `config_manager.py` module with save functions (save_gait_settings, save_pounce_settings, save_eye_*, save_menu_settings, save_pid/imp/est_settings) and config dataclasses.
+- Code cleanup: controller.py reduced by additional ~220 lines; save functions now reusable.
+
+## Python Controller 0.5.41 (b153) — 2025-12-18
+
+- Modularization Phase 1: Extracted `telemetry.py` module with all telemetry dataclasses (SystemTelemetry, ServoTelemetry, LegTelemetry, SafetyTelemetry), IDX_* constants, processTelemS1-S5 parsers, and helper functions.
+- Code cleanup: controller.py reduced by ~170 lines; telemetry code now reusable across modules.
+
+## Firmware 0.2.42 (b158) — 2025-12-18
+
+- Bugfix: Removed duplicate jitter metrics calculation block in loopTick() that was wasting cycles and double-counting jitter stats.
+- Code review: Added new TODO items for loopTick() refactor, globals.h consolidation, and controller.py modularization.
+
+## Python Controller 0.5.40 (b152) — 2025-12-18
+
+- UX: Use real Mars photo (ESA/Rosetta, CC BY-SA 3.0 IGO) for startup splash instead of procedural drawing.
+
+## Python Controller 0.5.39 (b151) — 2025-12-17
+
+- UX: Replaced LCD startup banner with a Mars splash image on black and overlaid firmware/controller versions.
+
+## Python Controller 0.5.38 (b150) — 2025-12-17
+
+- Version/docs: Updated controller startup banner firmware version string to match current firmware (0.2.41/b157).
+
+## Python Controller 0.5.37 (b149) — 2025-12-17
+
+- Telemetry/protocol: Added binary framed S4 parsing (type=4, 6 per-leg contact flags) to match firmware S4 frames.
+
+## Python Controller 0.5.36 (b148) — 2025-12-16
+
+- Telemetry/protocol: Extended binary S1 parsing to include battery/current/IMU fields when present (FW 0.2.38+), so INFO shows real values in pure-binary mode.
+
+## Python Controller 0.5.35 (b147) — 2025-12-16
+
+- Telemetry/protocol: Prefer binary framed telemetry when available by sending `TELEM BIN 1` (still uses `Y 1` / `Y 0` as the master telemetry enable).
+- Telemetry: Added a framing parser for binary S1/S2/S3/S5 packets while still supporting mixed ASCII command replies (e.g., `PID LIST`).
+
+## Python Controller 0.5.34 (b146) — 2025-12-16
+
+- Telemetry/perf: Reduced per-tick allocations in the telemetry parsing hot path (S1/S2 debug snapshots only captured when telemetry debug is enabled).
+- Perf: Gated raw gamepad event printing behind verbose+telemetry-debug to avoid console I/O overhead during normal operation.
+
+## Python Controller 0.5.33 (b145) — 2025-12-16
+
+- Motion/UI: Added Posture menu tuning parameters for Pounce and persisted them to `controller.ini` (`[pounce]`).
+- Controls: Added launch shortcuts (`Back+Y` on gamepad, `U` on keyboard) to trigger Pounce without opening the menu.
+
+## Python Controller 0.5.32 (b143) — 2025-12-16
+
+- Motion: Added a kinematic “Pounce” move (spider-like jump attack sequence) runnable from the Posture tab.
+
+## Python Controller 0.5.31 (b142) — 2025-12-16
+
+- Menu: Reordered menu tab stack so INFO and SYS appear first; servo voltage and servo temperature metrics are shown only on INFO.
+
+## Python Controller 0.5.30 (b141) — 2025-12-16
+
+- Telemetry: Display rendering now prefers structured telemetry for gait/disabled/contact indicators; safety overlay text now prefers structured safety telemetry.
+
+## Python Controller 0.5.29 (b140) — 2025-12-16
+
+- Telemetry: Finished wiring structured telemetry objects into INFO menu updates, enable gating (menu/gait/posture), and display-thread robot_enabled reporting.
+
+## Python Controller 0.5.28 (b139) — 2025-12-16
+
+- Telemetry: Added lightweight structured telemetry containers (system/servo/leg/safety) and updated S1–S5 parsers to populate them alongside the existing list-based state.
+
 ## Python Controller 0.5.27 (b138) — 2025-12-15
 
 - Version/docs: Startup banner firmware version string updated to match current firmware (0.2.36/b152); updated `docs/USER_MANUAL.md` revision line accordingly.
@@ -81,6 +192,28 @@
 ## Python Controller 0.5.9 (b119) — 2025-12-10
 ### Fixed
 - Eyes V Center wiring: Eyes tab "V Center" slider now drives the `SimpleEyes.eye_vertical_offset` baseline and the display thread's vertical look offset. Vertical eye position changes are visibly reflected on the LCD and persist via a new `[eyes] vertical_offset` key in `controller.ini`.
+
+## Firmware 0.2.38 (b154) — 2025-12-16
+### Added
+- Telemetry: Extended binary S1 payload to include battery/current/IMU fields (battery derived from average servo bus voltage when available; current/IMU reserved when not instrumented).
+
+## Firmware 0.2.41 (b157) — 2025-12-17
+### Added
+- Telemetry: Re-introduced S4 segment (leg contact flags, 6 values in canonical leg order). Currently stubbed to 0 for all legs until foot contact sensing is implemented.
+
+## Firmware 0.2.40 (b156) — 2025-12-17
+### Fixed
+- TEST mode config persistence: `TEST CYCLE/HEIGHT/BASEX/STEPLEN/LIFT/OVERLAP` now updates `/config.txt` (`test.trigait.*`) so `CONFIG` reflects changes and values survive reboot.
+
+## Firmware 0.2.39 (b155) — 2025-12-17
+### Fixed
+- STAND: Clamp neutral IK stance to a reachable workspace (and fall back to a conservative default) so STAND does not fail with `ERR 1 IK_FAIL` when test gait base parameters are tuned out-of-range.
+
+## Firmware 0.2.37 (b153) — 2025-12-16
+### Added
+- Telemetry: Added `TELEM` format-selection command. When `TELEM BIN 1` is set and `Y 1` is enabled, firmware emits compact binary framed telemetry (S1/S2/S3/S5) instead of the ASCII telemetry stream.
+### Compatibility
+- `Y 1` / `Y 0` remains the master telemetry enable/disable switch.
 
 ## Firmware 0.2.36 (b152) — 2025-12-12
 ### Added

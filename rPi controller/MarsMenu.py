@@ -219,6 +219,21 @@ class MarsMenu:
     # Tab labels (ASCII text for font compatibility)
     TAB_LABELS = ["EYE", "GAIT", "POSE", "INFO", "SAFE", "SYS", "PID", "IMP", "EST"]
     TAB_NAMES = ["Eyes", "Gait", "Pose", "Info", "Safety", "Sys", "PID", "IMP", "EST"]
+
+    # Visual ordering for the sidebar tab stack.
+    # Keep MenuCategory numeric IDs stable (they are used as keys) and
+    # control the UI tab order via this mapping.
+    TAB_ORDER = [
+        MenuCategory.INFO,
+        MenuCategory.SYSTEM,
+        MenuCategory.EYES,
+        MenuCategory.GAIT,
+        MenuCategory.POSTURE,
+        MenuCategory.SAFETY,
+        MenuCategory.PID,
+        MenuCategory.IMP,
+        MenuCategory.EST,
+    ]
     
     def __init__(self, touch=None):
         """Initialize the menu system."""
@@ -272,14 +287,19 @@ class MarsMenu:
 
         Returns (start_index, end_index, visible_count, max_per_page, page_index, page_count).
         """
-        total = MenuCategory.COUNT
+        total = len(self.TAB_ORDER)
         if total <= 0:
             return 0, 0, 0, 1, 0, 1
 
         max_per = min(self.MAX_TABS_PER_PAGE, total)
         page_count = (total + max_per - 1) // max_per
-        # Derive page from current tab index
-        page = self._current_tab // max_per
+
+        # Derive page from current tab position within TAB_ORDER
+        try:
+            current_pos = self.TAB_ORDER.index(self._current_tab)
+        except ValueError:
+            current_pos = 0
+        page = current_pos // max_per
         if page >= page_count:
             page = page_count - 1
         start = page * max_per
@@ -320,6 +340,18 @@ class MarsMenu:
             MenuItem("Stand", "action"),
             MenuItem("Tuck", "action"),
             MenuItem("Home", "action"),
+            MenuItem("Pounce", "action"),
+            MenuItem("P Prep", "value", value=400, min_val=100, max_val=1500, step=25, unit="ms"),
+            MenuItem("P Rear", "value", value=250, min_val=50, max_val=1000, step=25, unit="ms"),
+            MenuItem("P Lunge", "value", value=250, min_val=50, max_val=1000, step=25, unit="ms"),
+            MenuItem("P Recov", "value", value=500, min_val=100, max_val=2000, step=50, unit="ms"),
+            MenuItem("P Back1", "value", value=55, min_val=0, max_val=140, step=5, unit="mm"),
+            MenuItem("P Back2", "value", value=75, min_val=0, max_val=180, step=5, unit="mm"),
+            MenuItem("P Push", "value", value=-60, min_val=-200, max_val=0, step=10, unit="mm"),
+            MenuItem("P Strike", "value", value=140, min_val=20, max_val=220, step=10, unit="mm"),
+            MenuItem("P Crouch", "value", value=55, min_val=0, max_val=120, step=5, unit="mm"),
+            MenuItem("P Lift", "value", value=110, min_val=0, max_val=180, step=5, unit="mm"),
+            MenuItem("P FrontZ", "value", value=20, min_val=0, max_val=80, step=5, unit="mm"),
             MenuItem("Stand Height", "value", value=120, min_val=80, max_val=160, step=5, unit="mm"),
             MenuItem("Body Pitch", "value", value=0, min_val=-15, max_val=15, step=1, unit="°"),
             MenuItem("Body Roll", "value", value=0, min_val=-15, max_val=15, step=1, unit="°"),
@@ -339,6 +371,8 @@ class MarsMenu:
                     format_func=lambda v: f"{v:.1f}°" if v is not None else "---"),
             MenuItem("Servo Temp", "info", value=0,
                 format_func=lambda v: f"{v}°C" if (v is not None and v > 0) else "---"),
+            MenuItem("Servo Volt", "info", value=0.0, unit="V",
+                format_func=lambda v: f"{v:.1f}V" if v is not None else "---"),
             MenuItem("FW Version", "info", value="0.0.0"),
             MenuItem("Ctrl Version", "info", value="0.0.0"),
         ]
@@ -369,8 +403,6 @@ class MarsMenu:
                     on_change=self._on_palette_change),
             MenuItem("Brightness", "value", value=100, min_val=10, max_val=100, step=10, unit="%"),
             MenuItem("Auto-Disable", "value", value=5, min_val=0, max_val=30, step=1, unit="s"),
-            MenuItem("Avg Servo Temp", "info", value=0.0,
-                format_func=lambda v: f"{v:.1f}°C" if (v is not None and v > 0) else "---"),
             MenuItem("Verbose", "option", value=0, options=["Off", "On"]),
             MenuItem("Mirror Display", "option", value=0, options=["Off", "On"]),
             MenuItem("Save All", "action"),
@@ -552,11 +584,7 @@ class MarsMenu:
                 item.adjust(-1)
                 self._needs_render = True
             else:
-                # Switch to previous tab
-                self._current_tab = (self._current_tab - 1) % MenuCategory.COUNT
-                self._selected_item = 0
-                self._scroll_offset = 0
-                self._needs_render = True
+                self.nav_tab_left()
     
     def nav_right(self):
         """Adjust value right or switch to next tab."""
@@ -569,17 +597,22 @@ class MarsMenu:
                 item.adjust(1)
                 self._needs_render = True
             else:
-                # Switch to next tab
-                self._current_tab = (self._current_tab + 1) % MenuCategory.COUNT
-                self._selected_item = 0
-                self._scroll_offset = 0
-                self._needs_render = True
+                self.nav_tab_right()
     
     def nav_tab_left(self):
         """Switch to previous tab."""
         if not self._visible:
             return
-        self._current_tab = (self._current_tab - 1) % MenuCategory.COUNT
+
+        total = len(self.TAB_ORDER)
+        if total <= 0:
+            return
+        try:
+            pos = self.TAB_ORDER.index(self._current_tab)
+        except ValueError:
+            pos = 0
+        pos = (pos - 1) % total
+        self._current_tab = self.TAB_ORDER[pos]
         self._selected_item = 0
         self._scroll_offset = 0
         self._needs_render = True
@@ -588,7 +621,16 @@ class MarsMenu:
         """Switch to next tab."""
         if not self._visible:
             return
-        self._current_tab = (self._current_tab + 1) % MenuCategory.COUNT
+
+        total = len(self.TAB_ORDER)
+        if total <= 0:
+            return
+        try:
+            pos = self.TAB_ORDER.index(self._current_tab)
+        except ValueError:
+            pos = 0
+        pos = (pos + 1) % total
+        self._current_tab = self.TAB_ORDER[pos]
         self._selected_item = 0
         self._scroll_offset = 0
         self._needs_render = True
@@ -724,7 +766,11 @@ class MarsMenu:
                     local_idx = relative_y // tab_total
                     # Check if within a tab (not in the gap) and within visible window
                     if local_idx < visible and (relative_y % tab_total) < tab_height:
-                        touched_tab = start + local_idx
+                        touched_pos = start + local_idx
+                        if 0 <= touched_pos < len(self.TAB_ORDER):
+                            touched_tab = self.TAB_ORDER[touched_pos]
+                        else:
+                            return True
                         if touched_tab != self._current_tab:
                             self._current_tab = touched_tab
                             self._selected_item = 0
@@ -735,7 +781,11 @@ class MarsMenu:
                 # MARS theme: visible tabs divide height evenly
                 tab_height = self.HEIGHT // visible
                 local_idx = min(y // tab_height, visible - 1)
-                touched_tab = start + local_idx
+                touched_pos = start + local_idx
+                if 0 <= touched_pos < len(self.TAB_ORDER):
+                    touched_tab = self.TAB_ORDER[touched_pos]
+                else:
+                    return True
                 if touched_tab != self._current_tab:
                     self._current_tab = touched_tab
                     self._selected_item = 0
@@ -1085,16 +1135,18 @@ class MarsMenu:
             draw.text((text_x, text_y), indicator, fill=self.LCARS_BLACK,
                       font=self._font_small)
 
-        for visible_idx, i in enumerate(range(start, end)):
+        for visible_idx, pos in enumerate(range(start, end)):
             y1 = start_y + visible_idx * (tab_height + tab_gap)
             y2 = y1 + tab_height - 1
+
+            cat = self.TAB_ORDER[pos]
             
             # Determine tab color
-            if i == self._current_tab:
+            if cat == self._current_tab:
                 tab_color = colors['tab_selected']
             else:
                 # Use alternating colors from limited palette
-                tab_color = tab_colors[i % len(tab_colors)]
+                tab_color = tab_colors[pos % len(tab_colors)]
             
             # Draw tab with rounded cap on left (LCARS cap = termination/button)
             cap_r = tab_height // 2
@@ -1104,7 +1156,7 @@ class MarsMenu:
             draw.rectangle((tab_x + cap_r, y1, self.TAB_WIDTH - 1, y2), fill=tab_color)
             
             # Tab label (right-aligned, black text on colored background)
-            label = self.TAB_LABELS[i]
+            label = self.TAB_LABELS[cat]
             bbox = draw.textbbox((0, 0), label, font=self._font_small)
             text_w = bbox[2] - bbox[0]
             text_x = self.TAB_WIDTH - text_w - 6
@@ -1273,12 +1325,14 @@ class MarsMenu:
         available_h = max(1, self.HEIGHT - header_h)
         tab_height = available_h // visible
         
-        for visible_idx, i in enumerate(range(start, end)):
+        for visible_idx, pos in enumerate(range(start, end)):
             y1 = header_h + visible_idx * tab_height
             y2 = y1 + tab_height - 1
+
+            cat = self.TAB_ORDER[pos]
             
             # Tab background
-            if i == self._current_tab:
+            if cat == self._current_tab:
                 color = colors['tab_selected']
             else:
                 color = colors['tab']
@@ -1286,18 +1340,18 @@ class MarsMenu:
             draw.rectangle((0, y1, self.TAB_WIDTH - 1, y2), fill=color)
             
             # Tab label (use text name, emoji may not render well)
-            label = self.TAB_NAMES[i]
+            label = self.TAB_NAMES[cat]
             bbox = draw.textbbox((0, 0), label, font=self._font_small)
             text_w = bbox[2] - bbox[0]
             text_h = bbox[3] - bbox[1]
             text_x = (self.TAB_WIDTH - text_w) // 2
             text_y = y1 + (tab_height - text_h) // 2
             
-            text_color = colors['accent'] if i == self._current_tab else colors['text_dim']
+            text_color = colors['accent'] if cat == self._current_tab else colors['text_dim']
             draw.text((text_x, text_y), label, fill=text_color, font=self._font_small)
             
             # Selection indicator
-            if i == self._current_tab:
+            if cat == self._current_tab:
                 draw.rectangle((self.TAB_WIDTH - 3, y1 + 2,
                                 self.TAB_WIDTH - 1, y2 - 2),
                                fill=colors['accent'])

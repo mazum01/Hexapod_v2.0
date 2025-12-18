@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-12-15 (PID/IMP/EST menu persistence + docs cleanup; controller Ctrl 0.5.27 b138)
+Last updated: 2025-12-18 (Modularization complete: Controller 0.5.48 b160; 4844→3826 lines, ~21% reduction; all modules have __all__ exports)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -8,6 +8,38 @@ Conventions
 - Keep items short and actionable; mirror high-level plan in docs/PROJECT_SPEC.md when relevant.
 - Copilot will update this file when TODOs change, and reference it in commits.
  - Reminder: On any behavior change or TODO completion, also bump FW/Controller versions, update in-file change logs, update CHANGELOG.md, and keep docs/USER_MANUAL.md in sync with the new versions.
+
+## Code Review Recommendations (2025-12-18)
+
+### Firmware hygiene
+ - [x] Remove duplicate jitter metrics block (2025-12-18)
+   - Identical jitter calculation block was duplicated in loopTick(). Removed the duplicate to avoid wasted cycles and double-counting.
+ - [ ] Refactor loopTick() into phase helpers
+   - Goal: Split ~1100-line loopTick() into `tickEstimator()`, `tickPID()`, `tickFeedback()`, `tickSafety()`, `tickLogging()` for maintainability.
+   - Priority: Medium. Defer until next major firmware work.
+ - [ ] Consolidate extern declarations into globals.h
+   - Goal: Move ~70 scattered extern declarations in functions.ino into a shared header.
+   - Priority: Medium. Reduces coupling and improves compile-time checks.
+
+### Controller architecture
+ - [x] Split controller.py into modules (2025-12-18) — COMPLETE
+   - Goal: Break 4800-line controller.py into focused modules.
+   - Result: 7 phases completed; controller.py reduced from 4844 to 3825 lines (~21% reduction).
+   - New modules: telemetry.py (385), config_manager.py (646), posture.py (281), mars_state.py (366), display_thread.py (596), input_handler.py (407).
+   - Progress:
+     - [x] Phase 1: telemetry.py extracted (2025-12-18, v0.5.41 b153) — dataclasses, IDX_* constants, processTelemS1-S5, helpers.
+     - [x] Phase 2: config_manager.py extracted (2025-12-18, v0.5.42 b154) — save functions, config dataclasses, set_config_state() for shared state.
+     - [x] Phase 3: posture.py extracted (2025-06-18, v0.5.43 b155) — ensure_enabled, apply_posture, start_pounce_move (281 lines); wrapper pattern.
+     - [x] Phase 4: mars_state.py created (2025-06-18, v0.5.44 b156) — state container dataclasses (366 lines); foundation for global state consolidation.
+     - [x] Phase 5: display_thread.py extracted (2025-06-18, v0.5.45 b157) — DisplayThread, UpdateDisplay, getColor, drawLogo, drawMarsSplash, get_font (520 lines). controller.py: 4422→3946 (-476 lines).
+     - [x] Phase 6: input_handler.py extracted (2025-12-18, v0.5.46 b158) — keyboard/gamepad/Teensy I/O, XboxButton/XboxAxis constants (407 lines). controller.py: 3946→3838 (-108 lines).
+     - [x] Phase 7: Final cleanup (2025-12-18, v0.5.47 b159) — removed duplicates, consolidated imports. controller.py: 3838→3825 lines.
+ - [ ] Unify ASCII/binary telemetry parser interface
+   - Goal: Create single parser interface that handles both formats transparently.
+   - Priority: Medium.
+ - [ ] Complete global state migration into Controller class
+   - Goal: Move remaining `_foo` globals into Controller instance or dedicated state classes.
+   - Priority: Medium.
 
 ## Open tasks (firmware)
 
@@ -96,7 +128,7 @@ Conventions
     - Deliverable: Simple logger writing CSV or JSON lines; toggle via config.
     - Acceptance: Log captures listed events; disabled mode has zero measurable overhead.
 
-  3. [ ] Telemetry data structures upgrade
+  3. [x] Telemetry data structures upgrade (2025-12-16)
     - Goal: Use lightweight structured containers for servo/system telemetry for clarity.
     - Deliverable: Definitions + parser returning structured objects.
     - Acceptance: Parsing performance acceptable; code readability improved.
@@ -106,7 +138,7 @@ Conventions
     - Deliverable: Threshold logic before send_cmd.
     - Acceptance: Serial traffic decreased; control feel unchanged.
 
-  5. [ ] Document telemetry field mapping
+  5. [x] Document telemetry field mapping (2025-12-17)
     - Goal: Clarify S1/S2/S3/S4 schemas and indices.
     - Deliverable: Inline comments + doc snippet.
     - Acceptance: New contributors can interpret telemetry quickly.
@@ -137,6 +169,11 @@ Conventions
     - Goal: Make the "Vertical" (V Center) parameter in the Eyes tab actually move eye positions.
     - Deliverable: Proper plumbing from MarsMenu value into SimpleEyes / DisplayThread so vertical offset changes render location.
     - Acceptance: Changing eye vertical parameter visibly shifts eyes up/down on the LCD.
+
+  11. [x] Telemetry parsing perf pass (2025-12-16)
+    - Goal: Reduce per-tick overhead in the serial telemetry hot path.
+    - Deliverable: Fewer allocations/splits; debug snapshots only when telemetry debug is enabled.
+    - Acceptance: No behavioral changes; improved stability/CPU headroom.
 
   11. [x] Finer eye spacing granularity (2025-12-10)
     - Goal: Reduce horizontal spacing step size for finer tuning.

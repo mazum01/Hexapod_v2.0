@@ -6,6 +6,25 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2025-12-18  v0.5.48 b160: Modularization complete — added __all__ exports to all modules, updated MODULARIZATION_PLAN.md status.
+2025-12-18  v0.5.47 b159: Modularization Phase 7: Final cleanup — removed duplicate get_font, consolidated imports. controller.py: 3838→3825 lines. Total: 4844→3825 (~21% reduction).
+2025-12-18  v0.5.46 b158: Modularization Phase 6: Extracted input_handler.py (407 lines) with keyboard/gamepad/Teensy I/O, XboxButton/XboxAxis constants, normalize_joystick/trigger. controller.py: 3946→3838 (-108 lines).
+2025-06-18  v0.5.45 b157: Modularization Phase 5: Extracted display_thread.py (520 lines) with DisplayThread, UpdateDisplay, getColor, drawLogo, drawMarsSplash, get_font. controller.py: 4422→3946 (-476 lines).
+2025-06-18  v0.5.44 b156: Modularization Phase 4: Created mars_state.py with state container dataclasses (366 lines); foundation for global state consolidation.
+2025-06-18  v0.5.43 b155: Modularization Phase 3: Extracted posture.py with ensure_enabled, apply_posture, start_pounce_move (281 lines); wrapper pattern retains original API.
+2025-12-18  v0.5.42 b154: Modularization Phase 2: Extracted config_manager.py with save functions and config dataclasses.
+2025-12-18  v0.5.41 b153: Modularization Phase 1: Extracted telemetry.py with dataclasses, IDX_* constants, processTelemS1-S5, and helper functions.
+2025-12-18  v0.5.40 b152: UX: Use real Mars photo (ESA/Rosetta, CC BY-SA 3.0 IGO) for startup splash instead of procedural drawing.
+2025-12-17  v0.5.39 b151: UX: Replaced LCD startup banner with a Mars splash image on black and overlaid firmware/controller versions.
+2025-12-17  v0.5.38 b150: Version/docs: Update startup banner firmware version string to match current firmware (0.2.41/b157).
+2025-12-17  v0.5.37 b149: Telemetry/protocol: Added binary framed S4 parsing (type=4, 6 per-leg contact flags) to match firmware S4 frames.
+2025-12-16  v0.5.36 b148: Telemetry/protocol: Extended binary S1 payload parsing to include battery/current/IMU fields so INFO matches ASCII behavior.
+2025-12-16  v0.5.35 b147: Telemetry/protocol: Added binary framed telemetry support (TELEM BIN 1) while keeping Y 1/Y 0 as master enable.
+2025-12-16  v0.5.34 b146: Telemetry/perf: Reduced parse-path allocations and gated raw gamepad event printing behind debug.
+2025-12-16  v0.5.33 b145: Motion/UI: Added Posture menu tuning params for Pounce, persisted to controller.ini; added Back+Y + U shortcuts to launch.
+2025-12-16  v0.5.32 b143: Motion: Added a kinematic “Pounce” move (spider-like jump attack) runnable from Posture menu.
+2025-12-16  v0.5.31 b142: Menu: Reordered tab stack (INFO/SYS first); show servo voltage/temp only on INFO.
+
 2025-11-22  Introduced controller CHANGELOG and in-file header log block.
 2025-11-22  Normalized Teensy command protocol: removed semicolons; LF-only line termination.
 2025-11-22  Added A button enable/disable toggle (LEG ALL ENABLE + ENABLE / DISABLE) using S1 idx9 flag.

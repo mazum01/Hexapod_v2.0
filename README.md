@@ -16,6 +16,7 @@ Firmware for a Teensy 4.1 controlling 18x Hiwonder HTS‑35S serial bus servos v
 - Test mode: tripod gait with tunables (cycle, base X/Y, step length, lift, overlap)
 - ASCII serial protocol with `OK` / `ERR` replies; startup splash and STATUS
 - SD config: `loop_hz`, `servo_id`, `home_cd`, `joint_limits`, `rate_limit`, and `test.trigait.overlap_pct`
+  - Tripod gait SD keys: `test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}`
 
 ## Repo layout
 - `firmware/MARS_Hexapod/`
@@ -51,6 +52,11 @@ See `docs/PROJECT_SPEC.md` for the full protocol and behavior.
 - `home_cd.<LEG>.<coxa|femur|tibia>=<0..24000>`
 - `joint_limits.<LEG>.<joint>.min_deg|max_deg=<deg around home>`
 - `rate_limit.deg_per_s=<float>`
+- `test.trigait.cycle_ms=<750..10000>`
+- `test.trigait.height_mm=<mm, negative down>`
+- `test.trigait.basex_mm=<mm>`
+- `test.trigait.steplen_mm=<mm>`
+- `test.trigait.lift_mm=<mm>`
 - `test.trigait.overlap_pct=<0..25>`
 
 ## Versioning

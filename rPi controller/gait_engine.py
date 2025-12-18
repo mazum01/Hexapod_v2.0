@@ -941,6 +941,189 @@ class StationaryPattern(GaitEngine):
 
 
 #----------------------------------------------------------------------------------------------------------------------
+# Kinematic Move: Pounce / Spider Jump Attack
+#----------------------------------------------------------------------------------------------------------------------
+
+class PounceAttack(GaitEngine):
+    """Short kinematic "pounce" sequence (spider-like jump attack).
+
+    This is not a cyclic gait; it is a timed sequence of poses blended
+    smoothly:
+      1) Move back + crouch on rear 4 legs while lifting front legs
+      2) Spring forward: front legs reach forward and drop to "strike"
+      3) Recover back to neutral stance
+
+    Output is compatible with the Teensy FEET command.
+    """
+
+    # Legs
+    _FRONT = (LEG_LF, LEG_RF)
+    _REAR4 = (LEG_LM, LEG_LR, LEG_RM, LEG_RR)
+
+    def __init__(
+        self,
+        params: Optional[GaitParams] = None,
+        prep_ms: int = 400,
+        rear_ms: int = 250,
+        lunge_ms: int = 250,
+        recover_ms: int = 500,
+        back1_z_mm: float = 55.0,
+        back2_z_mm: float = 75.0,
+        push_z_mm: float = -60.0,
+        strike_z_mm: float = 140.0,
+        crouch_dy_mm: float = 55.0,
+        lift_dy_mm: float = 110.0,
+        front_z_mm: float = 20.0,
+    ):
+        super().__init__(params)
+        self.prep_ms = int(prep_ms)
+        self.rear_ms = int(rear_ms)
+        self.lunge_ms = int(lunge_ms)
+        self.recover_ms = int(recover_ms)
+
+        # Pose parameters (mm)
+        self.back1_z_mm = float(back1_z_mm)
+        self.back2_z_mm = float(back2_z_mm)
+        self.push_z_mm = float(push_z_mm)
+        self.strike_z_mm = float(strike_z_mm)
+        self.crouch_dy_mm = float(crouch_dy_mm)
+        self.lift_dy_mm = float(lift_dy_mm)
+        self.front_z_mm = float(front_z_mm)
+
+        self._elapsed_ms = 0
+        self._start_time = None
+
+        # Initialize feet to a neutral stance
+        self._set_pose(self._pose_home())
+
+    def start(self) -> None:
+        self._start_time = time.monotonic()
+        self._elapsed_ms = 0
+        self.state = GaitState.RUNNING
+        self._set_pose(self._pose_home())
+
+    def is_complete(self) -> bool:
+        return self.state != GaitState.RUNNING
+
+    def tick(self, dt_seconds: float = None) -> List[List[float]]:
+        if self.state != GaitState.RUNNING:
+            return [foot.as_list() for foot in self._feet]
+
+        if dt_seconds is not None:
+            self._elapsed_ms += int(max(0.0, float(dt_seconds)) * 1000.0)
+        elif self._start_time is not None:
+            self._elapsed_ms = int((time.monotonic() - self._start_time) * 1000)
+
+        total_ms = self.prep_ms + self.rear_ms + self.lunge_ms + self.recover_ms
+        t = max(0, min(self._elapsed_ms, total_ms))
+
+        home = self._pose_home()
+        prep = self._pose_prep()
+        rear = self._pose_rear()
+        lunge = self._pose_lunge()
+
+        if t < self.prep_ms:
+            pose = self._blend_pose(home, prep, self._ease(t / max(1, self.prep_ms)))
+        elif t < self.prep_ms + self.rear_ms:
+            tt = (t - self.prep_ms) / max(1, self.rear_ms)
+            pose = self._blend_pose(prep, rear, self._ease(tt))
+        elif t < self.prep_ms + self.rear_ms + self.lunge_ms:
+            tt = (t - self.prep_ms - self.rear_ms) / max(1, self.lunge_ms)
+            pose = self._blend_pose(rear, lunge, self._ease(tt))
+        else:
+            tt = (t - self.prep_ms - self.rear_ms - self.lunge_ms) / max(1, self.recover_ms)
+            pose = self._blend_pose(lunge, home, self._ease(tt))
+
+        self._set_pose(pose)
+
+        if self._elapsed_ms >= total_ms:
+            self.state = GaitState.STOPPED
+
+        return [foot.as_list() for foot in self._feet]
+
+    @staticmethod
+    def _ease(x: float) -> float:
+        """Cubic ease-in-out in [0,1]."""
+        x = max(0.0, min(1.0, float(x)))
+        return 3.0 * x * x - 2.0 * x * x * x
+
+    def _clamp_y(self, y: float) -> float:
+        """Keep feet Y in a conservative range (Y is vertical; negative = down)."""
+        # Avoid commanding feet above the hip plane (y >= 0). Keep at least -30mm.
+        return min(float(y), -30.0)
+
+    def _pose_home(self) -> List[Tuple[float, float, float]]:
+        bx = float(self.params.base_x_mm)
+        by = float(self.params.base_y_mm)
+        return [(bx, by, 0.0) for _ in range(NUM_LEGS)]
+
+    def _pose_prep(self) -> List[Tuple[float, float, float]]:
+        bx = float(self.params.base_x_mm)
+        by = float(self.params.base_y_mm)
+
+        # Prep pose is a partial crouch/lift before the full rear set.
+        crouch_y = self._clamp_y(by + 0.75 * self.crouch_dy_mm)
+        lift_y = self._clamp_y(by + 0.80 * self.lift_dy_mm)
+        back_z = self.back1_z_mm   # rear feet forward -> body shifts back
+        front_z = self.front_z_mm
+
+        pose = [(bx, by, 0.0) for _ in range(NUM_LEGS)]
+        for leg in self._REAR4:
+            pose[leg] = (bx, crouch_y, back_z)
+        for leg in self._FRONT:
+            pose[leg] = (bx, lift_y, front_z)
+        return pose
+
+    def _pose_rear(self) -> List[Tuple[float, float, float]]:
+        bx = float(self.params.base_x_mm)
+        by = float(self.params.base_y_mm)
+
+        crouch_y = self._clamp_y(by + self.crouch_dy_mm)
+        lift_y = self._clamp_y(by + self.lift_dy_mm)
+        back_z = self.back2_z_mm
+        # Keep front feet nearer to the body as they lift.
+        front_z = max(0.0, self.front_z_mm - 10.0)
+
+        pose = [(bx, by, 0.0) for _ in range(NUM_LEGS)]
+        for leg in self._REAR4:
+            pose[leg] = (bx, crouch_y, back_z)
+        for leg in self._FRONT:
+            pose[leg] = (bx, lift_y, front_z)
+        return pose
+
+    def _pose_lunge(self) -> List[Tuple[float, float, float]]:
+        bx = float(self.params.base_x_mm)
+        by = float(self.params.base_y_mm)
+
+        # Front legs reach forward and drop to ground.
+        strike_z = self.strike_z_mm
+        # Rear legs push backward to "launch".
+        push_z = self.push_z_mm
+
+        pose = [(bx, by, 0.0) for _ in range(NUM_LEGS)]
+        for leg in self._FRONT:
+            pose[leg] = (bx, by, strike_z)
+        for leg in self._REAR4:
+            pose[leg] = (bx, by, push_z)
+        return pose
+
+    @staticmethod
+    def _blend_pose(a: List[Tuple[float, float, float]], b: List[Tuple[float, float, float]], t: float) -> List[Tuple[float, float, float]]:
+        t = max(0.0, min(1.0, float(t)))
+        out: List[Tuple[float, float, float]] = []
+        for i in range(NUM_LEGS):
+            ax, ay, az = a[i]
+            bx, by, bz = b[i]
+            out.append((ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t))
+        return out
+
+    def _set_pose(self, pose: List[Tuple[float, float, float]]) -> None:
+        for i in range(NUM_LEGS):
+            x, y, z = pose[i]
+            self._feet[i] = FootTarget(x=float(x), y=float(y), z=float(z))
+
+
+#----------------------------------------------------------------------------------------------------------------------
 # Gait Transition Manager
 #----------------------------------------------------------------------------------------------------------------------
 
