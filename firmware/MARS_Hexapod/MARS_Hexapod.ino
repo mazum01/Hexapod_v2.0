@@ -4,6 +4,8 @@
 
   Change log (top N entries)
   DIRECTIVE: Every code change (any file) must update BOTH this header list (add a concise dated bullet with FW version) AND `CHANGELOG.md`, bump `FW_VERSION` (patch) and `FW_BUILD`.
+  - 2025-12-19: Refactor: Consolidated ~100+ scattered extern declarations from functions.ino and commandprocessor.ino into new globals.h header. Improves maintainability and eliminates duplicate extern blocks. FW 0.2.44. (author: copilot)
+  - 2025-12-18: Refactor: Extracted tickSafetyChecks() and tickLogging() inline phase helpers from loopTick() for maintainability. Uses lambda for log row deduplication. Added PHASE section markers. No runtime behavior changes. FW 0.2.43. (author: copilot)
   - 2025-12-18: Bugfix: Removed duplicate jitter metrics calculation block in loopTick() that was wasting cycles and double-counting jitter stats. FW 0.2.42. (author: copilot)
   - 2025-12-17: Telemetry: Re-introduced S4 contact segment (6 per-leg contact flags). Currently stubbed to 0 for all legs until foot contact sensing is implemented. FW 0.2.41. (author: copilot)
   - 2025-12-17: TEST mode: Persist tripod test-gait parameters changed via TEST (cycle/height/basex/steplen/lift/overlap) into `/config.txt` (test.trigait.*) so CONFIG reflects updates and values survive reboot. FW 0.2.40. (author: copilot)
@@ -197,11 +199,11 @@ void telemetryBinS5();
 // changes behavior or completes a TODO item. Keep MAJOR/MINOR stable unless
 // explicitly requested.
 #ifndef FW_VERSION
-#define FW_VERSION "0.2.42"
+#define FW_VERSION "0.2.44"
 #endif
 // Monotonic build number (never resets across minor/major). Increment every code edit.
 #ifndef FW_BUILD
-#define FW_BUILD 158
+#define FW_BUILD 160
 #endif
 
 // -----------------------------------------------------------------------------
@@ -1063,6 +1065,230 @@ void loop() {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Phase helpers for loopTick() — inline to avoid call overhead
+// Refactored in FW 0.2.43 for maintainability without runtime impact.
+// -----------------------------------------------------------------------------
+
+// Safety phase: collision keep-out and over-temperature checks (uses global state)
+static inline void tickSafetyChecks() {
+  // Collision check: keep-out between feet in X/Z plane
+  if (!g_lockout) {
+    float clr = g_safety_clearance_mm;
+    if (g_safety_collision_enabled && clr > 0.0f) {
+      float r2 = clr * clr;
+      const uint8_t pairs[][2] = {
+        // Same-side adjacent pairs
+        {LEG_LF, LEG_LM}, {LEG_LM, LEG_LR},
+        {LEG_RF, LEG_RM}, {LEG_RM, LEG_RR},
+        // Opposite-side facing pairs
+        {LEG_LF, LEG_RF}, {LEG_LM, LEG_RM}, {LEG_LR, LEG_RR}
+      };
+      const char* legNames[6] = {"LF", "LM", "LR", "RF", "RM", "RR"};
+      const uint8_t numPairs = (uint8_t)(sizeof(pairs) / sizeof(pairs[0]));
+      for (uint8_t idx = 0; idx < numPairs && !g_lockout; ++idx) {
+        uint8_t i = pairs[idx][0];
+        uint8_t j = pairs[idx][1];
+        float dx = g_foot_body_x_mm[i] - g_foot_body_x_mm[j];
+        float dz = g_foot_body_z_mm[i] - g_foot_body_z_mm[j];
+        float d2 = dx * dx + dz * dz;
+        if (d2 < r2) {
+          if (Serial) {
+            Serial.print(F("COLLISION "));
+            Serial.print(legNames[i]); Serial.print(F("-")); Serial.print(legNames[j]);
+            Serial.print(F(" d_mm=")); Serial.print(sqrtf(d2), 1);
+            Serial.print(F(" < clr=")); Serial.print(clr, 1);
+            Serial.print(F("\r\n"));
+          }
+          bool coll_overridden = (g_override_mask & LOCKOUT_CAUSE_COLLISION) != 0;
+          if (!coll_overridden) {
+            safetyLockoutCollision(i, j);
+          }
+          break;
+        }
+      }
+    }
+  }
+  // Temperature check: lockout on over-temperature (unless overridden)
+  if (!g_lockout) {
+    bool temp_overridden = (g_override_mask & LOCKOUT_CAUSE_TEMP) != 0;
+    if (!temp_overridden) {
+      for (uint8_t L = 0; L < NUM_LEGS && !g_lockout; ++L) {
+        for (uint8_t J = 0; J < LEG_SERVOS; ++J) {
+          if (g_meas_temp_C[L][J] >= (g_safety_temp_lockout_c10 / 10)) {
+            safetyLockoutTemp(L, J, g_meas_temp_C[L][J] * 10);
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+// Logging phase: buffered CSV logging to SD (called at end of tick)
+#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
+static inline void tickLogging() {
+  if (!g_log_enabled) {
+#if MARS_TIMING_PROBES
+    g_probe_log_us = 0;
+#endif
+    return;
+  }
+  ++g_log_tick_counter;
+  if (g_log_sample_div == 0) g_log_sample_div = 1;
+  bool sample_now = ((g_log_tick_counter % g_log_sample_div) == 0);
+  if (!sample_now) {
+#if MARS_TIMING_PROBES
+    g_probe_log_us = 0;
+#endif
+    return;
+  }
+
+  uint32_t log_start_us = micros();
+
+  // Ensure file is open
+  if (!g_log_file) {
+    if (SD.begin(BUILTIN_SDCARD)) {
+      SD.mkdir("/logs");
+      char fname[64];
+      uint32_t ms = millis();
+      snprintf(fname, sizeof(fname), "/logs/%lu_seq%lu.csv", (unsigned long)ms, (unsigned long)g_log_seq);
+      g_log_file = SD.open(fname, FILE_WRITE);
+      if (g_log_file && g_log_header) {
+        g_log_file.print(F("# MARS — Modular Autonomous Robotic System\r\n"));
+        g_log_file.print(F("# FW ")); g_log_file.print(FW_VERSION);
+        g_log_file.print(F(" build=")); g_log_file.print(__DATE__); g_log_file.print(F(" ")); g_log_file.print(__TIME__);
+        g_log_file.print(F("\r\n# loop_hz=")); g_log_file.print((unsigned int)g_loop_hz);
+        g_log_file.print(F(" log_rate_hz=")); g_log_file.print((unsigned int)g_log_rate_hz);
+        g_log_file.print(F(" mode=")); g_log_file.print((unsigned int)g_log_mode);
+        g_log_file.print(F(" div=")); g_log_file.print((unsigned int)g_log_sample_div);
+        g_log_file.print(F(" rotate=")); g_log_file.print(g_log_rotate ? 1 : 0);
+        g_log_file.print(F(" max_bytes=")); g_log_file.print((unsigned long)g_log_max_bytes);
+        g_log_file.print(F(" seq=")); g_log_file.print((unsigned long)g_log_seq);
+        g_log_file.print(F("\r\n# columns: time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err\r\n"));
+        g_log_file.print(F("time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err\r\n"));
+        g_log_file_bytes = g_log_file.size();
+      }
+      g_log_buf_used = 0;
+    } else {
+      g_log_enabled = false; // SD init failure
+    }
+  }
+
+  if (g_log_file) {
+    uint32_t t_ms = millis();
+    uint8_t err = g_last_err;
+    auto writeLogRow = [&](uint8_t leg) {
+      char row[192];
+      int16_t cmd0 = g_last_sent_cd[leg][0];
+      int16_t cmd1 = g_last_sent_cd[leg][1];
+      int16_t cmd2 = g_last_sent_cd[leg][2];
+      int16_t meas0 = g_meas_pos_cd[leg][0];
+      int16_t meas1 = g_meas_pos_cd[leg][1];
+      int16_t meas2 = g_meas_pos_cd[leg][2];
+      uint16_t vin0_mV = g_meas_vin_mV[leg][0];
+      uint16_t vin1_mV = g_meas_vin_mV[leg][1];
+      uint16_t vin2_mV = g_meas_vin_mV[leg][2];
+      uint8_t temp0C = g_meas_temp_C[leg][0];
+      uint8_t temp1C = g_meas_temp_C[leg][1];
+      uint8_t temp2C = g_meas_temp_C[leg][2];
+      uint8_t oos0 = servoIsOOS(leg, 0) ? 1 : 0;
+      uint8_t oos1 = servoIsOOS(leg, 1) ? 1 : 0;
+      uint8_t oos2 = servoIsOOS(leg, 2) ? 1 : 0;
+      int vin0_whole = vin0_mV / 1000; int vin0_tenth = (vin0_mV % 1000) / 100;
+      int vin1_whole = vin1_mV / 1000; int vin1_tenth = (vin1_mV % 1000) / 100;
+      int vin2_whole = vin2_mV / 1000; int vin2_tenth = (vin2_mV % 1000) / 100;
+      int n = snprintf(row, sizeof(row), "%lu,%u,%d,%d,%d.%d,%u,%u,%d,%d,%d.%d,%u,%u,%d,%d,%d.%d,%u,%u,%u\r\n",
+                       (unsigned long)t_ms, (unsigned int)leg,
+                       (int)cmd0, (int)meas0, vin0_whole, vin0_tenth, (unsigned int)temp0C, (unsigned int)oos0,
+                       (int)cmd1, (int)meas1, vin1_whole, vin1_tenth, (unsigned int)temp1C, (unsigned int)oos1,
+                       (int)cmd2, (int)meas2, vin2_whole, vin2_tenth, (unsigned int)temp2C, (unsigned int)oos2,
+                       (unsigned int)err);
+      if (n > 0 && (g_log_buf_used + (uint16_t)n) < sizeof(g_log_buf)) {
+        memcpy(g_log_buf + g_log_buf_used, row, (size_t)n);
+        g_log_buf_used += (uint16_t)n;
+      } else {
+        g_log_file.write(g_log_buf, g_log_buf_used);
+        g_log_file_bytes += g_log_buf_used;
+        g_log_total_bytes += g_log_buf_used;
+        g_log_buf_used = 0;
+        if (n > 0 && (uint16_t)n < sizeof(g_log_buf)) {
+          memcpy(g_log_buf, row, (size_t)n);
+          g_log_buf_used = (uint16_t)n;
+        }
+      }
+    };
+
+    if (g_log_mode == 0) {
+      // Compact: RR leg only
+      uint8_t leg = g_rr_index / LEG_SERVOS;
+      writeLogRow(leg);
+    } else {
+      // Full: all 6 legs
+      for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
+        writeLogRow(leg);
+      }
+    }
+
+    // Flush buffer if 3/4 full
+    if (g_log_buf_used > (sizeof(g_log_buf) * 3 / 4)) {
+      g_log_file.write(g_log_buf, g_log_buf_used);
+      g_log_file_bytes += g_log_buf_used;
+      g_log_total_bytes += g_log_buf_used;
+      g_log_buf_used = 0;
+    }
+
+    // Size-based rotation
+    if (g_log_rotate) {
+      const uint32_t HARD_CLAMP = (1024UL * 1024UL * 1024UL);
+      if (g_log_max_bytes > HARD_CLAMP) g_log_max_bytes = HARD_CLAMP;
+      if ((g_log_file_bytes + g_log_buf_used) >= g_log_max_bytes) {
+        if (g_log_buf_used) {
+          g_log_file.write(g_log_buf, g_log_buf_used);
+          g_log_file_bytes += g_log_buf_used;
+          g_log_total_bytes += g_log_buf_used;
+          g_log_buf_used = 0;
+        }
+        g_log_file.flush();
+        g_log_file.close();
+        ++g_log_seq;
+        char fname2[64];
+        uint32_t ms2 = millis();
+        snprintf(fname2, sizeof(fname2), "/logs/%lu_seq%lu.csv", (unsigned long)ms2, (unsigned long)g_log_seq);
+        g_log_file = SD.open(fname2, FILE_WRITE);
+        g_log_file_bytes = 0;
+        if (g_log_file && g_log_header) {
+          g_log_file.print(F("# MARS — Modular Autonomous Robotic System\r\n"));
+          g_log_file.print(F("# FW ")); g_log_file.print(FW_VERSION);
+          g_log_file.print(F(" build=")); g_log_file.print(__DATE__); g_log_file.print(F(" ")); g_log_file.print(__TIME__);
+          g_log_file.print(F("\r\n# loop_hz=")); g_log_file.print((unsigned int)g_loop_hz);
+          g_log_file.print(F(" log_rate_hz=")); g_log_file.print((unsigned int)g_log_rate_hz);
+          g_log_file.print(F(" mode=")); g_log_file.print((unsigned int)g_log_mode);
+          g_log_file.print(F(" div=")); g_log_file.print((unsigned int)g_log_sample_div);
+          g_log_file.print(F(" rotate=")); g_log_file.print(g_log_rotate ? 1 : 0);
+          g_log_file.print(F(" max_bytes=")); g_log_file.print((unsigned long)g_log_max_bytes);
+          g_log_file.print(F(" seq=")); g_log_file.print((unsigned long)g_log_seq);
+          g_log_file.print(F("\r\n# columns: time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err\r\n"));
+          g_log_file.print(F("time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err\r\n"));
+          g_log_file_bytes = g_log_file.size();
+        }
+      }
+    }
+  }
+
+#if MARS_TIMING_PROBES
+  g_probe_log_us = (uint16_t)(micros() - log_start_us);
+#endif
+}
+#else
+// SD disabled: no-op stub
+static inline void tickLogging() {
+#if MARS_TIMING_PROBES
+  g_probe_log_us = 0;
+#endif
+}
+#endif
+
 static void loopTick() {
   // Measure tick execution time for overrun guard (start at the very top)
   uint32_t tick_start_us = micros();
@@ -1907,66 +2133,11 @@ static void loopTick() {
   // Update BODY-frame foot position estimates before collision checks
   updateFootBodyEstimates();
 
-  // Safety check: keep-out collision between feet in X/Z plane (applies in all modes)
-  if (!g_lockout)
-  {
-    float clr = g_safety_clearance_mm;
-    if (g_safety_collision_enabled && clr > 0.0f) {
-      float r2 = clr * clr;
-      const uint8_t pairs[][2] = {
-        // Same-side adjacent pairs
-        {LEG_LF, LEG_LM}, {LEG_LM, LEG_LR},
-        {LEG_RF, LEG_RM}, {LEG_RM, LEG_RR},
-        // Opposite-side facing pairs
-        {LEG_LF, LEG_RF}, {LEG_LM, LEG_RM}, {LEG_LR, LEG_RR}
-      };
-      const char* legNames[6]  = {"LF", "LM", "LR", "RF", "RM", "RR"};
+  // ========== PHASE: SAFETY CHECKS ==========
+  // Collision keep-out and over-temperature (refactored to tickSafetyChecks)
+  tickSafetyChecks();
 
-      const uint8_t numPairs = (uint8_t)(sizeof(pairs) / sizeof(pairs[0]));
-      for (uint8_t idx = 0; idx < numPairs && !g_lockout; ++idx) {
-        uint8_t i = pairs[idx][0];
-        uint8_t j = pairs[idx][1];
-        float dx = g_foot_body_x_mm[i] - g_foot_body_x_mm[j];
-        float dz = g_foot_body_z_mm[i] - g_foot_body_z_mm[j];
-        float d2 = dx * dx + dz * dz;
-        if (d2 < r2) {
-          if (Serial) {
-            Serial.print(F("COLLISION "));
-            Serial.print(legNames[i]); Serial.print(F("-")); Serial.print(legNames[j]);
-            Serial.print(F(" d_mm=")); Serial.print(sqrtf(d2), 1);
-            Serial.print(F(" < clr=")); Serial.print(clr, 1);
-            Serial.print(F("\r\n"));
-          }
-          bool coll_overridden = (g_override_mask & LOCKOUT_CAUSE_COLLISION) != 0;
-          if (!coll_overridden) {
-            safetyLockoutCollision(i, j);
-          }
-          break;
-        }
-      }
-    }
-  }
-
-  // Safety check: lockout on over-temperature (unless TEMP cause is overridden)
-  if (!g_lockout)
-  {
-    bool temp_overridden = (g_override_mask & LOCKOUT_CAUSE_TEMP) != 0;
-    if (!temp_overridden)
-    {
-      for (uint8_t L = 0; L < NUM_LEGS && !g_lockout; ++L)
-      {
-        for (uint8_t J = 0; J < LEG_SERVOS; ++J)
-        {
-          if (g_meas_temp_C[L][J] >= (g_safety_temp_lockout_c10 / 10))
-          {
-            safetyLockoutTemp(L, J, g_meas_temp_C[L][J] * 10);
-            break;
-          }
-        }
-      }
-    }
-  }
-
+  // ========== PHASE: OVERRUN GUARD ==========
   // Overrun guard and adaptive loop rate adjustment
   uint32_t period_us = (g_loop_hz > 0) ? (1000000UL / (uint32_t)g_loop_hz) : 0;
   uint32_t tick_elapsed_us = micros() - tick_start_us;
@@ -2012,186 +2183,9 @@ static void loopTick() {
   }
 #endif
 
-  //#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-  // --- Buffered CSV logging (compact/full modes) ---
-  if (g_log_enabled) {
-    ++g_log_tick_counter;
-    if (g_log_sample_div == 0) g_log_sample_div = 1;
-    bool sample_now = ((g_log_tick_counter % g_log_sample_div) == 0);
-    if (sample_now) {
-      uint32_t log_start_us = micros();
-      // Ensure file is open
-      if (!g_log_file) {
-        if (SD.begin(BUILTIN_SDCARD)) {
-          SD.mkdir("/logs");
-          char fname[64];
-          uint32_t ms = millis();
-          snprintf(fname, sizeof(fname), "/logs/%lu_seq%lu.csv", (unsigned long)ms, (unsigned long)g_log_seq);
-          g_log_file = SD.open(fname, FILE_WRITE);
-          if (g_log_file && g_log_header) {
-            g_log_file.print(F("# MARS — Modular Autonomous Robotic System\r\n"));
-            g_log_file.print(F("# FW ")); g_log_file.print(FW_VERSION);
-            g_log_file.print(F(" build=")); g_log_file.print(__DATE__); g_log_file.print(F(" ")); g_log_file.print(__TIME__);
-            g_log_file.print(F("\r\n# loop_hz=")); g_log_file.print((unsigned int)g_loop_hz);
-            g_log_file.print(F(" log_rate_hz=")); g_log_file.print((unsigned int)g_log_rate_hz);
-            g_log_file.print(F(" mode=")); g_log_file.print((unsigned int)g_log_mode);
-            g_log_file.print(F(" div=")); g_log_file.print((unsigned int)g_log_sample_div);
-            g_log_file.print(F(" rotate=")); g_log_file.print(g_log_rotate ? 1 : 0);
-            g_log_file.print(F(" max_bytes=")); g_log_file.print((unsigned long)g_log_max_bytes);
-            g_log_file.print(F(" seq=")); g_log_file.print((unsigned long)g_log_seq);
-            g_log_file.print(F("\r\n# columns: time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err\r\n"));
-            g_log_file.print(F("time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err\r\n"));
-            g_log_file_bytes = g_log_file.size();
-          }
-          g_log_buf_used = 0;
-        } else {
-          g_log_enabled = false; // SD init failure
-        }
-      }
-
-      if (g_log_file) {
-        uint32_t t_ms = millis();
-        uint8_t err = g_last_err;
-        if (g_log_mode == 0) {
-          uint8_t leg = g_rr_index / LEG_SERVOS;
-          char row[192];
-          int16_t cmd0 = g_last_sent_cd[leg][0];
-          int16_t cmd1 = g_last_sent_cd[leg][1];
-          int16_t cmd2 = g_last_sent_cd[leg][2];
-          int16_t meas0 = g_meas_pos_cd[leg][0];
-          int16_t meas1 = g_meas_pos_cd[leg][1];
-          int16_t meas2 = g_meas_pos_cd[leg][2];
-          uint16_t vin0_mV = g_meas_vin_mV[leg][0];
-          uint16_t vin1_mV = g_meas_vin_mV[leg][1];
-          uint16_t vin2_mV = g_meas_vin_mV[leg][2];
-          uint8_t temp0C = g_meas_temp_C[leg][0];
-          uint8_t temp1C = g_meas_temp_C[leg][1];
-          uint8_t temp2C = g_meas_temp_C[leg][2];
-          uint8_t oos0 = servoIsOOS(leg, 0) ? 1 : 0;
-          uint8_t oos1 = servoIsOOS(leg, 1) ? 1 : 0;
-          uint8_t oos2 = servoIsOOS(leg, 2) ? 1 : 0;
-          int vin0_whole = vin0_mV / 1000; int vin0_tenth = (vin0_mV % 1000) / 100;
-          int vin1_whole = vin1_mV / 1000; int vin1_tenth = (vin1_mV % 1000) / 100;
-          int vin2_whole = vin2_mV / 1000; int vin2_tenth = (vin2_mV % 1000) / 100;
-          int n = snprintf(row, sizeof(row), "%lu,%u,%d,%d,%d.%d,%u,%u,%d,%d,%d.%d,%u,%u,%d,%d,%d.%d,%u,%u,%u\r\n",
-                           (unsigned long)t_ms, (unsigned int)leg,
-                           (int)cmd0, (int)meas0, vin0_whole, vin0_tenth, (unsigned int)temp0C, (unsigned int)oos0,
-                           (int)cmd1, (int)meas1, vin1_whole, vin1_tenth, (unsigned int)temp1C, (unsigned int)oos1,
-                           (int)cmd2, (int)meas2, vin2_whole, vin2_tenth, (unsigned int)temp2C, (unsigned int)oos2,
-                           (unsigned int)err);
-          if (n > 0 && (g_log_buf_used + (uint16_t)n) < sizeof(g_log_buf)) {
-            memcpy(g_log_buf + g_log_buf_used, row, (size_t)n);
-            g_log_buf_used += (uint16_t)n;
-          }
-          else {
-            g_log_file.write(g_log_buf, g_log_buf_used); g_log_file_bytes += g_log_buf_used; g_log_total_bytes += g_log_buf_used; g_log_buf_used = 0;
-            if (n > 0 && (uint16_t)n < sizeof(g_log_buf)) {
-              memcpy(g_log_buf, row, (size_t)n);
-              g_log_buf_used = (uint16_t)n;
-            }
-          }
-        } else {
-          for (uint8_t leg = 0; leg < NUM_LEGS; ++leg) {
-            char row[192];
-            int16_t cmd0 = g_last_sent_cd[leg][0];
-            int16_t cmd1 = g_last_sent_cd[leg][1];
-            int16_t cmd2 = g_last_sent_cd[leg][2];
-            int16_t meas0 = g_meas_pos_cd[leg][0];
-            int16_t meas1 = g_meas_pos_cd[leg][1];
-            int16_t meas2 = g_meas_pos_cd[leg][2];
-            uint16_t vin0_mV = g_meas_vin_mV[leg][0];
-            uint16_t vin1_mV = g_meas_vin_mV[leg][1];
-            uint16_t vin2_mV = g_meas_vin_mV[leg][2];
-            uint8_t temp0C = g_meas_temp_C[leg][0];
-            uint8_t temp1C = g_meas_temp_C[leg][1];
-            uint8_t temp2C = g_meas_temp_C[leg][2];
-            uint8_t oos0 = servoIsOOS(leg, 0) ? 1 : 0;
-            uint8_t oos1 = servoIsOOS(leg, 1) ? 1 : 0;
-            uint8_t oos2 = servoIsOOS(leg, 2) ? 1 : 0;
-            int vin0_whole = vin0_mV / 1000; int vin0_tenth = (vin0_mV % 1000) / 100;
-            int vin1_whole = vin1_mV / 1000; int vin1_tenth = (vin1_mV % 1000) / 100;
-            int vin2_whole = vin2_mV / 1000; int vin2_tenth = (vin2_mV % 1000) / 100;
-            int n = snprintf(row, sizeof(row), "%lu,%u,%d,%d,%d.%d,%u,%u,%d,%d,%d.%d,%u,%u,%d,%d,%d.%d,%u,%u,%u\r\n",
-                             (unsigned long)t_ms, (unsigned int)leg,
-                             (int)cmd0, (int)meas0, vin0_whole, vin0_tenth, (unsigned int)temp0C, (unsigned int)oos0,
-                             (int)cmd1, (int)meas1, vin1_whole, vin1_tenth, (unsigned int)temp1C, (unsigned int)oos1,
-                             (int)cmd2, (int)meas2, vin2_whole, vin2_tenth, (unsigned int)temp2C, (unsigned int)oos2,
-                             (unsigned int)err);
-            if (n > 0 && (g_log_buf_used + (uint16_t)n) < sizeof(g_log_buf)) {
-              memcpy(g_log_buf + g_log_buf_used, row, (size_t)n);
-              g_log_buf_used += (uint16_t)n;
-            }
-            else {
-              g_log_file.write(g_log_buf, g_log_buf_used); g_log_file_bytes += g_log_buf_used; g_log_total_bytes += g_log_buf_used; g_log_buf_used = 0;
-              if (n > 0 && (uint16_t)n < sizeof(g_log_buf)) {
-                memcpy(g_log_buf, row, (size_t)n);
-                g_log_buf_used = (uint16_t)n;
-              }
-            }
-          }
-        }
-
-        // Flush/rotate inside file-opened scope
-        if (g_log_buf_used > (sizeof(g_log_buf) * 3 / 4)) {
-          g_log_file.write(g_log_buf, g_log_buf_used);
-          g_log_file_bytes += g_log_buf_used;
-          g_log_total_bytes += g_log_buf_used;
-          g_log_buf_used = 0;
-        }
-        if (g_log_rotate) {
-          const uint32_t HARD_CLAMP = (1024UL * 1024UL * 1024UL);
-          if (g_log_max_bytes > HARD_CLAMP) g_log_max_bytes = HARD_CLAMP;
-          if ((g_log_file_bytes + g_log_buf_used) >= g_log_max_bytes) {
-            if (g_log_buf_used) {
-              g_log_file.write(g_log_buf, g_log_buf_used);
-              g_log_file_bytes += g_log_buf_used;
-              g_log_total_bytes += g_log_buf_used;
-              g_log_buf_used = 0;
-            }
-            g_log_file.flush();
-            g_log_file.close();
-            ++g_log_seq;
-            char fname2[64];
-            uint32_t ms2 = millis();
-            snprintf(fname2, sizeof(fname2), "/logs/%lu_seq%lu.csv", (unsigned long)ms2, (unsigned long)g_log_seq);
-            g_log_file = SD.open(fname2, FILE_WRITE);
-            g_log_file_bytes = 0;
-            if (g_log_file && g_log_header) {
-              g_log_file.print(F("# MARS — Modular Autonomous Robotic System\r\n"));
-              g_log_file.print(F("# FW ")); g_log_file.print(FW_VERSION);
-              g_log_file.print(F(" build=")); g_log_file.print(__DATE__); g_log_file.print(F(" ")); g_log_file.print(__TIME__);
-              g_log_file.print(F("\r\n# loop_hz=")); g_log_file.print((unsigned int)g_loop_hz);
-              g_log_file.print(F(" log_rate_hz=")); g_log_file.print((unsigned int)g_log_rate_hz);
-              g_log_file.print(F(" mode=")); g_log_file.print((unsigned int)g_log_mode);
-              g_log_file.print(F(" div=")); g_log_file.print((unsigned int)g_log_sample_div);
-              g_log_file.print(F(" rotate=")); g_log_file.print(g_log_rotate ? 1 : 0);
-              g_log_file.print(F(" max_bytes=")); g_log_file.print((unsigned long)g_log_max_bytes);
-              g_log_file.print(F(" seq=")); g_log_file.print((unsigned long)g_log_seq);
-              g_log_file.print(F("\r\n# columns: time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err\r\n"));
-              g_log_file.print(F("time_ms,leg,cmd0_cd,meas0_cd,vin0_V,temp0_C,oos0,cmd1_cd,meas1_cd,vin1_V,temp1_C,oos1,cmd2_cd,meas2_cd,vin2_V,temp2_C,oos2,err\r\n"));
-              g_log_file_bytes = g_log_file.size();
-            }
-          }
-        }
-        // End of logging operations for this sampled tick: capture duration
-#if MARS_TIMING_PROBES
-        g_probe_log_us = (uint16_t)(micros() - log_start_us);
-#endif
-      }
-    } else {
-#if MARS_TIMING_PROBES
-      g_probe_log_us = 0;
-#endif
-    }
-  }
-  else {
-#if MARS_TIMING_PROBES
-    // When logging is disabled entirely, ensure probe reads 0 each tick.
-    g_probe_log_us = 0;
-#endif
-  }
-#endif
+  // ========== PHASE: SD LOGGING ==========
+  // Buffered CSV logging (refactored to tickLogging)
+  tickLogging();
 }
 // moved helpers to functions.ino
 

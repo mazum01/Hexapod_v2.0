@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-12-18 (Controller 0.5.49 b161: unified telemetry parser, is_robot_enabled/ensure_enabled() helpers)
+Last updated: 2025-12-19 (Completed body leveling with tilt safety and menu controls)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -14,12 +14,16 @@ Conventions
 ### Firmware hygiene
  - [x] Remove duplicate jitter metrics block (2025-12-18)
    - Identical jitter calculation block was duplicated in loopTick(). Removed the duplicate to avoid wasted cycles and double-counting.
- - [ ] Refactor loopTick() into phase helpers
-   - Goal: Split ~1100-line loopTick() into `tickEstimator()`, `tickPID()`, `tickFeedback()`, `tickSafety()`, `tickLogging()` for maintainability.
-   - Priority: Medium. Defer until next major firmware work.
- - [ ] Consolidate extern declarations into globals.h
-   - Goal: Move ~70 scattered extern declarations in functions.ino into a shared header.
-   - Priority: Medium. Reduces coupling and improves compile-time checks.
+ - [x] Refactor loopTick() into phase helpers (2025-12-18)
+   - Extracted tickSafetyChecks() (collision + temperature) and tickLogging() (buffered CSV to SD) as inline helpers.
+   - Added PHASE comment markers for remaining in-line blocks.
+   - Lambda-based log row writer deduplicates compact/full mode logic.
+   - FW 0.2.43 b159.
+ - [x] Consolidate extern declarations into globals.h (2025-12-19)
+   - Created globals.h with ~270 lines of centralized extern declarations.
+   - Removed ~90 lines from functions.ino and ~80 lines from commandprocessor.ino.
+   - Added forward declarations for MarsImpedance and LX16AServo classes.
+   - FW 0.2.44 b160.
 
 ### Controller architecture
  - [x] Split controller.py into modules (2025-12-18) — COMPLETE
@@ -134,10 +138,11 @@ Conventions
     - Deliverable: Definitions + parser returning structured objects.
     - Acceptance: Parsing performance acceptable; code readability improved.
 
-  4. [ ] Joystick command tolerance filtering
+  4. [x] Joystick command tolerance filtering (2025-12-19)
     - Goal: Reduce spam by skipping tiny deltas.
     - Deliverable: Threshold logic before send_cmd.
     - Acceptance: Serial traffic decreased; control feel unchanged.
+    - Implementation: Added `send_feet_cmd()` wrapper with tolerance check (default 0.3mm). Compares new FEET positions against last sent; skips transmission if max delta < threshold. Config key `gait.feet_tolerance_mm`.
 
   5. [x] Document telemetry field mapping (2025-12-17)
     - Goal: Clarify S1/S2/S3/S4 schemas and indices.
@@ -215,6 +220,81 @@ Conventions
     - Goal: Give PID/IMP/EST separate tabs that display current firmware values and allow updates from the menu.
     - Deliverable: PID/IMP/EST tabs with LIST polling/parsing and per-field edit callbacks.
     - Acceptance: Values on-screen match `PID LIST` / `IMP LIST` / `EST LIST`, and edits send the matching firmware commands.
+
+## Sensor integration (I²C / Qwiic)
+
+Hardware: SparkFun Qwiic breakouts on Pi 5 I²C-1 (pins 3/5) @ 400 kHz.
+Prerequisite: Set `dtparam=i2c_arm_baudrate=400000` in `/boot/firmware/config.txt`.
+
+### IMU integration (Adafruit BNO085)
+
+  1. [x] IMU driver module (2025-12-19)
+    - Goal: Create `imu_sensor.py` module with threaded I²C polling for orientation data.
+    - Deliverable: `ImuThread` class reading quaternion/euler at configurable rate (default 100 Hz); ring buffer for latest frame; graceful fallback if sensor absent.
+    - Acceptance: Thread runs without blocking gait loop; orientation data accessible via `get_orientation()`.
+    - Implementation: Created `imu_sensor.py` with `ImuThread`, `ImuFrame`, `ImuConfig` classes. Uses adafruit-circuitpython-bno08x library. Integrated into controller.py with config loading (`[imu]` section) and startup/shutdown. Helper functions: `get_imu_orientation()`, `get_imu_frame()`, `is_imu_connected()`. Controller v0.5.50 b162.
+
+  2. [x] IMU data integration (2025-12-19)
+    - Goal: Expose IMU orientation to gait engine for body stabilization.
+    - Deliverable: `ImuFrame` dataclass (timestamp, roll, pitch, yaw, quaternion); integration point in controller main loop.
+    - Acceptance: Orientation available each tick; no gait jitter introduced.
+    - Implementation: ImuFrame dataclass complete. Helper functions `get_imu_orientation()`, `get_imu_frame()`, `is_imu_connected()` provide access. IMU overlay visualization added to DisplayThread (`draw_imu_overlay()`) showing real-time gravity vector with roll/pitch/yaw values. Uses I2C bus 3 (configurable) via adafruit-extended-bus. Controller v0.5.52 b164.
+
+  3. [x] IMU menu tab (2025-12-19)
+    - Goal: Display live IMU data (roll/pitch/yaw) in MarsMenu.
+    - Deliverable: New "IMU" tab showing orientation values, calibration status, update rate.
+    - Acceptance: Values update in real-time; tab navigable via existing menu controls.
+    - Implementation: Added MenuCategory.IMU (index 9) to MarsMenu.py. Tab shows: Status (Connected/Disconnected), Roll/Pitch/Yaw angles, Update Rate, Read/Error counts, I2C Bus/Address, Show Overlay toggle. Tab placed after INFO in visual order. Controller v0.5.53 b165.
+
+  4. [x] Body leveling (2025-12-19)
+    - Goal: Use IMU pitch/roll to adjust body pose and keep chassis level on uneven terrain.
+    - Deliverable: Optional leveling mode that biases foot Z targets based on IMU feedback.
+    - Acceptance: Robot maintains level body when walking on mild slopes; toggle via config/menu.
+    - Safety: If tilt exceeds configurable threshold (default 25°), trigger safety lockout, issue TUCK, and disable servos.
+    - Implementation: New leveling.py module (~200 lines) with LevelingConfig, LevelingState, Z correction formula (Δz = x_hip×sin(pitch) + z_hip×sin(roll)). Integrated into send_feet_cmd(). Tilt safety callback triggers TUCK+DISABLE. Menu items in IMU tab: Leveling toggle, LVL Gain, Max Corr, Tilt Limit, LVL Corrections info. Config in [leveling] section of controller.ini. Controller v0.5.54 b166.
+    - Sub-tasks (all complete):
+      - [x] Z-only leveling (adjust foot Z based on leg position × sin(tilt))
+      - [x] Tilt safety threshold (lockout + tuck + disable on excessive tilt)
+      - [x] Leveling menu items in IMU tab
+      - [x] Config persistence ([leveling] section)
+
+  5. [ ] CoM shift compensation (Phase 2 enhancement)
+    - Goal: Shift body XY position to keep center of mass projection centered in support polygon on slopes.
+    - Deliverable: Optional CoM shift that moves body toward the "high" side of a slope.
+    - Acceptance: Improved stability margin on steeper slopes (>10°); toggle via config/menu.
+    - Depends: Body leveling (item 4) must be complete first.
+
+### ToF sensor integration (VL53L5CX stereo pair)
+
+  6. [ ] ToF driver module
+    - Goal: Create `tof_sensor.py` module with threaded I²C polling for dual VL53L5CX sensors.
+    - Deliverable: `ToFThread` class reading 8×8 distance arrays from both sensors at configurable rate (default 15 Hz); address assignment for left (0x30) and right (0x29); graceful fallback if sensors absent.
+    - Acceptance: Thread runs without blocking gait loop; distance data accessible via `get_tof_frame()`.
+
+  6. [ ] ToF data structures
+    - Goal: Define structured data containers for ToF output.
+    - Deliverable: `ToFFrame` dataclass (timestamp, left 8×8 array, right 8×8 array, sigma/confidence arrays); 3D projection to body-frame point cloud.
+    - Acceptance: Raw sensor data converted to usable spatial representation.
+
+  7. [ ] ToF stereo fusion
+    - Goal: Merge left/right sensor data into unified obstacle representation.
+    - Deliverable: Polar occupancy grid (e.g., 12 sectors × 10 distance bins) or closest-obstacle-per-sector array; sensor mounting transforms configurable.
+    - Acceptance: Fused grid updates at sensor frame rate; no gaps in center overlap region.
+
+  8. [ ] ToF display visualization
+    - Goal: Visualize ToF sensor output on the LCD display.
+    - Deliverable: Overlay or dedicated view showing 8×8 depth grids (color-coded by distance), fused obstacle sectors, or simple "closest obstacle" indicator.
+    - Acceptance: Visualization updates in real-time; togglable via menu or hotkey; does not impact gait loop timing.
+
+  9. [ ] ToF menu tab
+    - Goal: Display ToF sensor status and configuration in MarsMenu.
+    - Deliverable: New "ToF" tab showing sensor status (connected/disconnected), frame rate, closest obstacles per sector, enable/disable toggle.
+    - Acceptance: Tab reflects live sensor state; settings persist to config.
+
+  10. [ ] Reactive obstacle avoidance (Phase 2)
+    - Goal: Use ToF obstacle grid to prevent collisions during autonomous motion.
+    - Deliverable: Gait engine checks obstacle grid before each step; stops or steers away when obstacle detected in travel direction.
+    - Acceptance: Robot stops before hitting obstacle; optional steer-around behavior; safety override always available.
 
 ## Completed
  - [x] Keep STATUS slim (2025-11-12)

@@ -178,11 +178,17 @@
 # 2025-12-18  v0.5.47 b159: Modularization Phase 7: Final cleanup — removed duplicate get_font, consolidated imports. controller.py: 3838→3825 lines. Total reduction: 4844→3825 (~21%).
 # 2025-12-18  v0.5.48 b160: Modularization complete — added __all__ exports to all modules, updated MODULARIZATION_PLAN.md.
 # 2025-12-18  v0.5.49 b161: Architecture: Unified telemetry parser (binary/ASCII via telemetry.py); added is_robot_enabled property and ensure_enabled() method to Controller.
+# 2025-12-19  v0.5.50 b162: Sensors: Added imu_sensor.py module with ImuThread for BNO085; integrated into controller with config loading and startup/shutdown.
+# 2025-12-19  v0.5.51 b163: Display: Added real-time IMU gravity vector visualization overlay showing roll/pitch/yaw with graphical horizon indicator.
+# 2025-12-19  v0.5.52 b164: Sensors: IMU data integration complete; uses I2C bus 3 via adafruit-extended-bus; horizon display reversed; overlay moved to bottom-left.
+# 2025-12-19  v0.5.53 b165: Menu: Added IMU tab to MarsMenu with live orientation, status, read/error counts, I2C config, and overlay toggle.
+# 2025-12-19  v0.5.54 b166: Leveling: Body leveling module (leveling.py) with IMU-based Z corrections; tilt safety threshold triggers TUCK+DISABLE; menu items in IMU tab.
+# 2025-12-20  v0.6.0  b167: IMU Milestone: Complete sensor integration — driver, display overlay, menu tab, body leveling with tilt safety.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.5.49"
+CONTROLLER_VERSION = "0.6.0"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 161
+CONTROLLER_BUILD = 167
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -241,7 +247,7 @@ from telemetry import (
     processTelemS1, processTelemS2, processTelemS3, processTelemS4, processTelemS5,
     parseBinaryS1, parseBinaryS2, parseBinaryS3, parseBinaryS4, parseBinaryS5,
     applyBinaryS1ToState, applyBinaryS5ToState, decodeBinaryFrame,
-    get_safety_overlay_text, getGait, GAIT_NUM_NAMES,
+    get_safety_overlay_text, getGait, GAIT_NAMES,
 )
 
 # import config_manager module (Phase 2 modularization)
@@ -249,7 +255,7 @@ from config_manager import (
     set_config_state,
     save_gait_settings, save_pounce_settings, save_eye_shape,
     save_human_eye_settings, save_eye_center_offset, save_eye_vertical_offset,
-    save_menu_settings, save_pid_settings, save_imp_settings, save_est_settings,
+    save_eye_crt_mode, save_menu_settings, save_pid_settings, save_imp_settings, save_est_settings,
 )
 
 # import posture module (Phase 3 modularization)
@@ -285,6 +291,13 @@ from input_handler import (
     normalize_joystick, normalize_trigger,
     JOYSTICK_CENTER, JOYSTICK_RANGE, TRIGGER_MAX, JOYSTICK_MIN_FOR_STICK,
 )
+
+# import imu_sensor module (sensor integration)
+from imu_sensor import ImuThread, ImuConfig, ImuFrame, create_imu_thread
+
+# import leveling module (body leveling based on IMU)
+import leveling as leveling_module
+from leveling import LevelingConfig, LevelingState, init_leveling, get_leveling_state
 
 # Gait type cycling order (RB button)
 GAIT_TYPES = [TripodGait, WaveGait, RippleGait, StationaryPattern]
@@ -1366,7 +1379,7 @@ def readTeensyBytes(teensy, _verbose=False):
 
 
 # Gait number to string mapping moved to telemetry.py (GAIT_NAMES, getGait)
-# Use GAIT_NUM_NAMES (imported as GAIT_NAMES alias) or getGait() directly
+# Use GAIT_NAMES dict or getGait() helper directly
 
 # testForGamePad, keyboard functions are now imported from input_handler.py
 # The imports provide: testForGamePad, init_keyboard, cleanup_keyboard, poll_keyboard, getkey
@@ -1671,6 +1684,12 @@ _moveActive = False
 _moveTickCount = 0
 _moveSendDivisor = 1  # Send FEET every tick while a kinematic move is active
 
+# FEET command tolerance filtering to reduce serial spam
+_lastFeetPositions = None  # List of 18 floats: [x0, y0, z0, x1, y1, z1, ...] for 6 legs
+_feetToleranceMm = 0.3     # Skip FEET command if max position delta < this threshold (mm)
+_lastFeetSendTime = 0.0    # Monotonic time of last FEET send
+_feetMaxSkipMs = 100.0     # Force send if no FEET sent for this long (prevents stalls during turn/strafe)
+
 # create the Teensy serial object
 _teensy = None
 # create the Xbox controller object
@@ -1742,6 +1761,7 @@ _humanEyeColorGreen = (60, 140, 80)       # Green
 _humanEyeColorHazel = (140, 110, 60)      # Hazel (golden brown-green)
 _humanEyeColorBrown = (100, 60, 30)       # Brown
 _humanEyeColorDarkBrown = (50, 30, 20)    # Dark brown
+_eyeCrtMode = False                       # CRT scanline effect (persisted to config)
 # Menu settings (saved to config)
 _menuTheme = 0      # 0=MARS, 1=LCARS
 _menuPalette = 0    # LCARS palette: 0=Classic, 1=Nemesis, 2=LowerDecks, 3=PADD
@@ -1772,6 +1792,26 @@ def _parse_ini_triplet_int(s):
 _displayThreadEnabled = True
 _displayThreadHz = 15.0
 _blinkFrameDivisor = 2  # Skip N-1 out of N frames during blink (1=no skip, 2=half rate, 3=third rate)
+
+# IMU sensor settings (BNO085)
+_imuEnabled = True  # Set to False if IMU not connected
+_imuHz = 100.0
+_imuAddress = 0x4A  # Default BNO085 address (0x4B if jumper set)
+_imuBus = 3  # I2C bus number (run 'i2cdetect -y N' to find your device)
+_imuUseGameRotation = False  # True = faster startup, no magnetometer fusion
+_imuEnableAccel = False
+_imuEnableGyro = False
+_imuEnableMag = False
+
+# Body leveling settings (IMU-based Z correction)
+_levelingEnabled = False  # Enable body leveling
+_levelingGain = 1.0  # Scale factor for corrections (0-2)
+_levelingMaxCorrMm = 30.0  # Max per-leg Z delta
+_levelingFilterAlpha = 0.15  # EMA filter (lower = smoother)
+_levelingPitchOffset = 0.0  # Pitch bias correction (deg)
+_levelingRollOffset = 0.0  # Roll bias correction (deg)
+_levelingTiltLimitDeg = 25.0  # Safety threshold (deg)
+
 try:
     _cfg = configparser.ConfigParser()
     _cfg_path = os.path.join(os.path.dirname(__file__), 'controller.ini') if '__file__' in globals() else 'controller.ini'
@@ -1801,6 +1841,33 @@ try:
     if 'menu' in _cfg:
         _menuTheme = _cfg.getint('menu', 'theme', fallback=_menuTheme)
         _menuPalette = _cfg.getint('menu', 'palette', fallback=_menuPalette)
+
+    # Load IMU sensor settings
+    if 'imu' in _cfg:
+        _imuEnabled = _cfg.getboolean('imu', 'enabled', fallback=_imuEnabled)
+        _imuHz = _cfg.getfloat('imu', 'hz', fallback=_imuHz)
+        _imuBus = _cfg.getint('imu', 'bus', fallback=_imuBus)
+        # Accept hex string or int for address
+        _imu_addr_str = _cfg.get('imu', 'address', fallback=None)
+        if _imu_addr_str is not None:
+            try:
+                _imuAddress = int(_imu_addr_str, 0)
+            except ValueError:
+                pass
+        _imuUseGameRotation = _cfg.getboolean('imu', 'use_game_rotation', fallback=_imuUseGameRotation)
+        _imuEnableAccel = _cfg.getboolean('imu', 'enable_accel', fallback=_imuEnableAccel)
+        _imuEnableGyro = _cfg.getboolean('imu', 'enable_gyro', fallback=_imuEnableGyro)
+        _imuEnableMag = _cfg.getboolean('imu', 'enable_mag', fallback=_imuEnableMag)
+
+    # Load body leveling settings
+    if 'leveling' in _cfg:
+        _levelingEnabled = _cfg.getboolean('leveling', 'enabled', fallback=_levelingEnabled)
+        _levelingGain = _cfg.getfloat('leveling', 'gain', fallback=_levelingGain)
+        _levelingMaxCorrMm = _cfg.getfloat('leveling', 'max_correction_mm', fallback=_levelingMaxCorrMm)
+        _levelingFilterAlpha = _cfg.getfloat('leveling', 'filter_alpha', fallback=_levelingFilterAlpha)
+        _levelingPitchOffset = _cfg.getfloat('leveling', 'pitch_offset', fallback=_levelingPitchOffset)
+        _levelingRollOffset = _cfg.getfloat('leveling', 'roll_offset', fallback=_levelingRollOffset)
+        _levelingTiltLimitDeg = _cfg.getfloat('leveling', 'tilt_limit_deg', fallback=_levelingTiltLimitDeg)
 
     # Load optional PID/IMP/EST defaults
     if 'pid' in _cfg:
@@ -1883,6 +1950,8 @@ try:
         _gaitOverlapPct = _cfg.getfloat('gait', 'overlap_pct', fallback=_gaitOverlapPct)
         _gaitSmoothingAlpha = _cfg.getfloat('gait', 'smoothing_alpha', fallback=_gaitSmoothingAlpha)
         _gaitSendDivisor = _cfg.getint('gait', 'send_divisor', fallback=_gaitSendDivisor)
+        _feetToleranceMm = _cfg.getfloat('gait', 'feet_tolerance_mm', fallback=_feetToleranceMm)
+        _feetMaxSkipMs = _cfg.getfloat('gait', 'feet_max_skip_ms', fallback=_feetMaxSkipMs)
         _cmdThrottleMs = _cfg.getfloat('gait', 'cmd_throttle_ms', fallback=_cmdThrottleMs)
         _gaitTurnMaxDegS = _cfg.getfloat('gait', 'turn_max_deg_s', fallback=_gaitTurnMaxDegS)
         # Bezier curve shape
@@ -1922,6 +1991,7 @@ try:
         _humanEyeSize = _cfg.getint('eyes', 'human_eye_size', fallback=_humanEyeSize)
         _humanEyeColorIdx = _cfg.getint('eyes', 'human_eye_color', fallback=_humanEyeColorIdx)
         _eyeShape = _cfg.getint('eyes', 'shape', fallback=_eyeShape)
+        _eyeCrtMode = _cfg.getboolean('eyes', 'crt_mode', fallback=_eyeCrtMode)
         # Helper to parse R,G,B string to tuple
         def parse_rgb(s, default):
             try:
@@ -2021,6 +2091,7 @@ _eyes.human_eye_spacing_pct = _humanEyeSpacingPct
 _eyes.human_eye_size = _humanEyeSize
 _eyes.human_eye_color_idx = _humanEyeColorIdx
 _eyes.human_eye_colors = _humanEyeColorPalette  # Pass loaded palette to SimpleEyes
+_eyes.crt_mode = _eyeCrtMode  # Set CRT mode from config
 _eyes.update(force_update=True)  # force the initial update to draw the eyes
 UpdateDisplay(_disp, _eyes.display_image, _menu.image, _servo, _legs, _state, _mirrorDisplay, _menuState)  # display the eyes on the display
 
@@ -2058,10 +2129,12 @@ def _setup_mars_menu():
         _forceDisplayUpdate = True
     
     def on_crt_change(val):
-        global _eyes, _forceDisplayUpdate
-        _eyes.crt_mode = (val == 1)
+        global _eyes, _forceDisplayUpdate, _eyeCrtMode
+        _eyeCrtMode = (val == 1)
+        _eyes.crt_mode = _eyeCrtMode
         _eyes.update(force_update=True)
         _forceDisplayUpdate = True
+        save_eye_crt_mode(_eyeCrtMode)
     
     def on_eye_vcenter_change(val):
         global _eyes, _eyeVerticalOffset, _forceDisplayUpdate, _displayThread
@@ -2307,6 +2380,51 @@ def _setup_mars_menu():
             _kick_list_poll('EST')
         except Exception:
             pass
+
+    def on_imu_overlay_change(val):
+        """Toggle IMU overlay display on/off."""
+        global _displayThread
+        show_overlay = (val == 1)
+        if _displayThread is not None:
+            _displayThread.update_imu(show_overlay=show_overlay)
+    
+    def on_leveling_enabled_change(val):
+        """Toggle body leveling on/off."""
+        global _levelingState, _levelingEnabled
+        _levelingEnabled = (val == 1)
+        if _levelingState is not None:
+            _levelingState.config.enabled = _levelingEnabled
+            if not _levelingEnabled:
+                _levelingState.reset()  # Clear corrections when disabled
+        if _verbose:
+            print(f"Body leveling: {'ON' if _levelingEnabled else 'OFF'}", end="\r\n")
+    
+    def on_leveling_gain_change(val):
+        """Update leveling gain."""
+        global _levelingState, _levelingGain
+        _levelingGain = val
+        if _levelingState is not None:
+            _levelingState.config.gain = val
+        if _verbose:
+            print(f"Leveling gain: {val:.1f}", end="\r\n")
+    
+    def on_leveling_max_corr_change(val):
+        """Update max correction limit."""
+        global _levelingState, _levelingMaxCorrMm
+        _levelingMaxCorrMm = val
+        if _levelingState is not None:
+            _levelingState.config.max_correction_mm = val
+        if _verbose:
+            print(f"Leveling max correction: {val:.0f}mm", end="\r\n")
+    
+    def on_leveling_tilt_limit_change(val):
+        """Update tilt safety threshold."""
+        global _levelingState, _levelingTiltLimitDeg
+        _levelingTiltLimitDeg = val
+        if _levelingState is not None:
+            _levelingState.config.tilt_limit_deg = val
+        if _verbose:
+            print(f"Leveling tilt limit: {val:.0f}°", end="\r\n")
     
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Theme", "on_change", on_theme_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Palette", "on_change", on_palette_change)
@@ -2350,6 +2468,12 @@ def _setup_mars_menu():
     _marsMenu.set_callback(MenuCategory.EST, "Cmd α", "on_change", on_est_cmd_alpha_change)
     _marsMenu.set_callback(MenuCategory.EST, "Meas α", "on_change", on_est_meas_alpha_change)
     _marsMenu.set_callback(MenuCategory.EST, "Vel α", "on_change", on_est_vel_alpha_change)
+
+    _marsMenu.set_callback(MenuCategory.IMU, "Show Overlay", "on_change", on_imu_overlay_change)
+    _marsMenu.set_callback(MenuCategory.IMU, "Leveling", "on_change", on_leveling_enabled_change)
+    _marsMenu.set_callback(MenuCategory.IMU, "LVL Gain", "on_change", on_leveling_gain_change)
+    _marsMenu.set_callback(MenuCategory.IMU, "Max Corr", "on_change", on_leveling_max_corr_change)
+    _marsMenu.set_callback(MenuCategory.IMU, "Tilt Limit", "on_change", on_leveling_tilt_limit_change)
 
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Verbose", "on_change", on_verbose_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Mirror Display", "on_change", on_mirror_change)
@@ -2819,6 +2943,52 @@ def update_menu_info(ctrl: Controller | None = None):
     if _est_state.get("meas_vel_alpha_milli") is not None:
         _marsMenu.set_value(MenuCategory.EST, "Vel α", int(_est_state["meas_vel_alpha_milli"]))
 
+    # IMU tab: update live sensor data
+    if _imuThread is not None:
+        imu_connected = _imuThread.connected
+        imu_frame = _imuThread.get_frame() if imu_connected else None
+        _marsMenu.set_value(MenuCategory.IMU, "Status", "Connected" if imu_connected else "Disconnected")
+        if imu_frame and imu_frame.valid:
+            _marsMenu.set_value(MenuCategory.IMU, "Roll", imu_frame.roll_deg)
+            _marsMenu.set_value(MenuCategory.IMU, "Pitch", imu_frame.pitch_deg)
+            _marsMenu.set_value(MenuCategory.IMU, "Yaw", imu_frame.yaw_deg)
+        else:
+            _marsMenu.set_value(MenuCategory.IMU, "Roll", None)
+            _marsMenu.set_value(MenuCategory.IMU, "Pitch", None)
+            _marsMenu.set_value(MenuCategory.IMU, "Yaw", None)
+        _marsMenu.set_value(MenuCategory.IMU, "Update Rate", int(_imuHz) if imu_connected else 0)
+        _marsMenu.set_value(MenuCategory.IMU, "Read Count", _imuThread.read_count)
+        _marsMenu.set_value(MenuCategory.IMU, "Error Count", _imuThread.error_count)
+        _marsMenu.set_value(MenuCategory.IMU, "I2C Bus", _imuBus)
+        _marsMenu.set_value(MenuCategory.IMU, "I2C Addr", _imuAddress)
+        # Sync leveling state to menu
+        _marsMenu.set_value(MenuCategory.IMU, "Leveling", 1 if _levelingEnabled else 0)
+        _marsMenu.set_value(MenuCategory.IMU, "LVL Gain", _levelingGain)
+        _marsMenu.set_value(MenuCategory.IMU, "Max Corr", _levelingMaxCorrMm)
+        _marsMenu.set_value(MenuCategory.IMU, "Tilt Limit", _levelingTiltLimitDeg)
+        # Show current corrections
+        if _levelingState is not None and _levelingState.config.enabled:
+            corr = _levelingState.get_last_corrections()
+            # Format as compact string: LF/LM/LR RF/RM/RR
+            corr_str = f"L{corr[0]:+.0f}/{corr[1]:+.0f}/{corr[2]:+.0f} R{corr[3]:+.0f}/{corr[4]:+.0f}/{corr[5]:+.0f}"
+            _marsMenu.set_value(MenuCategory.IMU, "LVL Corrections", corr_str)
+        else:
+            _marsMenu.set_value(MenuCategory.IMU, "LVL Corrections", "---")
+    else:
+        _marsMenu.set_value(MenuCategory.IMU, "Status", "Disabled")
+        _marsMenu.set_value(MenuCategory.IMU, "Roll", None)
+        _marsMenu.set_value(MenuCategory.IMU, "Pitch", None)
+        _marsMenu.set_value(MenuCategory.IMU, "Yaw", None)
+        _marsMenu.set_value(MenuCategory.IMU, "Update Rate", 0)
+        _marsMenu.set_value(MenuCategory.IMU, "Read Count", 0)
+        _marsMenu.set_value(MenuCategory.IMU, "Error Count", 0)
+        # Leveling defaults when IMU disabled
+        _marsMenu.set_value(MenuCategory.IMU, "Leveling", 0)
+        _marsMenu.set_value(MenuCategory.IMU, "LVL Gain", _levelingGain)
+        _marsMenu.set_value(MenuCategory.IMU, "Max Corr", _levelingMaxCorrMm)
+        _marsMenu.set_value(MenuCategory.IMU, "Tilt Limit", _levelingTiltLimitDeg)
+        _marsMenu.set_value(MenuCategory.IMU, "LVL Corrections", "---")
+
 # Create and start display thread if enabled
 _displayThread = None
 if _displayThreadEnabled:
@@ -2833,15 +3003,182 @@ if _displayThreadEnabled:
                                 robot_enabled=(_state[IDX_ROBOT_ENABLED] == 1.0 if len(_state) > IDX_ROBOT_ENABLED else True),
                                 safety_active=_safety_state.get("lockout", False),
                                 safety_text=get_safety_overlay_state()[1])
+    _displayThread.set_mars_menu(_marsMenu)
     _displayThread.start()
     if _verbose:
         print(f"Display thread started at {_displayThreadHz} Hz (blink divisor: {_blinkFrameDivisor})", end="\r\n")
+
+# Create and start IMU thread if enabled
+_imuThread = None
+if _imuEnabled:
+    _imuConfig = ImuConfig(
+        enabled=True,
+        i2c_bus=_imuBus,
+        i2c_address=_imuAddress,
+        target_hz=_imuHz,
+        use_game_rotation=_imuUseGameRotation,
+        enable_accel=_imuEnableAccel,
+        enable_gyro=_imuEnableGyro,
+        enable_mag=_imuEnableMag,
+    )
+    _imuThread = ImuThread(_imuConfig)
+    _imuThread.start()
+    # Give it time to connect - BNO085 initialization can take ~1.5s
+    for _wait_i in range(20):  # Up to 2 seconds
+        time.sleep(0.1)
+        if _imuThread.connected:
+            break
+        if _imuThread.last_error:
+            break
+    if _imuThread.connected:
+        if _verbose:
+            print(f"IMU thread started at {_imuHz} Hz (bus {_imuBus}, addr 0x{_imuAddress:02X})", end="\r\n")
+    else:
+        if _verbose:
+            print(f"IMU not detected (bus {_imuBus}, addr 0x{_imuAddress:02X}): {_imuThread.last_error}", end="\r\n")
+
+# Initialize body leveling state
+_levelingConfig = LevelingConfig(
+    enabled=_levelingEnabled,
+    gain=_levelingGain,
+    max_correction_mm=_levelingMaxCorrMm,
+    filter_alpha=_levelingFilterAlpha,
+    pitch_offset_deg=_levelingPitchOffset,
+    roll_offset_deg=_levelingRollOffset,
+    tilt_limit_deg=_levelingTiltLimitDeg,
+)
+_levelingState = init_leveling(_levelingConfig)
+
+
+def _on_tilt_safety_triggered(pitch_deg: float, roll_deg: float) -> None:
+    """Callback invoked when tilt exceeds safety threshold.
+    Issues TUCK + DISABLE to protect the robot."""
+    global _enabledLocal, _verbose
+    tilt_max = max(abs(pitch_deg), abs(roll_deg))
+    if _verbose:
+        print(f"\n[LEVELING] TILT SAFETY: pitch={pitch_deg:.1f}° roll={roll_deg:.1f}° (>{_levelingTiltLimitDeg:.0f}°)", end="\r\n")
+        print(f"[LEVELING] Issuing emergency TUCK + DISABLE", end="\r\n")
+    # Issue TUCK with auto-disable (protective posture)
+    apply_posture(b'TUCK', auto_disable_s=2.0, require_enable=False)
+
+
+# Set up tilt safety callback
+_levelingState.set_tilt_safety_callback(_on_tilt_safety_triggered)
 
 # --------------------------------------------------------------------------------------------------
 # Command helper: centralizes Teensy command emission (newline termination + throttling/dedup)
 # --------------------------------------------------------------------------------------------------
 _cmd_last = {}            # bytes(command) -> last send time (seconds)
 _enabledLocal = False     # local view (updated when we send ENABLE / DISABLE)
+
+
+def _parse_feet_positions(feet_cmd: bytes) -> list:
+    """Parse FEET command bytes into list of 18 floats [x0,y0,z0,x1,y1,z1,...].
+    Returns empty list if parsing fails."""
+    try:
+        # Expected format: b'FEET x0 y0 z0 x1 y1 z1 ... x5 y5 z5'
+        text = feet_cmd.decode('ascii').strip()
+        if not text.startswith('FEET '):
+            return []
+        parts = text[5:].split()
+        if len(parts) != 18:
+            return []
+        return [float(p) for p in parts]
+    except Exception:
+        return []
+
+
+def _feet_changed_enough(new_positions: list, tolerance_mm: float) -> bool:
+    """Check if any foot position changed by more than tolerance_mm.
+    Returns True if command should be sent (first time or delta exceeds tolerance).
+    Updates _lastFeetPositions if returning True."""
+    global _lastFeetPositions
+    if _lastFeetPositions is None or len(_lastFeetPositions) != 18:
+        # First FEET command or invalid previous state - always send
+        _lastFeetPositions = new_positions[:]
+        return True
+    
+    # Check max delta across all 18 coordinates
+    max_delta = 0.0
+    for i in range(18):
+        delta = abs(new_positions[i] - _lastFeetPositions[i])
+        if delta > max_delta:
+            max_delta = delta
+    
+    if max_delta >= tolerance_mm:
+        _lastFeetPositions = new_positions[:]
+        return True
+    return False
+
+
+# --------------------------------------------------------------------------------------------------
+# IMU helper: get current orientation from IMU thread (if running)
+# --------------------------------------------------------------------------------------------------
+
+def get_imu_orientation():
+    """Get current IMU orientation as (roll_deg, pitch_deg, yaw_deg).
+    Returns (0, 0, 0) if IMU not connected or data not available."""
+    global _imuThread
+    if _imuThread is None or not _imuThread.connected:
+        return (0.0, 0.0, 0.0)
+    return _imuThread.get_orientation()
+
+
+def get_imu_frame():
+    """Get full IMU frame with all data (ImuFrame object).
+    Returns an invalid frame if IMU not connected."""
+    global _imuThread
+    if _imuThread is None:
+        return ImuFrame()
+    return _imuThread.get_frame()
+
+
+def is_imu_connected() -> bool:
+    """Return True if IMU is connected and providing data."""
+    global _imuThread
+    return _imuThread is not None and _imuThread.connected
+
+
+def send_feet_cmd(feet_cmd: bytes, force: bool = False) -> bool:
+    """Send FEET command with optional tolerance filtering and body leveling.
+    Applies IMU-based Z corrections if leveling is enabled.
+    Skips send if positions haven't changed by more than _feetToleranceMm,
+    unless more than _feetMaxSkipMs has passed since last send.
+    Set force=True to bypass tolerance check (e.g., for initial/final positions).
+    Returns True if command was actually transmitted."""
+    global _lastFeetPositions, _feetToleranceMm, _lastFeetSendTime, _feetMaxSkipMs
+    global _levelingState, _imuThread
+    
+    now = time.monotonic()
+    time_since_last = (now - _lastFeetSendTime) * 1000.0  # ms
+    
+    # Apply body leveling if enabled and IMU is connected
+    cmd_to_send = feet_cmd
+    if _levelingState is not None and _levelingState.config.enabled:
+        if _imuThread is not None and _imuThread.connected:
+            roll_deg, pitch_deg, _ = _imuThread.get_orientation()
+            # Update leveling state with filtered orientation (also checks tilt safety)
+            _levelingState.update(pitch_deg, roll_deg)
+            # Only apply corrections if tilt is safe
+            if _levelingState.is_tilt_safe():
+                corrections = _levelingState.compute_corrections()
+                cmd_to_send = leveling_module.build_corrected_feet_cmd(feet_cmd, corrections)
+    
+    if not force and time_since_last < _feetMaxSkipMs:
+        positions = _parse_feet_positions(cmd_to_send)
+        if positions and not _feet_changed_enough(positions, _feetToleranceMm):
+            if _debugSendAll:
+                print(f"[send_feet_cmd] FILTERED (delta < {_feetToleranceMm}mm, {time_since_last:.1f}ms ago)", end="\r\n")
+            return False
+    else:
+        # Update last positions even on force/timeout send
+        positions = _parse_feet_positions(cmd_to_send)
+        if positions:
+            _lastFeetPositions = positions[:]
+    
+    _lastFeetSendTime = now
+    return send_cmd(cmd_to_send, force=True)
+
 
 def send_cmd(cmd, force: bool = False, throttle_ms: float = None):
     """Send command to Teensy as bytes terminated by \n.
@@ -3114,6 +3451,16 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
                 safety_active=safety_active,
                 safety_text=safety_text
         )
+        
+        # Update IMU state for display overlay
+        imu_frame = get_imu_frame()
+        displayThread.update_imu(
+            connected=imu_frame.valid,
+            roll=imu_frame.roll_deg,
+            pitch=imu_frame.pitch_deg,
+            yaw=imu_frame.yaw_deg,
+        )
+        
         ctrl.forceDisplayUpdate = False
     elif not gaitActive:
         # Direct update when thread not running and gait not active
@@ -3434,7 +3781,7 @@ def phase_gait_tick(ctrl, gaitEngine, gaitActive):
         _moveTickCount += 1
         if _moveTickCount >= _moveSendDivisor:
             _moveTickCount = 0
-            send_cmd(_moveEngine.get_feet_bytes(), force=True)
+            send_feet_cmd(_moveEngine.get_feet_bytes())
 
         if hasattr(_moveEngine, 'is_complete') and _moveEngine.is_complete():
             _moveActive = False
@@ -3483,7 +3830,7 @@ def phase_gait_tick(ctrl, gaitEngine, gaitActive):
                 for foot in feet:
                     parts.extend([f"{foot[0]:.1f}", f"{foot[1]:.1f}", f"{foot[2]:.1f}"])
                 feet_cmd = ("FEET " + " ".join(parts)).encode('ascii')
-                send_cmd(feet_cmd, force=True)
+                send_feet_cmd(feet_cmd)
     else:
         # Normal gait operation - tick the single gait engine
         gaitEngine.tick(dt_seconds)
@@ -3493,7 +3840,7 @@ def phase_gait_tick(ctrl, gaitEngine, gaitActive):
         if _gaitTickCount >= _gaitSendDivisor:
             _gaitTickCount = 0
             feet_cmd = gaitEngine.get_feet_bytes()
-            send_cmd(feet_cmd, force=True)
+            send_feet_cmd(feet_cmd)
 
 
 def phase_auto_disable(ctrl):
@@ -3739,6 +4086,11 @@ if _displayThread is not None and _displayThread.is_alive():
     if _verbose:
         print("Stopping display thread...", end="\r\n")
     _displayThread.stop()
+# Stop IMU thread
+if _imuThread is not None and _imuThread.is_alive():
+    if _verbose:
+        print("Stopping IMU thread...", end="\r\n")
+    _imuThread.stop()
 # Restore terminal from curses FIRST (endwin() clears screen)
 cleanup_keyboard()
 # NOW print debug info so it persists after script exits

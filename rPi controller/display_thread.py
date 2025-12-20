@@ -8,6 +8,7 @@ Contains DisplayThread class, UpdateDisplay function, and display helpers.
 from __future__ import annotations
 import os
 import time
+import math
 import threading
 from typing import Optional, Any, List, Tuple
 
@@ -80,6 +81,117 @@ def reset_frame_hash():
     """Reset the frame hash to force a display update."""
     global _last_frame_hash
     _last_frame_hash = None
+
+
+# -----------------------------------------------------------------------------
+# IMU Visualization
+# -----------------------------------------------------------------------------
+
+def draw_imu_overlay(
+    draw: ImageDraw.Draw,
+    center_x: int,
+    center_y: int,
+    radius: int,
+    roll_deg: float,
+    pitch_deg: float,
+    yaw_deg: float,
+    connected: bool = True,
+    show_values: bool = True,
+) -> None:
+    """Draw an IMU gravity vector visualization.
+    
+    Renders a circular horizon indicator with:
+    - Outer ring (fixed reference)
+    - Tilted horizon line (shows roll)
+    - Gravity dot (shows pitch as distance from center)
+    - Numeric values for roll/pitch/yaw
+    
+    Args:
+        draw: PIL ImageDraw object
+        center_x, center_y: Center of the indicator
+        radius: Radius of the outer ring
+        roll_deg: Roll angle in degrees (tilts horizon line)
+        pitch_deg: Pitch angle in degrees (moves dot up/down)
+        yaw_deg: Yaw angle in degrees (displayed as text)
+        connected: If False, show disconnected state
+        show_values: If True, show numeric values
+    """
+    # Colors
+    ring_color = (100, 100, 100) if connected else (60, 60, 60)
+    horizon_color = (0, 200, 255) if connected else (80, 80, 80)
+    dot_color = (255, 100, 50) if connected else (100, 60, 40)
+    text_color = (200, 200, 200) if connected else (80, 80, 80)
+    crosshair_color = (60, 60, 60)
+    
+    # Draw outer ring
+    draw.ellipse(
+        (center_x - radius, center_y - radius, center_x + radius, center_y + radius),
+        outline=ring_color,
+        width=2
+    )
+    
+    # Draw crosshairs (fixed reference)
+    draw.line((center_x - radius + 5, center_y, center_x + radius - 5, center_y), fill=crosshair_color, width=1)
+    draw.line((center_x, center_y - radius + 5, center_x, center_y + radius - 5), fill=crosshair_color, width=1)
+    
+    if connected:
+        # Calculate horizon line endpoints (rotated by roll)
+        # Negate roll to show "artificial horizon" style (horizon tilts opposite to aircraft)
+        roll_rad = math.radians(-roll_deg)
+        line_len = radius - 4
+        dx = line_len * math.cos(roll_rad)
+        dy = line_len * math.sin(roll_rad)
+        
+        # Draw tilted horizon line
+        draw.line(
+            (center_x - dx, center_y + dy, center_x + dx, center_y - dy),
+            fill=horizon_color,
+            width=2
+        )
+        
+        # Calculate gravity dot position
+        # Pitch moves dot along the roll-perpendicular axis
+        # Positive pitch = nose up = dot moves toward top of display
+        pitch_offset = (pitch_deg / 90.0) * (radius - 8)
+        # Clamp to stay within circle
+        pitch_offset = max(-radius + 8, min(radius - 8, pitch_offset))
+        
+        # Dot position: perpendicular to roll axis
+        perp_angle = roll_rad + math.pi / 2
+        dot_x = center_x + pitch_offset * math.cos(perp_angle)
+        dot_y = center_y - pitch_offset * math.sin(perp_angle)
+        
+        # Draw gravity dot
+        dot_radius = 5
+        draw.ellipse(
+            (dot_x - dot_radius, dot_y - dot_radius, dot_x + dot_radius, dot_y + dot_radius),
+            fill=dot_color,
+            outline=(255, 255, 255),
+            width=1
+        )
+        
+        # Draw small markers at ±45° on the ring
+        for angle in [-45, 45]:
+            mark_rad = math.radians(angle)
+            mx = center_x + (radius - 3) * math.cos(mark_rad - math.pi/2)
+            my = center_y + (radius - 3) * math.sin(mark_rad - math.pi/2)
+            draw.ellipse((mx - 2, my - 2, mx + 2, my + 2), fill=ring_color)
+    
+    # Draw numeric values below the indicator
+    if show_values:
+        try:
+            font = get_font(10)
+            if connected:
+                text = f"R:{roll_deg:+5.1f} P:{pitch_deg:+5.1f} Y:{yaw_deg:+5.1f}"
+            else:
+                text = "IMU: --"
+            bbox = draw.textbbox((0, 0), text, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_x = center_x - text_width // 2
+            text_y = center_y + radius + 4
+            draw.text((text_x, text_y), text, fill=text_color, font=font)
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------------------------
@@ -427,6 +539,13 @@ class DisplayThread(threading.Thread):
         self._ctrl = None
         self._power_palette = POWER_COLOR_PALETTE
         self._temperature_palette = TEMPERATURE_COLOR_PALETTE
+        
+        # IMU state
+        self._imu_connected = False
+        self._imu_roll = 0.0
+        self._imu_pitch = 0.0
+        self._imu_yaw = 0.0
+        self._imu_show_overlay = True  # Toggle for IMU display
 
     def set_mars_menu(self, mars_menu: Any) -> None:
         """Set the MarsMenu reference for overlay rendering."""
@@ -488,6 +607,22 @@ class DisplayThread(threading.Thread):
             if safety_text is not None:
                 self._safety_text = safety_text
     
+    def update_imu(self, connected: bool = None, roll: float = None, 
+                   pitch: float = None, yaw: float = None,
+                   show_overlay: bool = None) -> None:
+        """Thread-safe update of IMU state from main thread."""
+        with self._lock:
+            if connected is not None:
+                self._imu_connected = connected
+            if roll is not None:
+                self._imu_roll = roll
+            if pitch is not None:
+                self._imu_pitch = pitch
+            if yaw is not None:
+                self._imu_yaw = yaw
+            if show_overlay is not None:
+                self._imu_show_overlay = show_overlay
+    
     def stop(self) -> None:
         """Signal thread to stop and wait for it to finish."""
         self._stop_event.set()
@@ -510,6 +645,8 @@ class DisplayThread(threading.Thread):
         last_robot_enabled = True
         last_safety_active = False
         last_safety_text = ""
+        last_imu_roll = 0.0
+        last_imu_pitch = 0.0
         
         while not self._stop_event.is_set():
             try:
@@ -529,6 +666,12 @@ class DisplayThread(threading.Thread):
                     robot_enabled = self._robot_enabled
                     safety_active = self._safety_active
                     safety_text = self._safety_text
+                    # IMU state
+                    imu_connected = self._imu_connected
+                    imu_roll = self._imu_roll
+                    imu_pitch = self._imu_pitch
+                    imu_yaw = self._imu_yaw
+                    imu_show_overlay = self._imu_show_overlay
                     mars_menu = self._mars_menu
                     ctrl = self._ctrl
                     power_palette = self._power_palette
@@ -554,11 +697,18 @@ class DisplayThread(threading.Thread):
                     last_look_x = look_x
                     last_look_y = look_y
                 
+                # Check if IMU changed significantly
+                imu_changed = (abs(imu_roll - last_imu_roll) > 0.5 or 
+                              abs(imu_pitch - last_imu_pitch) > 0.5)
+                if imu_changed:
+                    last_imu_roll = imu_roll
+                    last_imu_pitch = imu_pitch
+                
                 if abs(last_look_x) > 0.01 or abs(last_look_y) > 0.01:
                     self.eyes.eye_center_offset = self._base_center_offset + last_look_x * self.look_range_x
                     self.eyes.eye_vertical_offset = self._base_vertical_offset + last_look_y * self.look_range_y
                 
-                needs_render = self.eyes.update(force_update=look_changed or status_changed)
+                needs_render = self.eyes.update(force_update=look_changed or status_changed or imu_changed)
                 
                 is_blinking = (self.eyes.blinkState == 1 or self.eyes.blinkState == 2)
                 if is_blinking and self.blink_frame_divisor > 1:
@@ -568,9 +718,31 @@ class DisplayThread(threading.Thread):
                 else:
                     blink_frame_counter = 0
                 
-                if needs_render or force or look_changed or status_changed:
+                if needs_render or force or look_changed or status_changed or imu_changed:
+                    # Prepare display image with IMU overlay
+                    display_image = self.eyes.display_image
+                    if imu_show_overlay and not safety_active:
+                        # Draw IMU overlay in bottom-left corner
+                        display_image = display_image.copy()
+                        draw = ImageDraw.Draw(display_image)
+                        # Position: bottom-left, with some margin
+                        imu_radius = 28
+                        imu_center_x = imu_radius + 8
+                        imu_center_y = self.disp.width - imu_radius - 18  # Extra margin for text below
+                        draw_imu_overlay(
+                            draw,
+                            center_x=imu_center_x,
+                            center_y=imu_center_y,
+                            radius=imu_radius,
+                            roll_deg=imu_roll,
+                            pitch_deg=imu_pitch,
+                            yaw_deg=imu_yaw,
+                            connected=imu_connected,
+                            show_values=True,
+                        )
+                    
                     UpdateDisplay(
-                        self.disp, self.eyes.display_image,
+                        self.disp, display_image,
                         self.menu._image if self.menu else None,
                         servo, legs, state, mirror, menu_state,
                         teensy_connected=teensy_connected,
