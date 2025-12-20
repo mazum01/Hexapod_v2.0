@@ -9,6 +9,7 @@
 #include "command_helpers.h"
 #include "command_types.h"
 #include "robot_config.h"
+#include "globals.h"
 // Servo library header provides hardware angle offset helpers
 #include <lx16a-servo.h>
 // For rebootNow() register access (ARM SCB AIRCR)
@@ -16,6 +17,9 @@
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
 #include <SD.h>
 #endif
+
+// Impedance class include (for g_impedance usage)
+#include "MarsImpedance.hpp"
 
 // -----------------------------------------------------------------------------
 // Forward Kinematics (FK) implementations (body + leg frame)
@@ -30,96 +34,8 @@
 //  - Body frame translation by Robot::COXA_OFFSET[leg] (x,z).
 // Accuracy: Adequate for collision and telemetry; refine later if needed.
 
-extern volatile int16_t g_home_cd[6][3];
-extern volatile uint16_t g_loop_hz;
-extern bool     g_config_loaded;
-extern uint16_t g_config_keys_applied;
-extern uint16_t g_config_loop_hz;
-extern volatile uint8_t  g_fk_stream_mask;
-// Test mode parameters
-extern float    g_test_base_y_mm;
-extern float    g_test_base_x_mm;
-extern float    g_test_step_len_mm;
-extern uint32_t g_test_cycle_ms;
-extern float    g_test_lift_y_mm;
-extern float    g_test_overlap_pct;
-// Safety parameters
-extern volatile bool    g_safety_soft_limits_enabled;
-extern volatile bool    g_safety_collision_enabled;
-extern volatile int16_t g_safety_temp_lockout_c10;
-extern float            g_safety_clearance_mm;
-// OOS and offsets
-extern volatile uint32_t g_servo_oos_mask;
-extern int16_t g_offset_cd[6][3];
-// Last measured values from sparse feedback (updated round-robin)
-extern uint16_t g_meas_vin_mV[6][3]; // millivolts
-extern uint8_t  g_meas_temp_C[6][3]; // temperature in whole deg C
-extern int16_t  g_meas_pos_cd[6][3]; // 0..24000 centidegrees
-extern volatile uint8_t g_meas_pos_valid[6][3];
-extern volatile uint8_t g_tuck_active;
-extern volatile uint8_t g_tuck_mask;
-extern volatile uint8_t g_tuck_done_mask;
-extern volatile int16_t g_last_sent_cd[6][3];
-extern volatile int16_t  g_tuck_tibia_cd;
-extern volatile int16_t  g_tuck_femur_cd;
-extern volatile int16_t  g_tuck_coxa_cd;
-extern volatile int16_t  g_tuck_tol_tibia_cd;
-extern volatile int16_t  g_tuck_tol_other_cd;
-extern volatile uint16_t g_tuck_timeout_ms;
-// Globals from main sketch
-extern volatile bool g_enabled;
-extern volatile bool g_lockout;
-extern volatile uint16_t g_lockout_causes;
-extern volatile uint16_t g_override_mask;
-extern volatile uint64_t g_uptime_ms64;
-extern volatile uint8_t g_last_err;
-extern volatile uint32_t g_overrun_count;
-extern volatile uint8_t g_rr_index;
-extern volatile uint8_t g_servo_fb_fail_threshold;
-extern volatile int16_t g_limit_min_cd[6][3];
-extern volatile int16_t g_limit_max_cd[6][3];
-extern volatile uint16_t g_rate_limit_cdeg_per_s;
-extern void setServoId(uint8_t leg, uint8_t joint, uint8_t id);
-extern uint8_t servoId(uint8_t leg, uint8_t joint);
-// PID globals from main sketch
-extern volatile bool     g_pid_enabled;
-extern volatile uint16_t g_pid_kp_milli[3];
-extern volatile uint16_t g_pid_ki_milli[3];
-extern volatile uint16_t g_pid_kd_milli[3];
-extern volatile uint16_t g_pid_kd_alpha_milli[3];
-extern volatile uint8_t  g_pid_mode; // 0=active,1=shadow
-extern volatile uint16_t g_pid_shadow_report_hz;
-// Estimator globals
-extern volatile uint16_t g_est_cmd_alpha_milli;
-extern volatile uint16_t g_est_meas_alpha_milli;
-extern volatile uint16_t g_est_meas_vel_alpha_milli;
-// Impedance globals (access to MarsImpedance instance)
-#include "MarsImpedance.hpp"
-extern MarsImpedance g_impedance;
-// Command handlers provided by commandprocessor.ino
-void processCmdLIMITS(const char* line, int s, int len);
-
-// Joint compliance globals (defined in MARS_Hexapod.ino)
-extern bool     g_comp_enabled;
-extern uint16_t g_comp_kp_milli[3];
-extern uint16_t g_comp_range_cd[3];
-extern uint16_t g_comp_deadband_cd[3];
-extern uint16_t g_comp_leak_milli;
-
-#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-// Logging globals (defined in MARS_Hexapod.ino)
-extern volatile bool     g_log_enabled;
-extern volatile uint16_t g_log_rate_hz;
-extern volatile uint8_t  g_log_sample_div;
-extern volatile uint32_t g_log_tick_counter;
-extern volatile uint8_t  g_log_mode;
-extern volatile bool     g_log_header;
-extern volatile bool     g_log_rotate;
-extern volatile uint32_t g_log_max_bytes;
-#endif
-
-// Forward declaration for loop Hz apply helper in main sketch
-void configApplyLoopHz(uint16_t hz);
+// NOTE: Global variable externs are now centralized in globals.h.
+// Command handler externs are also in globals.h.
 
 // Local helpers
 static inline void rtrim(char* s)
@@ -188,9 +104,7 @@ void telemetryPrintS1(uint8_t leg, uint16_t loop_us, uint8_t lockout, uint8_t mo
 //   S2:<en0>,<en1>,...,<en17>
 // Order: legs 0..5 (LF,LM,LR,RF,RM,RR) × joints 0..2 (C,F,T).
 // en = legEnabled AND jointEnabled.
-extern bool jointEnabled(uint8_t leg, uint8_t joint); // provided by main sketch
-extern bool legEnabled(uint8_t leg);                   // provided by main sketch
-extern uint8_t footContactState(uint8_t leg);          // provided by main sketch (future sensor)
+// Note: legEnabled/jointEnabled/footContactState externs are in globals.h
 void telemetryPrintS2()
 {
   if (!Serial) return;
@@ -603,50 +517,9 @@ bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t out_cd
   return true;
 }
 
-// Externs provided by other compilation units
-extern int nextToken(const char* s, int start, int len, int* tokStart, int* tokLen);
-// printERR is defined later in this file; only declare its prototype here to
-// avoid multiple-definition/linker issues when functions.ino and
-// commandprocessor.ino are linked together.
-void printERR(uint8_t code, const char* msg);
-extern CommandType parseCommandType(const char* cmd);
-extern void processCmdHELP(const char* line, int s, int len);
-extern void processCmdSTATUS(const char* line, int s, int len);
-extern void processCmdREBOOT(const char* line, int s, int len);
-extern void processCmdENABLE(const char* line, int s, int len);
-extern void processCmdDISABLE(const char* line, int s, int len);
-extern void processCmdFK(const char* line, int s, int len);
-extern void processCmdLEGS(const char* line, int s, int len);
-extern void processCmdSERVOS(const char* line, int s, int len);
-extern void processCmdLEG(const char* line, int s, int len);
-extern void processCmdSERVO(const char* line, int s, int len);
-extern void processCmdRAW(const char* line, int s, int len);
-extern void processCmdRAW3(const char* line, int s, int len);
-extern void processCmdFOOT(const char* line, int s, int len);
-extern void processCmdFEET(const char* line, int s, int len);
-extern void processCmdMODE(const char* line, int s, int len);
-extern void processCmdI(const char* line, int s, int len);
-extern void processCmdT(const char* line, int s, int len);
-extern void processCmdY(const char* line, int s, int len);
-extern void processCmdTELEM(const char* line, int s, int len);
-extern void processCmdTEST(const char* line, int s, int len);
-extern void processCmdSTAND(const char* line, int s, int len);
-extern void processCmdTUCK(const char* line, int s, int len);
-extern void processCmdSAFETY(const char* line, int s, int len);
-extern void processCmdHOME(const char* line, int s, int len);
-extern void processCmdSAVEHOME(const char* line, int s, int len);
-extern void processCmdOFFSET(const char* line, int s, int len);
-extern void processCmdLOG(const char* line, int s, int len);
-extern void processCmdPID(const char* line, int s, int len);
-extern void processCmdIMP(const char* line, int s, int len);
-extern void processCmdCOMP(const char* line, int s, int len);
-extern void processCmdEST(const char* line, int s, int len);
-extern void processCmdLOOP(const char* line, int s, int len);
-extern void processCmdLIMITS(const char* line, int s, int len);
-extern void processCmdCONFIG(const char* line, int s, int len);
+// NOTE: Command handler externs and global variable externs are now
+// centralized in globals.h (included at top of file).
 
-extern char    lineBuf[160];
-extern uint8_t lineLen;
 // Centralized OK/ERR printing lives below with unified dispatch.
 
 void printOK() {
@@ -774,7 +647,7 @@ void splash() {
   // UART mapping / config summary line
   Serial.print(F("UARTs: ")); Serial.print(Robot::UART_MAP_SUMMARY);
   // If uart.* keys were present in /config.txt, show a brief sanity note (mapping is compile-time fixed)
-  extern volatile bool g_uart_cfg_present; extern volatile bool g_uart_cfg_match;
+  // (g_uart_cfg_present and g_uart_cfg_match declared in globals.h)
   if (g_uart_cfg_present) {
     Serial.print(F(" (cfg: "));
     Serial.print(g_uart_cfg_match ? F("match") : F("mismatch"));
@@ -825,9 +698,7 @@ static void configParseKV(char* key, char* val)
     legtok[li] = 0;
     int leg = legIndexFromToken(legtok);
     if (leg >= 0 && leg < 6) {
-      extern volatile uint8_t g_uart_cfg_seen_mask; // declared in main TU
-      extern volatile bool g_uart_cfg_present;
-      extern volatile bool g_uart_cfg_match;
+      // (g_uart_cfg_* declared in globals.h)
       g_uart_cfg_present = true;
       g_uart_cfg_seen_mask |= (uint8_t)(1u << leg);
       // Expected compile-time mapping names
@@ -854,9 +725,7 @@ static void configParseKV(char* key, char* val)
     legtok[li] = 0;
     int leg = legIndexFromToken(legtok);
     if (leg >= 0 && leg < 6) {
-      extern volatile uint8_t g_uart_cfg_seen_mask; // declared in main TU
-      extern volatile bool g_uart_cfg_present;
-      extern volatile bool g_uart_cfg_match;
+      // (g_uart_cfg_* declared in globals.h)
       g_uart_cfg_present = true;
       g_uart_cfg_seen_mask |= (uint8_t)(1u << leg);
       // Expected compile-time mapping names
@@ -2559,8 +2428,7 @@ void rebootNow() {
 //   - The underlying library stores angle offsets in ticks (units ≈ 0.24° = 24 cd).
 //   - We expose a centidegree API here and convert using helpers in command_helpers.h.
 //   - Clamp: firmware uses ±3000 cd (≈ ±30°), which corresponds to ±125 units.
-
-extern LX16AServo* g_servo[6][3]; // from main sketch
+// (g_servo[][] declared in globals.h)
 
 // Search only within the specified leg row to avoid cross-leg ID collisions
 int angle_offset_read(uint8_t leg, uint8_t id) {

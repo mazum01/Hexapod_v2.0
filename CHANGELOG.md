@@ -1,3 +1,91 @@
+## Python Controller 0.6.0 (b167) — 2025-12-20
+
+### IMU Subsystem Milestone
+
+This release marks the completion of full IMU integration for the hexapod:
+
+- **imu_sensor.py**: BNO085 driver with threaded I²C polling at 100 Hz
+- **Display overlay**: Real-time gravity vector visualization with artificial horizon
+- **IMU menu tab**: Live orientation, status, read/error counts, I2C config, overlay toggle
+- **leveling.py**: Body leveling with per-leg Z corrections based on pitch/roll
+- **Tilt safety**: Automatic TUCK + DISABLE when tilt exceeds configurable threshold (25°)
+
+New modules: `imu_sensor.py` (~500 lines), `leveling.py` (~200 lines)
+
+---
+
+## Python Controller 0.5.54 (b166) — 2025-12-19
+
+- **Body Leveling**: IMU-based Z-axis corrections to keep body level on uneven terrain.
+- New module `leveling.py` (~200 lines) with:
+  - `LevelingConfig`: Configuration dataclass (enabled, gain, max_correction, tilt_limit, etc.).
+  - `LevelingState`: Runtime state with EMA-filtered orientation and per-leg Z corrections.
+  - `apply_leveling_to_feet()`: Applies Z deltas to FEET position list.
+  - `build_corrected_feet_cmd()`: Parses/modifies FEET command bytes with corrections.
+  - Global singleton pattern for easy controller integration.
+- Correction formula: `Δz = x_hip × sin(pitch) + z_hip × sin(roll)` per leg.
+- Tilt safety threshold: triggers TUCK + auto-DISABLE if |pitch| or |roll| exceeds limit (default 25°).
+- Controller integration:
+  - Config loading from `[leveling]` section in controller.ini.
+  - Leveling applied in `send_feet_cmd()` before tolerance filtering.
+  - Callbacks update `_levelingState.config` in real-time.
+- IMU tab additions:
+  - "Leveling" on/off toggle.
+  - "LVL Gain" slider (0.0–2.0, step 0.1).
+  - "Max Corr" slider (5–50mm, step 5).
+  - "Tilt Limit" slider (10–45°, step 5).
+  - "LVL Corrections" info showing per-leg Z deltas (L+5/+2/-3 R-5/-2/+3 format).
+
+## Python Controller 0.5.53 (b165) — 2025-12-19
+
+- **IMU Menu Tab**: Added new "IMU" tab to MarsMenu for live sensor monitoring.
+- Tab displays: Status, Roll/Pitch/Yaw angles, Update Rate, Read/Error counts, I2C Bus/Address.
+- "Show Overlay" toggle to enable/disable the graphical horizon indicator.
+- Tab positioned after INFO in the visual tab order for easy access.
+- MenuCategory.IMU added as index 9; COUNT incremented to 10.
+
+## Python Controller 0.5.52 (b164) — 2025-12-19
+
+- **IMU Data Integration Complete**: BNO085 orientation data fully integrated and tested.
+- Fixed I2C initialization for non-default buses using `adafruit-extended-bus` library.
+- Configurable I2C bus number (`bus = 3` default in controller.ini `[imu]` section).
+- Increased IMU connection timeout to 2s (BNO085 takes ~1.3s to initialize).
+- Reversed horizon display for proper artificial horizon behavior (tilts opposite to roll).
+- Moved IMU overlay from top-right to bottom-left corner of display.
+- Dependencies: `pip install adafruit-extended-bus` required for non-default I2C buses.
+
+## Python Controller 0.5.50 (b162) — 2025-12-19
+
+- **Sensor Integration**: Added IMU support for Adafruit BNO085 9-DOF IMU breakout.
+- New module `imu_sensor.py` (~380 lines) with:
+  - `ImuThread`: Background I²C polling thread at configurable Hz (default 100).
+  - `ImuFrame`: Dataclass for orientation (quaternion, euler) and optional raw sensor data.
+  - `ImuConfig`: Configuration container with I²C address, rates, feature enables.
+  - `create_imu_thread()`: Factory function for config dict integration.
+  - Quaternion to Euler conversion utility.
+- Controller integration:
+  - Config loading from `[imu]` section in controller.ini.
+  - IMU thread startup/shutdown with display thread.
+  - Helper functions: `get_imu_orientation()`, `get_imu_frame()`, `is_imu_connected()`.
+- Hardware: Supports SparkFun Qwiic / Adafruit STEMMA QT on Pi 5 I²C-1 (pins 3/5).
+- Requires: `pip install adafruit-circuitpython-bno08x`
+
+## Firmware 0.2.44 (b160) — 2025-12-19
+
+- Consolidated ~100+ scattered extern declarations into new `globals.h` header.
+- Removed duplicate extern blocks from `functions.ino` (~90 lines) and `commandprocessor.ino` (~80 lines).
+- Added forward declarations for `MarsImpedance` and `LX16AServo` classes in globals.h.
+- Added missing UART config globals (`g_uart_cfg_*`) and servo array (`g_servo[][]`) to globals.h.
+- Improves maintainability: single authoritative source for all shared variable declarations.
+
+## Firmware 0.2.43 (b159) — 2025-12-18
+
+- Refactored `loopTick()` for maintainability: extracted `tickSafetyChecks()` and `tickLogging()` as inline phase helpers.
+- `tickSafetyChecks()`: Consolidates collision keep-out and over-temperature lockout checks.
+- `tickLogging()`: Consolidates buffered CSV logging to SD with lambda-based row deduplication.
+- Added PHASE section markers (SAFETY CHECKS, OVERRUN GUARD, SD LOGGING) within loopTick() for navigation.
+- No runtime behavior changes; inline functions preserve zero overhead.
+
 ## Python Controller 0.5.48 (b160) — 2025-12-18
 
 - Added `__all__` exports to all modularized files for explicit public API.

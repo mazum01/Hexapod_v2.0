@@ -25,7 +25,8 @@ class MenuCategory:
     PID = 6
     IMP = 7
     EST = 8
-    COUNT = 9  # Total number of categories
+    IMU = 9
+    COUNT = 10  # Total number of categories
 
 
 class MenuTheme:
@@ -217,14 +218,15 @@ class MarsMenu:
     }
     
     # Tab labels (ASCII text for font compatibility)
-    TAB_LABELS = ["EYE", "GAIT", "POSE", "INFO", "SAFE", "SYS", "PID", "IMP", "EST"]
-    TAB_NAMES = ["Eyes", "Gait", "Pose", "Info", "Safety", "Sys", "PID", "IMP", "EST"]
+    TAB_LABELS = ["EYE", "GAIT", "POSE", "INFO", "SAFE", "SYS", "PID", "IMP", "EST", "IMU"]
+    TAB_NAMES = ["Eyes", "Gait", "Pose", "Info", "Safety", "Sys", "PID", "IMP", "EST", "IMU"]
 
     # Visual ordering for the sidebar tab stack.
     # Keep MenuCategory numeric IDs stable (they are used as keys) and
     # control the UI tab order via this mapping.
     TAB_ORDER = [
         MenuCategory.INFO,
+        MenuCategory.IMU,
         MenuCategory.SYSTEM,
         MenuCategory.EYES,
         MenuCategory.GAIT,
@@ -265,6 +267,7 @@ class MarsMenu:
             MenuCategory.PID: [],
             MenuCategory.IMP: [],
             MenuCategory.EST: [],
+            MenuCategory.IMU: [],
         }
         
         # Callbacks will be set by controller
@@ -455,6 +458,39 @@ class MarsMenu:
             MenuItem("Cmd α", "value", value=500, min_val=0, max_val=1000, step=25),
             MenuItem("Meas α", "value", value=500, min_val=0, max_val=1000, step=25),
             MenuItem("Vel α", "value", value=500, min_val=0, max_val=2000, step=25),
+        ]
+
+        # === IMU ===
+        self._items[MenuCategory.IMU] = [
+            MenuItem("Status", "info", value="---"),
+            MenuItem("Roll", "info", value=0.0,
+                     format_func=lambda v: f"{v:+.1f}°" if v is not None else "---"),
+            MenuItem("Pitch", "info", value=0.0,
+                     format_func=lambda v: f"{v:+.1f}°" if v is not None else "---"),
+            MenuItem("Yaw", "info", value=0.0,
+                     format_func=lambda v: f"{v:+.1f}°" if v is not None else "---"),
+            MenuItem("Update Rate", "info", value=0,
+                     format_func=lambda v: f"{v} Hz" if v is not None and v > 0 else "---"),
+            MenuItem("Read Count", "info", value=0,
+                     format_func=lambda v: f"{v}" if v is not None else "---"),
+            MenuItem("Error Count", "info", value=0,
+                     format_func=lambda v: f"{v}" if v is not None else "---"),
+            MenuItem("I2C Bus", "info", value=1,
+                     format_func=lambda v: f"Bus {v}" if v is not None else "---"),
+            MenuItem("I2C Addr", "info", value=0x4A,
+                     format_func=lambda v: f"0x{v:02X}" if v is not None else "---"),
+            MenuItem("Show Overlay", "option", value=1, options=["Off", "On"]),
+            # Body leveling items
+            MenuItem("", "separator"),  # Visual separator
+            MenuItem("Leveling", "option", value=0, options=["Off", "On"]),
+            MenuItem("LVL Gain", "slider", value=1.0, min_value=0.0, max_value=2.0, step=0.1,
+                     format_func=lambda v: f"{v:.1f}"),
+            MenuItem("Max Corr", "slider", value=30.0, min_value=5.0, max_value=50.0, step=5.0,
+                     format_func=lambda v: f"{v:.0f}mm"),
+            MenuItem("Tilt Limit", "slider", value=25.0, min_value=10.0, max_value=45.0, step=5.0,
+                     format_func=lambda v: f"{v:.0f}°"),
+            MenuItem("LVL Corrections", "info", value="---",
+                     format_func=lambda v: v if isinstance(v, str) else "---"),
         ]
     
     def set_callback(self, category, item_label, callback_type, callback):

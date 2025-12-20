@@ -553,6 +553,23 @@ def save_eye_vertical_offset(offset: int) -> bool:
         return False
 
 
+def save_eye_crt_mode(enabled: bool) -> bool:
+    """Save eye CRT effect mode to controller.ini [eyes] section."""
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'eyes' not in _cfg:
+            _cfg.add_section('eyes')
+        _cfg.set('eyes', 'crt_mode', str(enabled).lower())
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error) as e:
+        print(f"Failed to save eye CRT mode: {e}", end="\r\n")
+        return False
+
+
 def save_menu_settings(theme: Optional[int] = None, 
                        palette: Optional[int] = None) -> bool:
     """Save menu theme and palette to controller.ini [menu] section."""
@@ -658,6 +675,7 @@ __all__ = [
     # Save functions
     'save_gait_settings', 'save_pounce_settings',
     'save_eye_shape', 'save_eye_color', 'save_eye_spacing', 'save_eye_vertical_offset',
+    'save_eye_crt_mode', 'save_eye_center_offset',
     'save_menu_settings',
     'save_pid_settings', 'save_imp_settings', 'save_est_settings',
 ]

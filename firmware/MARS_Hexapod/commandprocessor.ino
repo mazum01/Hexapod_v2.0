@@ -8,108 +8,19 @@
 #include "robot_config.h"
 #include "command_types.h"
 #include "command_helpers.h"
+#include "globals.h"
+#include "MarsImpedance.hpp"
 
 // Ensure feature flags have sane defaults in this TU as well
 #ifndef MARS_ENABLE_SD
 #define MARS_ENABLE_SD 1
 #endif
 
-// Externs from other compilation units (defined in MARS_Hexapod.ino / functions.ino)
-
-extern void printHELP();
-extern void printSTATUS();
-extern void rebootNow();
-extern void modeSetTest();
-extern void modeSetIdle();
-extern bool calculateIK(uint8_t leg, float x_mm, float y_mm, float z_mm, int16_t out_cd[3]);
-extern int16_t readServoPosCdSync(uint8_t leg, uint8_t joint);
-extern int nextToken(const char* s, int start, int len, int* tokStart, int* tokLen);
-extern void printERR(uint8_t code, const char* msg);
-extern void configSetKeyValue(const char* key, const char* val);
-extern uint8_t servoId(uint8_t leg, uint8_t joint);
-extern void setServoTorqueNow(uint8_t leg, uint8_t joint, bool on);
-extern bool fk_leg_body(uint8_t leg, int16_t coxa_cd, int16_t femur_cd, int16_t tibia_cd,
-                        float* out_x_mm, float* out_y_mm, float* out_z_mm);
-
-// Shared state (extern)
-extern volatile uint8_t  g_last_err;
-extern volatile bool     g_enabled;
-extern volatile bool     g_lockout;
-extern volatile uint16_t g_lockout_causes;
-extern volatile uint16_t g_override_mask;
-extern volatile uint8_t  g_leg_enabled_mask;
-extern volatile uint32_t g_joint_enabled_mask;
-extern volatile uint32_t g_servo_oos_mask;
-extern volatile uint8_t  g_rr_index;
-extern volatile uint16_t g_rate_limit_cdeg_per_s;
-extern volatile int16_t  g_cmd_cd[6][3];
-extern volatile int16_t  g_home_cd[6][3];
-extern volatile int16_t  g_limit_min_cd[6][3];
-extern volatile int16_t  g_limit_max_cd[6][3];
-extern int16_t           g_offset_cd[6][3];
-extern uint16_t          g_meas_vin_mV[6][3];
-extern uint8_t           g_meas_temp_C[6][3];
-extern int16_t           g_meas_pos_cd[6][3];
-extern float             g_test_base_y_mm;
-extern float             g_test_base_x_mm;
-extern float             g_test_step_len_mm;
-extern uint32_t          g_test_cycle_ms;
-extern float             g_test_lift_y_mm;
-extern float             g_test_overlap_pct;
-extern float             g_safety_clearance_mm;
-extern float             g_foot_target_x_mm[6];
-extern float             g_foot_target_z_mm[6];
-extern volatile bool     g_safety_soft_limits_enabled;
-extern volatile bool     g_safety_collision_enabled;
-extern volatile int16_t  g_safety_temp_lockout_c10;
-extern volatile uint8_t  g_fk_stream_mask;
-
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
-// Logging globals (from main)
-extern volatile bool     g_log_enabled;
-extern volatile uint16_t g_log_rate_hz;
-extern volatile uint8_t  g_log_sample_div;
-extern volatile uint32_t g_log_tick_counter;
-extern volatile uint8_t  g_log_mode;
-extern volatile bool     g_log_header;
-extern volatile bool     g_log_rotate;
-extern volatile uint32_t g_log_max_bytes;
-extern volatile uint32_t g_log_file_bytes;
-extern volatile uint32_t g_log_total_bytes;
-extern volatile uint32_t g_log_seq;
-extern char              g_log_buf[8192];
-extern uint16_t          g_log_buf_used;
 #include <SD.h>
-extern File              g_log_file;
 #endif
-extern volatile uint16_t g_loop_hz;
-extern void configApplyLoopHz(uint16_t hz);
-extern volatile uint8_t  g_telem_enabled;
-extern volatile uint8_t  g_telem_bin_enabled;
-// PID/EST globals
-extern volatile bool     g_pid_enabled;
-extern volatile uint16_t g_pid_kp_milli[3];
-extern volatile uint16_t g_pid_ki_milli[3];
-extern volatile uint16_t g_pid_kd_milli[3];
-extern volatile uint16_t g_pid_kd_alpha_milli[3];
-extern volatile uint8_t  g_pid_mode; // 0=active,1=shadow
-extern volatile uint16_t g_pid_shadow_report_hz;
-extern volatile uint16_t g_est_cmd_alpha_milli;
-extern volatile uint16_t g_est_meas_alpha_milli;
-extern volatile uint16_t g_est_meas_vel_alpha_milli;
 
-// Impedance controller
-#include "MarsImpedance.hpp"
-extern MarsImpedance g_impedance;
-
-
-// Hardware angle offset helpers (provided by lx16a-servo library or stubs)
-extern int  angle_offset_read(uint8_t leg, uint8_t id); // returns cd
-extern bool angle_offset_adjust(uint8_t leg, uint8_t id, int16_t offset_cd); // sets absolute cd
-extern bool angle_offset_write(uint8_t leg, uint8_t id);
-
-// SD enable flag
-// (SD.h already included above when MARS_ENABLE_SD is enabled)
+// NOTE: All extern declarations are now centralized in globals.h.
 
 // -------------------------------------------------------------------------------------------------
 // Command enumeration & mapping (enum defined in command_types.h)
@@ -1222,12 +1133,7 @@ static void imp_print_list() {
 //   COMP RANGE <COXA|FEMUR|TIBIA|ALL> <cd>
 //   COMP DEADBAND <COXA|FEMUR|TIBIA|ALL> <cd>
 //   COMP LEAK <milli>
-// Joint compliance globals from main sketch
-extern bool     g_comp_enabled;
-extern uint16_t g_comp_kp_milli[3];
-extern uint16_t g_comp_range_cd[3];
-extern uint16_t g_comp_deadband_cd[3];
-extern uint16_t g_comp_leak_milli;
+// (Compliance globals declared in globals.h)
 
 static void comp_print_list() {
   Serial.print(F("COMP enabled=")); Serial.print(g_comp_enabled ? 1 : 0);
@@ -1872,16 +1778,7 @@ void processCmdSAFETY(const char* line, int s, int len)
 //   PARAMS         – print current tuck.* parameter values
 void processCmdTUCK(const char* line, int s, int len)
 {
-  extern volatile uint8_t  g_tuck_active;
-  extern volatile uint8_t  g_tuck_mask;
-  extern volatile uint8_t  g_tuck_done_mask;
-  extern volatile uint32_t g_tuck_start_ms;
-  extern volatile int16_t  g_tuck_tibia_cd;
-  extern volatile int16_t  g_tuck_femur_cd;
-  extern volatile int16_t  g_tuck_coxa_cd;
-  extern volatile int16_t  g_tuck_tol_tibia_cd;
-  extern volatile int16_t  g_tuck_tol_other_cd;
-  extern volatile uint16_t g_tuck_timeout_ms;
+  // (TUCK globals declared in globals.h)
 
   int ts, tl;
   s = nextToken(line, s, len, &ts, &tl);
