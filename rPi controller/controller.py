@@ -246,7 +246,7 @@
 # Controller semantic version (bump on behavior-affecting changes)
 CONTROLLER_VERSION = "0.8.4"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 236
+CONTROLLER_BUILD = 237
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -5668,9 +5668,6 @@ def phase_dashboard(ctrl):
         imu_roll = float(getattr(system, 'roll_deg', 0) or 0)
         imu_yaw = float(getattr(system, 'yaw_deg', 0) or 0)
         robot_enabled = getattr(system, 'robot_enabled', False)
-        # Safety state from S1
-        safety_int = getattr(system, 'safety', 0)
-        safety_state = "OK" if safety_int == 0 else "LOCKOUT"
     
     # If no S1 telemetry, try IMU thread directly for orientation
     if (imu_pitch == 0 and imu_roll == 0) and _imuThread is not None and _imuThread.connected:
@@ -5680,9 +5677,12 @@ def phase_dashboard(ctrl):
             imu_roll = imu_frame.roll_deg
             imu_yaw = imu_frame.yaw_deg
     
-    # Safety cause from safety_telem (S5) if available
+    # Safety state from safety_telem (S5) - the correct source for lockout status
+    # NOTE: S1 'safety' field is actually rr_index due to firmware format mismatch
     safety_telem = getattr(ctrl, 'safety_telem', None)
     if safety_telem is not None and getattr(safety_telem, 'valid', False):
+        lockout = getattr(safety_telem, 'lockout', False)
+        safety_state = "LOCKOUT" if lockout else "OK"
         cause_mask = getattr(safety_telem, 'cause_mask', 0)
         if cause_mask == 0:
             safety_cause = "---"
