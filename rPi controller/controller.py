@@ -5668,11 +5668,27 @@ def phase_dashboard(ctrl):
         imu_yaw = ctrl.state[IDX_YAW_DEG] if len(ctrl.state) > IDX_YAW_DEG else 0.0
         robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if len(ctrl.state) > IDX_ROBOT_ENABLED else False
     
-    # Safety state from system_telem
+    # Safety state from system_telem (safety is an int, not a string)
     if ctrl.system_telem is not None and ctrl.system_telem.valid:
-        safety_state = ctrl.system_telem.safety_state or "---"
-        safety_cause = ctrl.system_telem.safety_cause or "---"
+        # Convert safety int to string (0=OK, non-zero=lockout)
+        safety_int = ctrl.system_telem.safety
+        safety_state = "OK" if safety_int == 0 else "LOCKOUT"
         robot_enabled = ctrl.system_telem.robot_enabled
+    
+    # Safety cause from safety_telem if available
+    if hasattr(ctrl, 'safety_telem') and ctrl.safety_telem is not None and ctrl.safety_telem.valid:
+        cause_mask = ctrl.safety_telem.cause_mask
+        if cause_mask == 0:
+            safety_cause = "---"
+        else:
+            causes = []
+            if cause_mask & 0x01:
+                causes.append("SOFT_LIMIT")
+            if cause_mask & 0x02:
+                causes.append("COLLISION")
+            if cause_mask & 0x04:
+                causes.append("TEMP")
+            safety_cause = ",".join(causes) if causes else f"0x{cause_mask:02X}"
     
     # Servo aggregates from ctrl.servo
     if ctrl.servo:
