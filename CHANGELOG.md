@@ -1,3 +1,75 @@
+## Python Controller 0.7.35 (b219) — 2025-12-27
+
+### Battery Status Display
+
+- **draw_battery_icon()**: New function in display_thread.py renders phone-style battery indicator.
+  - Position: Top-right corner of EYES display mode.
+  - Visual: Battery outline with colored fill bar (green >50%, yellow 20-50%, red <20%).
+  - Voltage text: Shows current voltage below icon (e.g., "11.8V").
+  - Semi-transparent: Uses 70% alpha for minimal distraction over eyes animation.
+- **Config**: `show_battery_icon = true/false` in [safety_display] section of controller.ini.
+- **Voltage range**: Uses existing volt_min/volt_max thresholds for percentage calculation.
+- **Data source**: Minimum voltage from S1 servo telemetry (all 18 servos).
+
+---
+
+## Firmware 0.2.45 (b161) — 2025-12-26
+
+### S6 Joint Position Telemetry
+
+- **telemetryPrintS6()**: New ASCII telemetry segment streaming 18 joint positions in centidegrees.
+  - Format: `S6:<c0>,<f0>,<t0>,...,<t17>` (leg-major order: LF,LM,LR,RF,RM,RR × C,F,T)
+  - Uses measured position if valid, falls back to last commanded position.
+- **telemetryBinS6()**: Binary version (36 bytes = 18×int16 LE centidegrees, frame type 6).
+- **Integration**: S6 sent after S5 in both ASCII and binary telemetry modes.
+- **Purpose**: Enables 3D wireframe visualization of leg positions in engineering display.
+
+---
+
+## Python Controller 0.6.3 (b172) — 2025-12-26
+
+### S6 Joint Position Telemetry Parsing
+
+- **JointTelemetry dataclass**: New dataclass holding 18 joint angles in degrees.
+- **processTelemS6()**: ASCII parser for S6 segment (centidegrees → degrees).
+- **parseBinaryS6()**: Binary parser for S6 frame (36 bytes → 18 floats).
+- **Controller integration**: Added `joint_telem` member; wired S6 parsing for both ASCII and binary modes.
+- **Purpose**: Foundation for 3D wireframe engineering view.
+
+---
+
+## Python Controller 0.6.2 (b171) — 2025-12-21
+
+### ToF Sensor Driver Module
+
+- **tof_sensor.py**: New module for VL53L5CX Time-of-Flight ranging sensors (~500 lines).
+- **Multi-sensor support**: `ToFThread` class supports multiple sensors with configurable I²C addresses.
+- **Data structures**: `ToFFrame`, `ToFSensorFrame`, `ToFConfig`, `ToFSensorConfig` dataclasses for structured data access.
+- **8×8 distance arrays**: Full resolution support at 15 Hz polling rate.
+- **Helper methods**: `get_distance_grid()`, `get_closest_distance()`, `get_closest_obstacle()` for easy obstacle detection.
+- **Graceful fallback**: Thread handles missing/disconnected sensors without crashing.
+
+### Gait Direction Control
+
+- **Left stick Y direction**: Now controls forward (stick up) / backward (stick down) via heading 0°/180°.
+- **Strafe priority**: Right stick X strafe takes priority when active, otherwise forward/back direction applies.
+
+---
+
+## Python Controller 0.6.1 (b169) — 2025-12-20
+
+### Body Leveling Fixes & StandingGait
+
+- **Leveling bugfix**: Corrections now apply to Y axis (height), not Z (was causing no visible effect).
+- **StandingGait fix**: Now uses firmware STAND foot positions (base_x, base_y, 0) for all legs instead of corner rotations.
+- **Leveling debug**: Added diagnostic output showing why leveling is/isn't active (every 250 ticks).
+- **Stand command**: Now uses gait engine (StandingGait) instead of firmware STAND, enabling IMU-based leveling corrections.
+- **Gait cycling**: RB button now cycles through Standing→Tripod→Wave→Ripple→Stationary.
+- **IMU correction**: Fixed upside-down mounting correction (±180° → 0° for level).
+- **Menu cleanup**: Removed blank separator line in IMU tab to save screen space.
+
+---
+
 ## Python Controller 0.6.0 (b167) — 2025-12-20
 
 ### IMU Subsystem Milestone

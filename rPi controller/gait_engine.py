@@ -560,10 +560,6 @@ class TripodGait(GaitEngine):
         l_x_prime = base_x + stride_x_prime
         l_z_prime = stride_z_prime
 
-        #Debug print
-        if leg == 1:
-            print(f"ROTATION:  Leg {leg}: walk dir={walk_dir:.2f}, full_angle={math.degrees(full_angle):.2f}, stride_z={stride_z:.2f}, base_x={base_x:.2f}, base_z={base_z:.2f}, stride_x_prime={stride_x_prime:.2f}, stride_z_prime={stride_z_prime:.2f} => x'={l_x_prime:.2f}, z'={l_z_prime:.2f}", end="\r\n")  
-
         # Return the final position
         return l_x_prime, l_z_prime, cos_angle, sin_angle
 
@@ -869,6 +865,35 @@ class RippleGait(GaitEngine):
         stride_z_prime = stride_z * cos_angle
         
         return base_x_calc + stride_x_prime, stride_z_prime
+
+
+#----------------------------------------------------------------------------------------------------------------------
+# Standing Gait (static pose for leveling tests)
+#----------------------------------------------------------------------------------------------------------------------
+
+class StandingGait(GaitEngine):
+    """Static standing pose that continuously sends FEET commands.
+    
+    Unlike the firmware STAND command, this uses the gait engine pipeline
+    so body leveling corrections can be applied. Feet stay at neutral position.
+    """
+    
+    def __init__(self, params: Optional[GaitParams] = None):
+        super().__init__(params)
+    
+    def _compute_foot_targets(self, t_active: float, in_overlap: bool) -> None:
+        """Set all feet to neutral standing position.
+        
+        Matches firmware STAND command: all feet at (base_x, base_y, 0).
+        No corner leg rotation is applied - same x for all legs.
+        """
+        base_x = self.params.base_x_mm
+        base_y = self.params.base_y_mm
+        
+        for leg in range(NUM_LEGS):
+            # Match firmware STAND: x=base_x, y=base_y, z=0 for all legs
+            # (no corner rotation like TripodGait uses)
+            self._feet[leg] = FootTarget(x=base_x, y=base_y, z=0.0)
 
 
 #----------------------------------------------------------------------------------------------------------------------

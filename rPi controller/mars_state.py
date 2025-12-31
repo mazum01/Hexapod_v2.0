@@ -141,7 +141,7 @@ class EyeSettings:
     center_offset: int = 5
     vertical_offset: int = 0
     eyelid_angle: int = 0
-    blink_percent_step: float = 0.25
+    blink_percent_step: float = 0.08
     rotation: int = -10
     size_x: int = 25
     size_y: int = 45

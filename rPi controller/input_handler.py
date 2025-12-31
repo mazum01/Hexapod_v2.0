@@ -46,16 +46,28 @@ _stdscr = None
 def init_keyboard():
     """Initialize persistent curses for non-blocking keyboard input.
     
-    Call this once at startup. Returns the curses stdscr object.
+    Call this once at startup. Returns the curses stdscr object, or None
+    if no terminal is available (e.g., when running as a daemon subprocess).
     Safe to call multiple times (idempotent).
     """
     global _stdscr
     if _stdscr is None:
-        _stdscr = curses.initscr()
-        curses.noecho()
-        curses.cbreak()
-        _stdscr.nodelay(True)  # non-blocking
-        _stdscr.keypad(True)
+        try:
+            # Check if we have a terminal before initializing curses
+            import os
+            if not os.isatty(0):
+                # No terminal (stdin is not a TTY) - skip curses init
+                # This happens when started as a subprocess without a terminal
+                return None
+            _stdscr = curses.initscr()
+            curses.noecho()
+            curses.cbreak()
+            _stdscr.nodelay(True)  # non-blocking
+            _stdscr.keypad(True)
+        except curses.error as e:
+            # curses failed (no terminal, etc.) - continue without keyboard input
+            _stdscr = None
+            return None
     return _stdscr
 
 
@@ -82,13 +94,17 @@ def poll_keyboard() -> int:
     
     Returns:
         Key code (ord value) if a key is pressed, -1 otherwise.
+        Returns -1 if no terminal is available.
     """
     global _stdscr
     if _stdscr is None:
-        init_keyboard()
+        result = init_keyboard()
+        if result is None:
+            # No terminal available - no keyboard input possible
+            return -1
     try:
         return _stdscr.getch()
-    except curses.error:
+    except (curses.error, AttributeError):
         return -1
 
 

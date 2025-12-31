@@ -1,433 +1,492 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-12-19 (Completed body leveling with tilt safety and menu controls)
+Last updated: 2025-12-31 (Control loop refactor COMPLETE)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
 - [ ] not-started | [~] in-progress | [x] completed
 - Keep items short and actionable; mirror high-level plan in docs/PROJECT_SPEC.md when relevant.
 - Copilot will update this file when TODOs change, and reference it in commits.
- - Reminder: On any behavior change or TODO completion, also bump FW/Controller versions, update in-file change logs, update CHANGELOG.md, and keep docs/USER_MANUAL.md in sync with the new versions.
+- Reminder: On any behavior change or TODO completion, also bump FW/Controller versions, update in-file change logs, update CHANGELOG.md, and keep docs/USER_MANUAL.md in sync with the new versions.
 
-## Code Review Recommendations (2025-12-18)
+---
 
-### Firmware hygiene
- - [x] Remove duplicate jitter metrics block (2025-12-18)
-   - Identical jitter calculation block was duplicated in loopTick(). Removed the duplicate to avoid wasted cycles and double-counting.
- - [x] Refactor loopTick() into phase helpers (2025-12-18)
-   - Extracted tickSafetyChecks() (collision + temperature) and tickLogging() (buffered CSV to SD) as inline helpers.
-   - Added PHASE comment markers for remaining in-line blocks.
-   - Lambda-based log row writer deduplicates compact/full mode logic.
-   - FW 0.2.43 b159.
- - [x] Consolidate extern declarations into globals.h (2025-12-19)
-   - Created globals.h with ~270 lines of centralized extern declarations.
-   - Removed ~90 lines from functions.ino and ~80 lines from commandprocessor.ino.
-   - Added forward declarations for MarsImpedance and LX16AServo classes.
-   - FW 0.2.44 b160.
+## Control Loop Refactor — Three-Layer Architecture ✅ COMPLETE
 
-### Controller architecture
- - [x] Split controller.py into modules (2025-12-18) — COMPLETE
-   - Goal: Break 4800-line controller.py into focused modules.
-   - Result: 7 phases completed; controller.py reduced from 4844 to 3825 lines (~21% reduction).
-   - New modules: telemetry.py (385), config_manager.py (646), posture.py (281), mars_state.py (366), display_thread.py (596), input_handler.py (407).
-   - Progress:
-     - [x] Phase 1: telemetry.py extracted (2025-12-18, v0.5.41 b153) — dataclasses, IDX_* constants, processTelemS1-S5, helpers.
-     - [x] Phase 2: config_manager.py extracted (2025-12-18, v0.5.42 b154) — save functions, config dataclasses, set_config_state() for shared state.
-     - [x] Phase 3: posture.py extracted (2025-06-18, v0.5.43 b155) — ensure_enabled, apply_posture, start_pounce_move (281 lines); wrapper pattern.
-     - [x] Phase 4: mars_state.py created (2025-06-18, v0.5.44 b156) — state container dataclasses (366 lines); foundation for global state consolidation.
-     - [x] Phase 5: display_thread.py extracted (2025-06-18, v0.5.45 b157) — DisplayThread, UpdateDisplay, getColor, drawLogo, drawMarsSplash, get_font (520 lines). controller.py: 4422→3946 (-476 lines).
-     - [x] Phase 6: input_handler.py extracted (2025-12-18, v0.5.46 b158) — keyboard/gamepad/Teensy I/O, XboxButton/XboxAxis constants (407 lines). controller.py: 3946→3838 (-108 lines).
-     - [x] Phase 7: Final cleanup (2025-12-18, v0.5.47 b159) — removed duplicates, consolidated imports. controller.py: 3838→3825 lines.
- - [x] Unify ASCII/binary telemetry parser interface (2025-12-18, v0.5.49 b161)
-   - Added parseBinaryS1..S5, applyBinaryS1ToState, applyBinaryS5ToState, decodeBinaryFrame to telemetry.py.
-   - Controller.read_telemetry() now uses unified parsers from telemetry module.
- - [x] Complete global state migration into Controller class (2025-12-18, v0.5.49 b161) — PARTIAL
-   - Added `is_robot_enabled` property (replaces magic index 9 checks).
-   - Added `ensure_enabled()` method (consolidates 9x repeated enable patterns).
-   - Remaining: full migration of ~100 globals deferred to future work; foundation complete.
+Goal: Restructure main loop into biologically/robotically principled layers with appropriate timing.
 
-## Open tasks (firmware)
+### Research Basis
+- **Three-Layer Architecture** (Firby/Gat): Controller → Sequencer → Deliberator
+- **Subsumption Architecture** (Brooks): Parallel behaviors with suppression/inhibition
+- **Biological Motor Control**: Spinal reflexes (fast) → CPG (rhythm) → Cortex (planning)
 
- - [x] Auto-generate missing config keys on boot (2025-12-09)
-  - Added `configWriteDefaults()` called after `configLoad()` in setup() to ensure all known config keys exist in /config.txt with code-default values. Fixes TUCK params and other settings disappearing on reboot.
- 
- - [x] CSV logging to SD (2025-11-09 → 2025-11-10)
-  - Phase 1 + FULL mode implemented; size rotation; tail/clear; leg-aggregated rows; per-servo OOS; settings persistence (RATE/MODE/HEADER/ROTATE/MAXKB) excluding enabled. Remaining future (deferred): Bresenham sampling, column mask/filter, compression/binary format.
- - [x] Expand config keys (2025-11-12)
-  - Added logging.rotate, logging.max_kb, test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. Joint limits parser already supports all legs.
- - [x] Expand config keys (2025-11-12)
-  - Added logging.rotate, logging.max_kb, test.trigait.{cycle_ms,height_mm,basex_mm,steplen_mm,lift_mm,overlap_pct}. Joint limits parser already supports all legs.
- - [x] Tripod test mode (2025-11-09)
-  - Implemented deterministic tripod gait with runtime tuning (CYCLE/HEIGHT/BASEX/STEPLEN/LIFT/OVERLAP) and persistence of overlap pct; STATUS reflects parameters.
- 
- - [x] Configurable move_time (2025-11-09)
-  - Implemented via dynamic derivation from loop rate each tick; future persistence optional.
-- [x] STATUS readability
-  - [x] Reformat STATUS output for better readability (grouped sections, aligned grids, compact summary lines). (2025-11-12 — section headers like HELP; one key per line)
+### Implemented Architecture (v0.8.13)
+```
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 3: DELIBERATOR  (~1 Hz, every 166 ticks)             │
+│  • Placeholder for future SLAM/planning                     │
+│  • run_layer3_deliberator()                                 │
+└─────────────────────────────────────────────────────────────┘
+                            ↓ goals/behaviors
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 2: SEQUENCER  (~33 Hz, every 5 ticks)                │
+│  • Gamepad connection/polling                               │
+│  • Touch input, keyboard input                              │
+│  • Autonomy behaviors (obstacle/cliff/patrol)               │
+│  • Display update                                           │
+│  • run_layer2_sequencer()                                   │
+└─────────────────────────────────────────────────────────────┘
+                            ↓ motor commands
+┌─────────────────────────────────────────────────────────────┐
+│  LAYER 1: CONTROLLER  (166 Hz, every tick)                  │
+│  • Timing update, Teensy I/O, housekeeping                  │
+│  • Gait tick → FEET commands                                │
+│  • Auto-disable safety, point cloud push                    │
+│  • run_layer1_controller()                                  │
+└─────────────────────────────────────────────────────────────┘
+```
 
-  - [x] Complete servo home offset update
-    - [x] Wire hardware angle offset I/O via lx16a-servo helpers (remove RAM stubs; Teensy uses real device I/O; host uses fake include).
-    - [x] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
-    - [x] Auto-refresh offsets at startup (populate g_offset_cd from hardware for STATUS before any commands).
-    - [x] SAVEHOME cd-only clear→read→compute flow; persist both home_cd.* and offset_cd.* (0.1.98).
+### Completed Tasks
 
-  - Re-implemented multi-line grouped STATUS (system/config, test, safety, enables, offsets, oos, fk mask). (2025-11-08)
-  - [x] Restore HELP formatting (2025-11-08) — multi-line categorized sections; single authoritative implementation in printHELP().
+#### R1. Layer 1 — Controller (166 Hz)
+- [x] run_layer1_controller() wraps: timing, teensy, housekeeping, gait tick, auto-disable, pointcloud
 
-## Phase 1 completion tasks (active)
- - [x] Phase1: expand config keys (joint_limits all legs; test.trigait.* persistence)
- - [x] Phase1: loop timing validation (<10% jitter idle + test gait) (2025-11-12)
- - [x] Phase1: UART mapping consistency (spec vs robot_config.h) (2025-11-12)
- - [x] Phase1: TUCK stage debug instrumentation (FW 0.1.113)
+#### R2. Layer 2 — Sequencer (~33 Hz)
+- [x] Added _layer2TickCount, _layer2Divisor = 5 (configurable via gait.layer2_divisor)
+- [x] run_layer2_sequencer() wraps: gamepad connection/poll, touch, keyboard, autonomy, display
 
-## Phase 2 backlog (deferred)
-- [x] Phase2: optimize send path (<300us)
-  - Implemented Option A: fast per-leg batched send (MARS_FAST_SEND, default OFF). Batches 3 frames per leg with single OE window and waits only on the RR feedback leg. STATUS shows send_us ≈ 1.7 ms in TEST mode; objective met. Further work: feedback path dominates (fb_us ≈ 4.9 ms) — consider staggering vin/temp reads.
- - [x] Phase2: stagger feedback reads
-  - Added MARS_FB_STAGGER (default ON). Always read position; alternate vin and temp across RR visits; maintain OOS semantics using stored values. Expect fb_us reduction by ~2–3×.
- - [x] Phase2: joint PID controller (FW 0.2.11)
-  - Integrated dt-aware PID compute into loop (between estimator and send) with P/PI/PD, anti-windup clamp, and filtered derivative. Default disabled with zero gains. Config keys `pid.enabled` and `pid.{kp,ki,kd}_milli.<coxa|femur|tibia>` parsed at boot; STATUS [PID] shows enabled flag, mode, gains, kd_alpha, and shadow report rate. Shadow mode (`pid.mode=shadow`) computes PID without driving servos and streams enriched `PID_SHADOW` lines (diff_cd, err_cd, est_cd, tgt_cd) at `pid.shadow_report_hz`.
- - [x] Phase2: virtual impedance (spring-damper)
-   - Implemented modular `MarsImpedance` class with joint-space and simple Cartesian modes; integrated into loopTick as an optional layer on top of PID/base commands. Config keys `imp.*` parsed at boot; IMP command family (`IMP LIST|ENABLE|DISABLE|MODE|JSPRING|JDAMP|CSPRING|CDAMP`) tunes and persists gains/mode. STATUS exposes an `[IMP]` section. FW 0.2.13.
- - [x] Phase2: estimator upgrade (2025-11-18, FW 0.2.15)
-   - Implemented and tuned simple exponential smoothing toward last command with measurement correction on RR updates; PID uses the estimate between sparse reads. Alphas validated on hardware for tripod stance and small motions (current recommended defaults: est.cmd_alpha_milli≈100, est.meas_alpha_milli≈150, est.meas_vel_alpha_milli≈100).
- - [~] Phase2: collision model refinement
-   - Layered approach in progress. Current work: joint workspace enforcement using existing joint_limits.* plus shared LIMITS command; future: foot workspace box, refined foot-foot clearance, and tracking-error based safety.
- - [ ] Phase2: foot 3D workspace bounds (backlog)
-   - Define a shared body-frame foot workspace box (x/y/z mm) used as a coarse sanity check on IK targets and estimated foot poses; when safety.collision is enabled, out-of-box feet should trigger the existing STAND+DISABLE collision path.
- - [ ] Phase2: FK/IK test harness
-   - Add `IKTEST` / `FKTEST` serial commands for quick validation; emit diff vs expected; optional stats accumulation.
- - [ ] Phase2: config live reload
-   - Implement `CONFIG RELOAD` (safe mid-run parse) with timing guard; only apply non-critical keys (limits, gait, safety, logging); reject loop_hz if would cause instability.
- - [ ] Phase2: pin wiring documentation
-   - Document SerialX TX/RX/enable pins & power wiring; mirror in `robot_config.h`; splash sanity print of pin set completeness.
- - [ ] Phase2: logging enhancements
-   - Add `logging.mode=profile` (per-tick timing, rr index, overruns); jitter histogram snapshot command; optional servo read distribution metrics.
- - [x] Phase2: eye updates during gait (Python controller) (2025-12-04)
-   - Implemented DisplayThread running at configurable Hz (default 15, tested at 30Hz). Eyes update in background thread with joystick-driven look direction. Optimized st7789.py with show_image_fast() using numpy.tobytes() and writebytes2() to minimize GIL contention - eliminates leg jitter during blinks entirely.
- - [ ] Phase2: homeAngles calibration workflow
-   - Add `CALIBRATE <LEG|ALL>` automation; unify offset/home persistence strategy; clearly separate hardware offset vs logical home.
- - [ ] Phase2: loop_hz strategy review
-   - Re-assess adaptive up/down hysteresis; consider fixed 166 Hz with overrun counter & downgrade warning only.
- - [ ] Phase2: memory/footprint audit
-   - Generate RAM/flash map; identify large symbols (float printf, lx16a unused); plan trims before adding PID/impedance.
+#### R3. Layer 3 — Deliberator (~1 Hz)
+- [x] Added _layer3TickCount, _layer3Divisor = 166
+- [x] run_layer3_deliberator() placeholder for future SLAM/planning
 
-## Workflow policies (Phase 2)
+#### R4. Integration & Testing
+- [x] Main loop updated with layered structure
+- [x] Flowchart generator updated (controller_flowcharts.py)
+- [x] Controller version bumped to v0.8.13
+- [x] CHANGELOG.md updated
 
-- [~] Defer commits until instructed
-  - Keep changes in the working tree; do not commit or push without an explicit request. Provide git status/diff on demand.
-- [~] Auto-bump FW_VERSION per edit
-  - Increment FW_VERSION patch with every assistant-made code change. Update main .ino header and CHANGELOG entries when a TODO is completed or behavior changes; skip verbose changelog spam for pure profiling/formatting edits.
- - [~] Confirm major/minor version bumps
-   - Major/minor version increments require explicit user confirmation. Patch and FW_BUILD monotonic can auto-increment with edits.
+---
 
-  ## Python controller TODOs
+## Autonomy — Phase 1: Reactive Behaviors (No New Hardware)
 
-  1. [ ] Align commands with firmware
-    - Goal: Diff Python command usage vs current Teensy HELP output; identify missing abstractions (e.g., STATUS polling, SAFETY toggles).
-    - Deliverable: Proposed command map + deprecation list + wrapper strategy.
-    - Acceptance: Document approved; ready for incremental implementation tasks.
+Goal: Add behavior arbitration layer using existing ToF and IMU sensors for basic autonomous operation.
 
-  2. [ ] Logging enhancements (controller)
-    - Goal: Optional structured event log (enable, posture, errors) with timestamps.
-    - Deliverable: Simple logger writing CSV or JSON lines; toggle via config.
-    - Acceptance: Log captures listed events; disabled mode has zero measurable overhead.
+### Architecture
+```
+Sensors → Behaviors → Arbitration → Gait Commands
+   ToF  →  Avoid     →            → Turn/Stop
+   IMU  →  Level     →  Priority  → Adjust stance
+  Touch →  E-Stop    →            → Disable
+```
 
-  3. [x] Telemetry data structures upgrade (2025-12-16)
-    - Goal: Use lightweight structured containers for servo/system telemetry for clarity.
-    - Deliverable: Definitions + parser returning structured objects.
-    - Acceptance: Parsing performance acceptable; code readability improved.
+### Tasks
 
-  4. [x] Joystick command tolerance filtering (2025-12-19)
-    - Goal: Reduce spam by skipping tiny deltas.
-    - Deliverable: Threshold logic before send_cmd.
-    - Acceptance: Serial traffic decreased; control feel unchanged.
-    - Implementation: Added `send_feet_cmd()` wrapper with tolerance check (default 0.3mm). Compares new FEET positions against last sent; skips transmission if max delta < threshold. Config key `gait.feet_tolerance_mm`.
+#### A1. Behavior Engine Framework
+- [x] Create `behavior_engine.py` module — **DONE v0.7.39**
+  - Behavior base class with: name, priority, enabled flag, compute() → (active, action)
+  - BehaviorArbiter: runs all behaviors, selects highest-priority active one
+  - Action types: STOP, TURN_LEFT, TURN_RIGHT, SLOW_DOWN, CONTINUE, BACK_UP, EMERGENCY_STOP
+- [x] Integrate with main loop (between sensor reads and gait tick) — **DONE v0.7.40**
+  - phase_autonomy() runs arbiter and applies actions to gait
+  - Keyboard 'a' toggles autonomy mode
+- [x] Add [behavior] config section for enable/disable toggles — **DONE v0.7.39**
 
-  5. [x] Document telemetry field mapping (2025-12-17)
-    - Goal: Clarify S1/S2/S3/S4 schemas and indices.
-    - Deliverable: Inline comments + doc snippet.
-    - Acceptance: New contributors can interpret telemetry quickly.
+#### A2. Obstacle Avoidance Behavior
+- [x] Parse ToF 8×8 grid into danger zones (front-left, front-center, front-right) — **DONE v0.7.39**
+- [x] Configurable thresholds: stop_distance_mm (default 150), slow_distance_mm (default 300) — **DONE v0.7.39**
+- [x] Actions: STOP if obstacle < stop_distance; SLOW_DOWN if < slow_distance; TURN away from obstacle side — **DONE v0.7.39**
+- [ ] Test with static obstacles
 
-  6. [ ] Configurable voltage/temp thresholds
-    - Goal: Move color palette thresholds to config.
-    - Deliverable: Config keys + usage in display rendering.
-    - Acceptance: Adjusting file changes display scaling.
+#### A3. Cliff Detection Behavior
+- [x] Use lower rows of ToF sensor (bottom zones) — **DONE v0.7.39**
+- [x] Detect sudden distance increase (floor dropout) → cliff — **DONE v0.7.39**
+- [x] Action: STOP immediately — **DONE v0.7.39**
+- [x] Configurable cliff_threshold_mm (default 100 = 10cm drop) — **DONE v0.7.39**
 
-  7. [ ] Split display rendering
-    - Goal: Break UpdateDisplay into pure sub-functions.
-    - Deliverable: Functions (render_status_text, render_servo_bars, apply_overlays, mirror_output).
-    - Acceptance: Top-level function shorter & clearer.
+#### A4. Wall Following Behavior
+- [ ] Track ToF edge readings (left or right side zones)
+- [ ] Maintain configurable wall_distance_mm (default 200)
+- [ ] PD controller to steer parallel to wall
+- [ ] Enable via menu or command
 
-  8. [x] Honor firmware safety state (2025-12-12)
-    - Goal: Make Python controller read and obey Teensy safety/lockout state instead of ignoring it.
-    - Deliverable: Safety flags parsed from S1 (and/or STATUS), with Python-side guards that block gaits/postures when safety is tripped.
-    - Acceptance: When firmware signals safety lockout, Python no longer starts gaits or motion until cleared.
-    - Status: Implemented via S5 safety telemetry segment, Python-side safety state, hard lockout response (stop gait + `LEG ALL DISABLE` + `DISABLE`), menu Safety tab, and full-screen safety overlay while lockout is active.
+#### A5. Patrol Mode
+- [x] Simple timed forward walk with random turns — **DONE v0.7.39**
+- [x] Configurable patrol_duration_s, turn_interval_s — **DONE v0.7.39**
+- [x] Respects obstacle avoidance (higher priority) — **DONE v0.7.39**
+- [ ] Stop on touch screen tap (E-stop already implemented)
 
-  9. [x] Make Wave gait translate (2025-12-13)
-    - Goal: Fix WaveGait so it produces forward translation instead of marching in place.
-    - Deliverable: Adjusted wave gait parameters/phase offsets so body advances forward under wave pattern.
-    - Acceptance: Selecting Wave gait on hardware moves robot forward at reasonable speed with stable stance.
-    - Status: Updated WaveGait stance phase distribution so stance legs are distributed across the stride rather than moving in sync.
+#### A6. Behavior Menu Tab
+- [x] Add AUTONOMY tab to MarsMenu — **DONE v0.7.41**
+- [x] Items: Enable/Disable each behavior, thresholds, patrol settings — **DONE v0.7.41**
+- [x] Status: Active behavior name, last action taken — **DONE v0.7.41**
+- [x] Save Settings action with save_behavior_settings() — **DONE v0.7.41**
+- [x] Controller toggle: Back+A gamepad combo — **DONE v0.7.42**
 
-  10. [x] Eye vertical offset wiring (2025-12-10)
-    - Goal: Make the "Vertical" (V Center) parameter in the Eyes tab actually move eye positions.
-    - Deliverable: Proper plumbing from MarsMenu value into SimpleEyes / DisplayThread so vertical offset changes render location.
-    - Acceptance: Changing eye vertical parameter visibly shifts eyes up/down on the LCD.
+#### A7. Caught Foot Detection & Recovery
+- [x] Detect foot snag during swing phase using: — **DONE v0.7.39**
+  - Position error: commanded vs actual divergence > threshold
+  - Swing timeout: foot doesn't reach target within expected time
+- [ ] Additional detection (future): servo load/current spike, IMU anomaly
+- [x] Recovery actions implemented: — **DONE v0.7.39**
+  - Lift caught leg higher (increase step height temporarily)
+  - Back up one step if lift fails
+  - E-stop after N consecutive failures
+- [x] Configurable: snag_position_error_deg, snag_timeout_ms, recovery_lift_mm — **DONE v0.7.39**
+- [ ] Log snag events for analysis
 
-  11. [x] Telemetry parsing perf pass (2025-12-16)
-    - Goal: Reduce per-tick overhead in the serial telemetry hot path.
-    - Deliverable: Fewer allocations/splits; debug snapshots only when telemetry debug is enabled.
-    - Acceptance: No behavioral changes; improved stability/CPU headroom.
+---
 
-  11. [x] Finer eye spacing granularity (2025-12-10)
-    - Goal: Reduce horizontal spacing step size for finer tuning.
-    - Deliverable: Updated menu range/step and controller-to-eyes mapping using smaller increments.
-    - Acceptance: Eyes spacing adjustment feels smoother with many distinct positions.
+## Autonomy — Phase 2: Deliberative Navigation (Moderate Effort)
 
-  12. [x] Reverse strafe direction (2025-12-10)
-    - Goal: Fix left/right strafe mapping so joystick X causes intuitive sideways motion.
-    - Deliverable: Adjusted sign convention in gait input→foot target mapping so left stick X and right stick X produce correct lateral direction.
-    - Acceptance: On hardware, pushing stick left strafes left; pushing right strafes right.
+Prerequisites: Phase 1 behaviors working reliably
 
-  13. [x] Reduce turning gain (2025-12-11)
-    - Goal: Lower yaw/turn rate gain so outside legs do not collide for small joystick inputs.
-    - Deliverable: Tuned mapping from turn joystick axis to gait_engine turn_rate_deg_s (and/or differential stride) with appropriate deadzone.
-    - Acceptance: With modest turn input, robot arcs smoothly without leg-leg collisions; full-deflection still allows tight turns.
+### Tasks
 
-  14. [x] Show firmware/controller versions at startup (2025-12-08)
-    - Goal: Display Teensy firmware build (date + FW_VERSION/FW_BUILD) and Python controller version/build alongside the MARS banner on controller startup.
-    - Deliverable: Startup banner line (or two) printed over USB serial and/or LCD that includes firmware and controller versions/dates in a concise, non-blocking way.
-    - Acceptance: On launch, the controller prints both firmware and controller version info; values stay in sync with FW_VERSION/FW_BUILD and CONTROLLER_VERSION/CONTROLLER_BUILD.
+#### A7. Waypoint Navigation
+- [ ] Dead reckoning using IMU yaw integration + gait step counting
+- [ ] Waypoint list (x, y) in body start frame
+- [ ] Simple pursuit: turn toward waypoint, walk, stop when close
+- [ ] Drift-limited (~1-2m useful range without correction)
 
-  15. [x] Rename Arachnotron banner to MARS
-    - Goal: Update the controller’s startup banner text to use the new project name "M.A.R.S. — Modular Autonomous Robotic System" instead of "Arachnotron".
-    - Deliverable: Startup output and any on-screen text that still says Arachnotron are updated to say M.A.R.S., without adding extra blocking delay.
-    - Acceptance: On controller startup, the banner clearly shows the M.A.R.S. name and no remaining Arachnotron references in primary startup messaging.
+#### A8. Simple SLAM (2D Occupancy Grid)
+- [ ] Rotate in place to scan 360° with ToF
+- [ ] Build 2D occupancy grid (configurable cell size, default 50mm)
+- [ ] Update grid incrementally during patrol
+- [ ] Display grid on engineering view or menu
 
-  16. [x] Mirror window keyboard mapping (2025-12-08)
-    - Goal: Fully map MarsMenu keyboard controls onto the OpenCV mirror window key stream so menu navigation feels as complete and responsive as the curses-based path.
-    - Deliverable: cv2.waitKey handling that supports tab navigation, item navigation, value adjustment, selection, and exit, mirroring the arrow/A/D/Esc behavior used in the terminal.
-    - Acceptance: With focus on the mirror window, keys move items, adjust values, switch tabs, and close the menu; latency is acceptable and behavior matches the terminal controls.
+#### A9. Return to Start
+- [ ] Record start position on patrol begin
+- [ ] Navigate back using dead reckoning + obstacle avoidance
+- [ ] Useful for "go explore and come back" behavior
 
-  17. [x] Firmware + controller user manual (2025-12-10)
-    - Goal: Maintain a comprehensive user manual covering both the Teensy firmware (MARS_Hexapod) and the Python controller, including setup, command protocols, menus, safety behaviors, and troubleshooting.
-    - Deliverable: A versioned manual document (`docs/USER_MANUAL.md`) whose revision is explicitly tied to the current FW_VERSION/FW_BUILD and CONTROLLER_VERSION/CONTROLLER_BUILD.
-    - Acceptance: Manual is updated whenever behavior changes; top-of-file revision section references matching firmware and controller versions, and a process note/command imperative is documented to keep the manual in sync with any future code changes.
+---
 
-  18. [x] Dedicated PID/IMP/EST menu tabs (2025-12-15)
-    - Goal: Give PID/IMP/EST separate tabs that display current firmware values and allow updates from the menu.
-    - Deliverable: PID/IMP/EST tabs with LIST polling/parsing and per-field edit callbacks.
-    - Acceptance: Values on-screen match `PID LIST` / `IMP LIST` / `EST LIST`, and edits send the matching firmware commands.
+## Autonomy — Phase 3: Vision & AI (Requires Camera + Optional Accelerator)
 
-## Sensor integration (I²C / Qwiic)
+### Hardware Options
 
-Hardware: SparkFun Qwiic breakouts on Pi 5 I²C-1 (pins 3/5) @ 400 kHz.
-Prerequisite: Set `dtparam=i2c_arm_baudrate=400000` in `/boot/firmware/config.txt`.
+| Device | Performance | Price | Notes |
+|--------|-------------|-------|-------|
+| Pi Camera 3 | N/A | ~\$25 | Required for all vision tasks |
+| Coral USB TPU | 4 TOPS | ~\$60 | Easy USB, good ecosystem |
+| Hailo-8L M.2 | 13 TOPS | ~\$70 | M.2 HAT needed, excellent perf |
+| Hailo-8 M.2 | 26 TOPS | ~\$100 | Top-tier for Pi |
 
-### IMU integration (Adafruit BNO085)
+### Tasks (Camera Only, CPU-based ~5-10 FPS)
 
-  1. [x] IMU driver module (2025-12-19)
-    - Goal: Create `imu_sensor.py` module with threaded I²C polling for orientation data.
-    - Deliverable: `ImuThread` class reading quaternion/euler at configurable rate (default 100 Hz); ring buffer for latest frame; graceful fallback if sensor absent.
-    - Acceptance: Thread runs without blocking gait loop; orientation data accessible via `get_orientation()`.
-    - Implementation: Created `imu_sensor.py` with `ImuThread`, `ImuFrame`, `ImuConfig` classes. Uses adafruit-circuitpython-bno08x library. Integrated into controller.py with config loading (`[imu]` section) and startup/shutdown. Helper functions: `get_imu_orientation()`, `get_imu_frame()`, `is_imu_connected()`. Controller v0.5.50 b162.
+#### A10. Add Pi Camera Module
+- [ ] Mount camera (front-facing, adjustable tilt)
+- [ ] Create `camera_sensor.py` module with threaded capture
+- [ ] Configurable resolution (default 640×480), frame rate (default 10 FPS)
 
-  2. [x] IMU data integration (2025-12-19)
-    - Goal: Expose IMU orientation to gait engine for body stabilization.
-    - Deliverable: `ImuFrame` dataclass (timestamp, roll, pitch, yaw, quaternion); integration point in controller main loop.
-    - Acceptance: Orientation available each tick; no gait jitter introduced.
-    - Implementation: ImuFrame dataclass complete. Helper functions `get_imu_orientation()`, `get_imu_frame()`, `is_imu_connected()` provide access. IMU overlay visualization added to DisplayThread (`draw_imu_overlay()`) showing real-time gravity vector with roll/pitch/yaw values. Uses I2C bus 3 (configurable) via adafruit-extended-bus. Controller v0.5.52 b164.
+#### A11. Color Blob Tracking
+- [ ] OpenCV HSV color detection
+- [ ] Track colored object (ball, marker)
+- [ ] Behavior: turn toward blob, approach slowly
 
-  3. [x] IMU menu tab (2025-12-19)
-    - Goal: Display live IMU data (roll/pitch/yaw) in MarsMenu.
-    - Deliverable: New "IMU" tab showing orientation values, calibration status, update rate.
-    - Acceptance: Values update in real-time; tab navigable via existing menu controls.
-    - Implementation: Added MenuCategory.IMU (index 9) to MarsMenu.py. Tab shows: Status (Connected/Disconnected), Roll/Pitch/Yaw angles, Update Rate, Read/Error counts, I2C Bus/Address, Show Overlay toggle. Tab placed after INFO in visual order. Controller v0.5.53 b165.
+#### A12. ArUco Marker Localization
+- [ ] Detect ArUco markers for known positions
+- [ ] Correct dead reckoning drift when marker seen
+- [ ] Place markers around room as waypoints
 
-  4. [x] Body leveling (2025-12-19)
-    - Goal: Use IMU pitch/roll to adjust body pose and keep chassis level on uneven terrain.
-    - Deliverable: Optional leveling mode that biases foot Z targets based on IMU feedback.
-    - Acceptance: Robot maintains level body when walking on mild slopes; toggle via config/menu.
-    - Safety: If tilt exceeds configurable threshold (default 25°), trigger safety lockout, issue TUCK, and disable servos.
-    - Implementation: New leveling.py module (~200 lines) with LevelingConfig, LevelingState, Z correction formula (Δz = x_hip×sin(pitch) + z_hip×sin(roll)). Integrated into send_feet_cmd(). Tilt safety callback triggers TUCK+DISABLE. Menu items in IMU tab: Leveling toggle, LVL Gain, Max Corr, Tilt Limit, LVL Corrections info. Config in [leveling] section of controller.ini. Controller v0.5.54 b166.
-    - Sub-tasks (all complete):
-      - [x] Z-only leveling (adjust foot Z based on leg position × sin(tilt))
-      - [x] Tilt safety threshold (lockout + tuck + disable on excessive tilt)
-      - [x] Leveling menu items in IMU tab
-      - [x] Config persistence ([leveling] section)
+#### A13. Motion Detection (Sentry Mode)
+- [ ] Frame differencing for motion detection
+- [ ] Alert behavior: turn toward motion, track
 
-  5. [ ] CoM shift compensation (Phase 2 enhancement)
-    - Goal: Shift body XY position to keep center of mass projection centered in support polygon on slopes.
-    - Deliverable: Optional CoM shift that moves body toward the "high" side of a slope.
-    - Acceptance: Improved stability margin on steeper slopes (>10°); toggle via config/menu.
-    - Depends: Body leveling (item 4) must be complete first.
+### Tasks (With AI Accelerator, 30+ FPS)
 
-### ToF sensor integration (VL53L5CX stereo pair)
+#### A14. Real-time Object Detection
+- [ ] MobileNet-SSD or YOLO-Nano on Coral/Hailo
+- [ ] Detect: people, pets, furniture, obstacles
+- [ ] Behavior: avoid people, follow person on command
 
-  6. [ ] ToF driver module
-    - Goal: Create `tof_sensor.py` module with threaded I²C polling for dual VL53L5CX sensors.
-    - Deliverable: `ToFThread` class reading 8×8 distance arrays from both sensors at configurable rate (default 15 Hz); address assignment for left (0x30) and right (0x29); graceful fallback if sensors absent.
-    - Acceptance: Thread runs without blocking gait loop; distance data accessible via `get_tof_frame()`.
+#### A15. Person Following
+- [ ] Track specific person (largest detection or re-ID)
+- [ ] Maintain follow_distance_mm (default 1000)
+- [ ] Stop when person stops, follow when they move
 
-  6. [ ] ToF data structures
-    - Goal: Define structured data containers for ToF output.
-    - Deliverable: `ToFFrame` dataclass (timestamp, left 8×8 array, right 8×8 array, sigma/confidence arrays); 3D projection to body-frame point cloud.
-    - Acceptance: Raw sensor data converted to usable spatial representation.
+#### A16. Semantic Terrain Classification
+- [ ] Segment floor vs obstacle vs wall
+- [ ] Detect terrain type (carpet, tile, stairs)
+- [ ] Behavior: avoid stairs, prefer smooth surfaces
 
-  7. [ ] ToF stereo fusion
-    - Goal: Merge left/right sensor data into unified obstacle representation.
-    - Deliverable: Polar occupancy grid (e.g., 12 sectors × 10 distance bins) or closest-obstacle-per-sector array; sensor mounting transforms configurable.
-    - Acceptance: Fused grid updates at sensor frame rate; no gaps in center overlap region.
+#### A17. Gesture Recognition
+- [ ] MediaPipe Hands for hand detection
+- [ ] Simple gestures: wave (come here), stop (palm), point (go there)
+- [ ] Map gestures to behaviors
 
-  8. [ ] ToF display visualization
-    - Goal: Visualize ToF sensor output on the LCD display.
-    - Deliverable: Overlay or dedicated view showing 8×8 depth grids (color-coded by distance), fused obstacle sectors, or simple "closest obstacle" indicator.
-    - Acceptance: Visualization updates in real-time; togglable via menu or hotkey; does not impact gait loop timing.
+#### A18. Voice Commands (Local)
+- [ ] Whisper-tiny or similar on accelerator
+- [ ] Commands: "come", "stop", "patrol", "follow me"
+- [ ] Wake word or always-on with low-power mode
 
-  9. [ ] ToF menu tab
-    - Goal: Display ToF sensor status and configuration in MarsMenu.
-    - Deliverable: New "ToF" tab showing sensor status (connected/disconnected), frame rate, closest obstacles per sector, enable/disable toggle.
-    - Acceptance: Tab reflects live sensor state; settings persist to config.
+---
 
-  10. [ ] Reactive obstacle avoidance (Phase 2)
-    - Goal: Use ToF obstacle grid to prevent collisions during autonomous motion.
-    - Deliverable: Gait engine checks obstacle grid before each step; stops or steers away when obstacle detected in travel direction.
-    - Acceptance: Robot stops before hitting obstacle; optional steer-around behavior; safety override always available.
+## Display & UX
 
-## Completed
- - [x] Keep STATUS slim (2025-11-12)
-  - Verified STATUS remains compact with grouped sections; no `[TUCK]` debug block or verbose fields present.
- - [x] Startup offset refresh (2025-11-12)
-  - On boot, read hardware angle offsets and populate g_offset_cd before first STATUS. Also parse offset_cd.<LEG>.<joint> from config (seed only; hardware read overwrites).
- - [x] Keep STATUS slim (2025-11-12)
-  - Verified STATUS remains compact with grouped sections; no `[TUCK]` debug block or verbose fields present.
- - [x] Startup offset refresh (2025-11-12)
-  - On boot, read hardware angle offsets and populate g_offset_cd before first STATUS. Also parse offset_cd.<LEG>.<joint> from config (seed only; hardware read overwrites).
- - [x] HELP TUCK update (2025-11-12)
-  - Added TUCK help lines documenting runtime tuck.* params and TUCK SET subcommand (persist TIBIA/FEMUR/COXA/TOL_TIBIA/TOL_OTHER/TIMEOUT). (FW 0.1.111)
- - [x] TUCK PARAMS command (2025-11-12)
-  - Added TUCK PARAMS subcommand to print current tuck parameter values (tibia/femur/coxa, tolerances, timeout) and corresponding HELP line. (FW 0.1.112)
- - [x] STATUS [TUCK] debug removal (2025-11-12)
-  - Removed temporary STATUS `[TUCK]` debug section (active/masks/params and tibia meas/eff). Keeps STATUS leaner and reduces print cost; TUCK controller remains unchanged. (FW 0.1.110)
- - [x] Position validity & TUCK tibia convergence (2025-11-12)
- - [x] Loop timing validation (2025-11-12)
-  - Jitter metrics added (FW 0.1.115) and observed min/avg/max within <10% of 6.024 ms budget under idle + test gait; no sustained overruns.
- - Confirms Phase 1 timing acceptance criteria.
- - [x] Loop timing validation (2025-11-12)
-  - Jitter metrics added (FW 0.1.115) and observed min/avg/max within <10% of 6.024 ms budget under idle + test gait; no sustained overruns.
- - Confirms Phase 1 timing acceptance criteria.
-  - Added `g_meas_pos_valid` flags so a measured 0 cd is treated as valid instead of falling back to last-sent (which appeared as 24000). Restored TUCK tibia target to 0 cd; prevents sequencing stall.
- - [x] Logging rotation & size cap (2025-11-10)
-  - Implemented size-based rotation with `LOG ROTATE` and `LOG MAXKB` (KB units). 1GB hard clamp; default max 10MB; sequence-based filenames and status reporting.
- - [x] Leg-aggregated CSV rows (2025-11-10)
-  - Changed logging schema to emit one line per leg (3 servos aggregated) reducing rows (compact: 1→1 unchanged semantics; full: 18→6). Updated headers, CHANGELOG, FW_VERSION to 0.1.88.
- - [x] Tripod test mode (2025-11-09)
-  - Deterministic tripod gait with runtime tuning (CYCLE/HEIGHT/BASEX/STEPLEN/LIFT/OVERLAP) and persistence of overlap pct; STATUS reflects parameters.
- - [x] Move time derived from loop period (2025-11-09)
-  - Per-tick move_time computed from current loop_hz; eliminates static constant and ensures sync with adaptive loop rate.
- - [x] Unify SD guard macros (2025-11-09)
-   - Standardized feature guards to `#if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD` across sources; avoids ambiguous truthiness and keeps guards consistent.
- - [x] Centralize OK responses (2025-11-09)
-   - Moved OK printing to a centralized dispatcher epilogue; removed per-handler printOK() calls; handlers only print ERR on failure.
-- [x] Echo processed command lines (2025-11-08)
-  - After each command is handled, the original line is reflected back as `> <line>` to aid logging/CLI.
-- [x] Keep docs in sync with commands (2025-11-04)
-  - Updated Serial command list in `docs/PROJECT_SPEC.md` to include SAFETY LIST/OVERRIDE/SOFTLIMITS/COLLISION/TEMPLOCK/CLEARANCE and expanded STATUS grouping; added implemented config keys (safety.* and test.trigait.overlap_pct).
-- [x] STATUS readability (2025-11-03)
-  - Reformatted STATUS output into grouped sections: system, safety, test, enables, telemetry, home, timing, oos.
-- [x] HELP in sync (2025-11-03)
-  - Updated HELP to list all implemented commands, including SAFETY SOFTLIMITS/COLLISION/TEMPLOCK; removed duplicates.
-- [x] RR FK round-robin telemetry (2025-11-03)
-  - Print FK body-frame x/y/z for the leg read during round-robin feedback to aid bring-up.
-- [x] Safety config toggles (2025-11-03)
-  - Added safety.soft_limits, safety.collision, and safety.temp_lockout_c keys; runtime `SAFETY` subcommands to update/persist; STATUS/SAFETY LIST show current values.
-- [x] Collision lockout (2025-11-03)
-  - Implemented simple foot-to-foot keep-out in X/Z plane with configurable clearance. Added `SAFETY CLEARANCE <mm>` command and `safety.clearance_mm` config key; STATUS prints `safety_clearance_mm`. Lockout triggers E40 and requires re-enable.
-- [x] TEST OVERLAP runtime command (2025-11-03)
-  - Added `TEST OVERLAP <pct>` to adjust overlap at runtime (0..25). Value is persisted to `/config.txt` as `test.trigait.overlap_pct`. STATUS includes `overlap_pct`.
-- [x] STATUS safety details (2025-11-03)
-  - STATUS now includes `safety=<state> cause=0x.. override=0x..`. Added `SAFETY LIST` and `SAFETY OVERRIDE` commands.
+### D1. Battery Status Display
+- [x] Add phone-style battery icon to EYES display mode (v0.7.35 b219)
+  - Position: top-right corner, semi-transparent
+  - Show: battery percentage bar, voltage text
+  - Color: green (>50%), yellow (20-50%), red (<20%)
+  - Data source: S1 telemetry servo voltage (min of all servos)
+  - Configurable: enable/disable via show_battery_icon in [safety_display]
 
-  - [x] Defer commits until instructed (2025-11-12)
-    - Phase 1 policy enforced (batched edits, explicit user-driven commit points). Closed after merge/tag of Phase 1 completion.
+### D2. Battery Voltage Calibration
+- [ ] Learn actual battery full/empty voltages for accurate percentage display
+  - Current defaults: volt_min=10.5V (empty), volt_max=12.5V (full)
+  - For 3S LiPo: 9.0V cutoff, 12.6V full → update defaults or auto-learn
+  - Option A: Manual config (document in USER_MANUAL)
+  - Option B: Track min/max seen over session, suggest calibration values
+  - Option C: Add "Calibrate Battery" menu item that records current voltage as "full"
+- [ ] Show percentage instead of/alongside voltage on icon
+- [ ] Add low battery audio warning (beep or TTS)
 
-  - [x] Defer commits until instructed (2025-11-12)
-    - Phase 1 policy enforced (batched edits, explicit user-driven commit points). Closed after merge/tag of Phase 1 completion.
+---
 
-- [x] TEST gait params commands (2025-11-02)
-  - Added TEST subcommands to set cycle time, ground height, base X, and step length at runtime; STATUS shows current values.
+## Safety — Limb Collision Avoidance
 
-- [x] Timing probes
-  - Compile-time timing probes for serial/send/feedback/tick and STATUS reporting.
-- [x] Direct bus MOVE_TIME writes
-  - Replace LX16AServo::move_time with custom busMoveTimeWrite helper in loopTick.
-- [x] Temperature safety lockout and UX
-  - Lockout at >=80°C with torque-off; LOCKOUT mode; SAFETY LIST and OVERRIDE support; STATUS safety summary and override handling.
- - [x] STAND neutral via IK (2025-11-01)
-  - STAND computes IK to a neutral stance at (x=BASE_X, y=BASE_Y, z=0) per leg; replaces prior home_cd copy behavior.
-- [x] Startup splash banner
-  - Show Robot::SPLASH_BANNER and concise runtime summary at boot.
-- [x] Integrate IK function
-  - Implemented calculateIK and wired FOOT/FEET; unreachable returns E20.
-- [x] Soft joint limits
-  - Parsed joint_limits.* from /config.txt; clamp commanded centidegrees prior to send.
+### Current State (Firmware)
+The firmware has geometric keep-out zone collision detection that triggers STAND+DISABLE when a foot position violates predefined body/leg clearances. This is reactive (catches violations after IK) rather than preventive.
+
+### S1. Analytical Pre-IK Collision Check (No AI, Recommended First)
+- [ ] Implement swept-volume collision test before sending foot targets
+  - Model each leg segment as capsule (cylinder + hemispheres)
+  - For each leg pair that could collide (LF↔LM, LM↔LR, etc.), test capsule-capsule intersection
+  - Run at gait planning time (before IK) to reject or clamp dangerous trajectories
+- [ ] Precompute collision risk zones per leg phase
+  - During swing: leg is most vulnerable to hitting neighbors
+  - During stance: stationary, minimal risk unless body tilts
+- [ ] Add velocity-aware margin (faster motion → larger keep-out buffer)
+
+### S2. Learned Collision Model (AI-Enhanced)
+- [ ] Train lightweight neural network on collision data
+  - Input: 18 joint angles (or 6×3 foot positions)
+  - Output: collision probability (0.0–1.0) for each leg pair
+  - Training data: exhaustive FK simulation sampling valid vs colliding configs
+- [ ] Deploy on Pi 5 CPU (~1ms inference for small MLP)
+  - No accelerator needed for 18-input → 6-output regression
+  - Run every gait tick to gate trajectory before sending to firmware
+
+### S3. Reinforcement Learning Gait Optimization (Advanced)
+- [ ] Train RL policy that maximizes task reward while avoiding collisions
+  - Reward: forward progress, stability, energy efficiency
+  - Penalty: collision events, near-misses, jerky motion
+  - Sim-to-real: train in PyBullet/MuJoCo, fine-tune on real robot
+- [ ] Deploy policy on Coral/Hailo for real-time inference
+  - Replaces or augments hand-tuned gait engine
+  - Automatically learns safe trajectories for complex terrain
+
+### S4. Visual Self-Monitoring (Camera-Based)
+- [ ] Downward-facing camera watches leg motion
+  - Detect unexpected leg positions or contact events
+  - Useful for detecting entanglement, debris, mechanical failure
+- [ ] Requires camera + AI accelerator for real-time pose estimation
+  - Could use lightweight pose model (MediaPipe, MoveNet)
+
+---
+
+## Open Tasks (Firmware)
+
+### Phase 2 Backlog
+
+- [ ] Foot 3D workspace bounds
+  - Define body-frame foot workspace box (x/y/z mm) as sanity check on IK targets
+  - Out-of-box feet trigger STAND+DISABLE collision path when safety.collision enabled
+
+- [ ] FK/IK test harness
+  - Add IKTEST / FKTEST serial commands for quick validation
+  - Emit diff vs expected; optional stats accumulation
+
+- [ ] Config live reload
+  - Implement CONFIG RELOAD (safe mid-run parse) with timing guard
+  - Only apply non-critical keys (limits, gait, safety, logging)
+
+- [ ] Pin wiring documentation
+  - Document SerialX TX/RX/enable pins & power wiring
+  - Mirror in robot_config.h; splash sanity print
+
+- [ ] Logging enhancements
+  - Add logging.mode=profile (per-tick timing, rr index, overruns)
+  - Jitter histogram snapshot command
+
+- [ ] homeAngles calibration workflow
+  - Add CALIBRATE <LEG|ALL> automation
+  - Unify offset/home persistence strategy
+
+- [ ] loop_hz strategy review
+  - Re-assess adaptive up/down hysteresis
+  - Consider fixed 166 Hz with overrun counter
+
+- [ ] Memory/footprint audit
+  - Generate RAM/flash map
+  - Identify large symbols (float printf, lx16a unused)
+
+---
+
+## Open Tasks (Python Controller)
+
+### General
+
+- [ ] Align commands with firmware
+  - Diff Python command usage vs current Teensy HELP output
+  - Identify missing abstractions (STATUS polling, SAFETY toggles)
+  - Deliverable: Command map + deprecation list + wrapper strategy
+
+- [ ] Logging enhancements (controller)
+  - Optional structured event log (enable, posture, errors) with timestamps
+  - Simple logger writing CSV or JSON lines; toggle via config
+
+- [ ] Configurable voltage/temp thresholds
+  - Move color palette thresholds to config
+  - Config keys + usage in display rendering
+
+- [ ] Split display rendering
+  - Break UpdateDisplay into pure sub-functions
+  - Functions: render_status_text, render_servo_bars, apply_overlays, mirror_output
+
+### Sensor Integration
+
+- [ ] ToF stereo fusion
+  - Merge left/right sensor data into unified obstacle representation
+  - Polar occupancy grid (12 sectors × 10 distance bins)
+
+- [ ] Reactive obstacle avoidance
+  - Gait engine checks obstacle grid before each step
+  - Stops or steers away when obstacle detected
+
+- [ ] CoM shift compensation (Phase 2 enhancement)
+  - Shift body XY to keep center of mass centered in support polygon on slopes
+  - Improved stability margin on steeper slopes (>10°)
+
+### Xbox Controller
+
+- [ ] startup.sh update
+  - Remove controller.py auto-start (now managed by joy_controller)
+  - Deferred from v0.7.1 release
+
+### View Settings
+
+- [ ] Persist 3D view angle in controller.ini
+  - Save/restore engineering view azimuth/elevation
+  - Low priority
+
+---
+
+## Completed Tasks
+
+### Startup Fixes (2025-12-27)
+- [x] Fix startup crash after ToF init (v0.7.33 b217)
+- [x] Fix startup display race condition (v0.7.34 b218)
+
+### 3D Wireframe Engineering View (2025-12-26)
+- [x] Firmware: S6 Joint Position Telemetry (FW 0.2.45)
+- [x] Python: S6 Parsing (v0.6.3 b172)
+- [x] Python: FK forward kinematics (v0.7.13 b197)
+- [x] Python: 3D Projection functions
+- [x] Python: D-pad view control
+- [x] Python: draw_hexapod_wireframe_3d()
+- [x] Integration & testing complete
+
+### Modularization (2025-12-18)
+- [x] Phase 1: telemetry.py extracted (v0.5.41 b153)
+- [x] Phase 2: config_manager.py extracted (v0.5.42 b154)
+- [x] Phase 3: posture.py extracted (v0.5.43 b155)
+- [x] Phase 4: mars_state.py created (v0.5.44 b156)
+- [x] Phase 5: display_thread.py extracted (v0.5.45 b157)
+- [x] Phase 6: input_handler.py extracted (v0.5.46 b158)
+- [x] Phase 7: Final cleanup (v0.5.47 b159)
+- [x] Unify ASCII/binary telemetry parser (v0.5.49 b161)
+
+### Sensor Integration (2025-12-19 - 2025-12-22)
+- [x] IMU driver module (v0.5.50 b162)
+- [x] IMU data integration (v0.5.52 b164)
+- [x] IMU menu tab (v0.5.53 b165)
+- [x] Body leveling with tilt safety (v0.5.54 b166)
+- [x] Motion lean (v0.6.8 b178)
+- [x] ToF driver module (v0.6.2 b171)
+- [x] ToF display visualization (v0.6.4 b174)
+- [x] ToF menu tab (v0.6.7 b177)
+
+### Xbox Controller Split (2025-12-22)
+- [x] joy_controller.py daemon
+- [x] joy_client.py socket client
+- [x] mars-joy.service systemd unit
+- [x] Power button start/stop with haptic feedback
+- [x] Xbox connection status display (v0.7.1 b180)
+
+### Display & UX (2025-12-06 - 2025-12-24)
+- [x] Eye updates during gait (v0.4.0 b65)
+- [x] Eye shape cycle with persistence (v0.4.16 b82)
+- [x] Human eye improvements (v0.4.15 b81 - v0.4.22 b88)
+- [x] Touch E-STOP (v0.4.23 b89)
+- [x] New eye types: CAT, HYPNO, ANIME (v0.4.24 b90)
+- [x] MARS menu system (v0.4.27 b93)
+- [x] LCARS theme (v0.4.33 b99)
+- [x] Eye flicker fixes (v0.7.7 b191 - v0.7.12 b196)
+- [x] Mars startup splash (v0.7.30 b214)
+
+### Firmware Hygiene (2025-12-18 - 2025-12-19)
+- [x] Remove duplicate jitter metrics block
+- [x] Refactor loopTick() into phase helpers
+- [x] Consolidate extern declarations into globals.h (FW 0.2.44 b160)
+
+### Safety & Telemetry (2025-12-12 - 2025-12-16)
+- [x] Honor firmware safety state (v0.5.15 b125)
+- [x] Telemetry data structures upgrade (v0.5.28 b139)
+- [x] Binary telemetry support (v0.5.35 b147)
+
+### Gait & Motion (2025-12-10 - 2025-12-13)
+- [x] Wave/Ripple gait translation fixes (v0.5.19-v0.5.20)
+- [x] Joystick command tolerance filtering (v0.5.50 b162)
+- [x] Reverse strafe direction (v0.5.11 b121)
+- [x] Turn gain tuning (v0.5.12 b122)
+- [x] Eye vertical offset wiring (v0.5.9 b119)
+- [x] Finer eye spacing granularity (v0.5.10 b120)
+
+### Menu & Config (2025-12-07 - 2025-12-15)
+- [x] Touchscreen config menu complete (v0.5.0 b110)
+- [x] Dedicated PID/IMP/EST menu tabs (v0.5.25 b135)
+- [x] Mirror window keyboard mapping (v0.5.8 b118)
+
+### Documentation (2025-12-08 - 2025-12-17)
+- [x] Firmware + controller user manual (USER_MANUAL.md)
+- [x] Document telemetry field mapping
+- [x] Rename to MARS branding (v0.5.7 b117)
+- [x] Show firmware/controller versions at startup (v0.5.14 b124)
+
+### Earlier Firmware Work (2025-11)
+- [x] CSV logging to SD with size rotation
+- [x] Tripod test mode with runtime tuning
+- [x] Joint PID controller (FW 0.2.11)
+- [x] Virtual impedance spring-damper (FW 0.2.13)
+- [x] Estimator upgrade (FW 0.2.15)
+- [x] Auto-generate missing config keys (FW)
+- [x] Temperature safety lockout
+- [x] Collision lockout with keep-out zones
+- [x] Soft joint limits from config
 - [x] Rate limit angle deltas
-  - Per-joint delta clamp per tick derived from rate_limit.deg_per_s; configurable via SD.
-
 - [x] Width downsizing of globals
-  - Store telemetry as integers: vin in mV (u16), temp in 0.1°C (i16), pos in centideg (i16); timing probes as u16; rate limit in cdeg/s.
-
 - [x] Bitmask leg/joint enable flags
-  - Replace arrays with compact 6-bit and 18-bit masks; update gating, LEGS/SERVOS, and STATUS rendering.
-
 - [x] Move constant strings to flash
-  - Wrap constant prints with F() across splash, STATUS labels, HELP, and command responses to keep strings in PROGMEM.
-
 - [x] RR/OOS feedback robustness
-  - Round-robin feedback runs every tick; position reads are optional and do not drive OOS.
-  - OOS is based on vin/temp: a failure is counted only when BOTH vin and temp are invalid; any valid vin OR temp resets the counter.
-  - Added a brief startup grace window (~750 ms) before counting failures to avoid false OOS at boot.
-  - Threshold configurable via `/config.txt` key `oos.fail_threshold` (1..20, default 3).
-  - LX16A bus init uses proper OE pins; joint mask defaults to all-enabled to simplify bring-up gating.
 
+---
 
-# Master TODO List (organized by area)
+## Robot Geometry Reference (from robot_config.h)
+```cpp
+COXA_LENGTH_MM   = 41.70
+FEMUR_LENGTH_MM  = 80.00
+TIBIA_LENGTH_MM  = 133.78
 
-## Memory & Code Footprint
-- [x] Audit globals for width downsizing
-  - Identify arrays/vars that can be int16_t/uint16_t/uint8_t (e.g., cmd/home/est/limits in centideg, temperatures, voltages, failure counters).
-- [x] Bitmask leg/joint enable flags
-  - Replace g_leg_enabled[6] and g_joint_enabled[6][3] with 6- and 18-bit masks (mirroring OOS) to save RAM and simplify code paths.
-- [x] Move all constant strings to flash
-  - Use F() and PROGMEM for Serial prints (splash, STATUS, HELP, errors).
-- [x] Eliminate double usage
-  - Ensure all math/IK and printing uses float (sinf/cosf/atan2f, suffix f, -fsingle-precision-constant).
-- [ ] Slim feedback/state types
-  - Compact types/scaling: temp uint8_t C, voltage uint16_t mV/cV, positions int16_t cd, timestamps uint32_t. List fields to change.
-- [ ] Library surface minimization
-  - Check lx16a-servo usage; mark unused functions static or isolate a tiny send/read shim to let the linker drop dead code.
+COXA_OFFSET[6][2] = {  // (X, Z) in body frame
+  {-65.60,  88.16},  // LF
+  {-86.00,   0.00},  // LM
+  {-65.60, -88.16},  // LR
+  { 65.60,  88.16},  // RF
+  { 86.00,   0.00},  // RM
+  { 65.60, -88.16}   // RR
+}
 
-## Safety & Robustness
-- [ ] Stack usage review
-  - Identify large locals in hot paths (loopTick, IK, STATUS); make small/static or reduce scope; propose a tiny stack watermark utility (later).
-
-## Performance & Output
-- [ ] STATUS print cost reduction
-  - Fewer/lighter STATUS fields, integer rendering (avoid float prints), single snprintf into static buffer; estimate flash/RAM impact.
-
-## Config & Logging
-- [ ] Config parser buffers review
-  - Review line/token buffers, propose minimal safe sizes (e.g., 128B line, 32B key, 64B value), static reuse, avoid hidden heap use.
-- [ ] SdFat/logging footprint trim
-  - Lazy init only when logging enabled; SdFat config to disable LFN/reduce buffers; small ring buffer with fixed-size records.
-
-## Build, Linker, & Optimization
-- [ ] Linker map + section GC check
-  - Enable/inspect map output, confirm -ffunction/data-sections and --gc-sections, consider LTO; identify big symbols (float printf, trig).
-
-## Optional Features
-
-- [ ] Centralize OK responses (consolidate duplicate entry)
-  - (Planned) After confirming link success under FW 0.1.72, evaluate moving printOK() emission to a single dispatcher epilogue unless handler already printed error or multi-line output; update handlers accordingly.
+LEG_ANGLES = {LF:135°, LM:180°, LR:225°, RF:45°, RM:0°, RR:315°}
+```

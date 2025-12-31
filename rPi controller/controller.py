@@ -4,6 +4,25 @@
 # CHANGE LOG (Python Controller)
 # Format: YYYY-MM-DD  Summary
 # REMINDER: Update CONTROLLER_VERSION below with every behavioral change, feature addition, or bug fix!
+# 2025-12-27  v0.7.38 b222: Display: LCARS palette syncs live when changed in menu; ToF distance moved to top of heatmap.
+# 2025-12-27  v0.7.37 b221: Display: LCARS engineering view uses config palette (Classic/Nemesis/LowerDecks/PADD), bigger fonts, black text.
+# 2025-12-27  v0.7.36 b220: Display: Added LCARS theme for engineering view; configurable via engineering_lcars in [display].
+# 2025-12-27  v0.7.35 b219: Display: Added phone-style battery icon to EYES mode (top-right corner); configurable via show_battery_icon in [safety_display].
+# 2025-12-26  v0.7.33 b217: Bugfix: Startup crash after ToF init - fixed undefined try_teensy_connect/_teensyPort/_teensyBaud; use connect_teensy with config values.
+# 2025-12-26  v0.7.32 b216: Startup: Connect to Teensy, controller, and start telemetry during splash for seamless transition to eyes.
+# 2025-12-26  v0.7.31 b215: Startup: Full Mars background on splash; configurable delay (0-30s, default 5s) via display.startup_delay_s.
+# 2025-12-26  v0.7.30 b214: Startup: Add StartupSplash with scrolling log during initialization; shows Mars image and progress messages.
+# 2025-12-26  v0.7.29 b213: Display: Fix voltage bar in 3D view; suppress DISABLED overlay in engineering mode.
+# 2025-12-26  v0.7.28 b212: Display: Add body pitch/roll from IMU to 3D wireframe visualization.
+# 2025-12-26  v0.7.27 b211: Display: Enable all 6 legs in 3D wireframe view.
+# 2025-12-26  v0.7.26 b210: Display: Also flip tibia direction for left-side legs.
+# 2025-12-26  v0.7.25 b209: Display: Fix LF base angle (+180°); flip femur direction for left-side legs.
+# 2025-12-26  v0.7.24 b208: Display: Add LF leg to debug view (now LF+RF+RM+RR).
+# 2025-12-26  v0.7.23 b207: Display: Fix RR base angle (315°→135°).
+# 2025-12-26  v0.7.22 b206: Display: Add RR leg to debug view (now RF+RM+RR).
+# 2025-12-26  v0.7.21 b205: Display: Fix middle leg base angles (+90°); re-enable RF+RM debug view.
+# 2025-12-26  v0.7.20 b204: Display: Mirror X-axis; fix body polygon order; remove debug overlays.
+# 2025-06-21  v0.7.19 b203: Display: FK coxa now includes leg base angle; DEBUG_LEGS supports multi-leg debug (RF+RM).
 # 2025-12-18  v0.5.40 b152: UX: Use real Mars photo (ESA/Rosetta, CC BY-SA 3.0 IGO) for startup splash instead of a procedural drawing.
 # 2025-12-17  v0.5.39 b151: UX: Replace LCD startup banner with a Mars splash image (black background) and overlay firmware/controller versions.
 # 2025-12-17  v0.5.38 b150: Version/docs: Update startup banner firmware version string to match current firmware (0.2.41/b157).
@@ -184,11 +203,49 @@
 # 2025-12-19  v0.5.53 b165: Menu: Added IMU tab to MarsMenu with live orientation, status, read/error counts, I2C config, and overlay toggle.
 # 2025-12-19  v0.5.54 b166: Leveling: Body leveling module (leveling.py) with IMU-based Z corrections; tilt safety threshold triggers TUCK+DISABLE; menu items in IMU tab.
 # 2025-12-20  v0.6.0  b167: IMU Milestone: Complete sensor integration — driver, display overlay, menu tab, body leveling with tilt safety.
+# 2025-12-20  v0.6.1  b168: Leveling: Fixed axis (Y not Z), added StandingGait for leveling tests, Stand uses gait engine, RB cycles through Standing→Tripod→Wave→Ripple→Stationary.
+# 2025-12-20  v0.6.1  b170: Gait direction: Left stick Y now controls forward/backward direction (heading 0°/180°); strafe takes priority.
+# 2025-12-21  v0.6.2  b171: ToF sensor module: Created tof_sensor.py with ToFThread, multi-sensor support, 8×8 distance arrays.
+# 2025-12-21  v0.6.3  b172: ToF integration: Integrated tof_sensor.py into controller with [tof] config, thread startup/shutdown.
+# 2025-12-21  v0.6.3  b173: ToF fix: Initialize sensors on main thread (VL53L5CX ctypes segfaults when init from thread); fix nested array data extraction.
+# 2025-12-21  v0.6.4  b174: Display mode: Start button cycles EYES→ENGINEERING→MENU; engineering view shows IMU + ToF heatmap side by side.
+# 2025-12-21  v0.6.5  b175: Display fix: Removed IMU overlay from EYES mode; engineering view now updates continuously (not just on IMU change).
+# 2025-12-21  v0.6.6  b176: Menu: Added ToF tab with live sensor status, closest distance, temperature, read/error counts, I2C config.
+# 2025-12-21  v0.6.7  b177: Menu: ToF tab now interactive — edit enabled/resolution/hz/bus, add/remove sensors, apply & restart; settings persist to config.
+# 2025-12-22  v0.6.8  b178: Motion lean: Body tilts 7-10° into direction of travel when walking; configurable via IMU tab; works with or without leveling.
+# 2025-12-22  v0.7.0  b179: Architecture: Split Xbox controller into separate joy_controller.py process; IPC via Unix socket; power button start/stop.
+# 2025-12-22  v0.7.1  b180: Display: Xbox connection status now reflects actual controller state, not just socket link; joy_controller sends connected flag.
+# 2025-12-22  v0.7.2  b183: Daemon compat: Handle no-TTY for curses (subprocess without terminal); fixes cbreak() ERR when started by joy_controller.
+# 2025-12-23  v0.7.3  b184: Bugfix: poll_joy_client X/Y buttons swapped (now X=TUCK, Y=TEST/IDLE); added rstick DISABLE; fixed eye offset sign; stop gait on posture commands.
+# 2025-12-23  v0.7.3  b185: Bugfix: Inverted left stick Y for gait speed (forward now moves forward).
+# 2025-12-24  v0.7.6  b190: Eye blink: Reduced blink_percent_step from 0.25 to 0.08 for smoother, more natural blink animation without frame tearing.
+# 2025-12-24  v0.7.7  b191: Display: Fixed eye flicker/tearing by adding 40ms min SPI write interval; removed IMU-triggered eye re-renders; increased blink frame divisor to 3.
+# 2025-12-24  v0.7.8  b192: Blink: Made blink animation time-based (blink_speed=3.0/s) instead of frame-based; fixes blink speed varying with loop rate after Xbox controller split.
+# 2025-12-24  v0.7.9  b193: Display: Fixed old-style eye flicker by excluding IMU changes from EYES mode render trigger; increased blink_speed to 8.0 for faster blinks.
+# 2025-12-24  v0.7.10 b194: Display: Disabled CRT mode (scanlines caused flicker); reduced display thread to 10Hz; increased min SPI interval to 80ms.
+# 2025-12-24  v0.7.11 b195: Eyes: Rewrote basic eye rendering (ELLIPSE, RECTANGLE, ROUNDRECTANGLE, X) to draw directly to display like special eyes; eliminates rotation/paste flicker.
+# 2025-12-24  v0.7.12 b196: Eyes: Added rotation support to basic eyes using NEAREST resampling (no interpolation) to avoid flicker.
+# 2025-12-25  v0.7.13 b197: Engineering: 3D wireframe hexapod view with FK-based leg positions; D-pad rotates view (L/R=azimuth, U/D=elevation); temp-colored segments; S6 joint telemetry wired to display.
+# 2025-12-26  v0.7.14 b198: Bugfix: Engineering view now displays immediately when switching modes (added mode_changed detection to display thread).
+# 2025-12-26  v0.7.15 b199: Bugfix: Fixed draw_hexapod_wireframe_3d() call - parameter names azimuth→azimuth_deg, elevation→elevation_deg.
+# 2025-12-26  v0.7.16 b200: FK fix: Rewrote fk_leg_points() to match firmware convention - uses relative angles from 120° home, proper yaw/alpha/beta formulas. Increased 3D view zoom.
+# 2025-12-26  v0.7.17 b201: FK debug: Isolated RF leg only, added angle labels and joint markers. More zoom (scale/200).
+# 2025-12-26  v0.7.18 b202: FK fix: Added 90° offset to femur (home=horizontal), negated tibia rotation.
+# 2025-12-27  v0.7.39 b223: Autonomy: Created behavior_engine.py + behaviors.py with obstacle avoidance, cliff, caught foot, patrol behaviors.
+# 2025-12-27  v0.7.40 b224: Autonomy: Integrated arbiter into main loop; 'a' key toggles autonomy mode; config parsing for [behavior] section.
+# 2025-12-27  v0.7.41 b225: Autonomy: Added AUTO menu tab with behavior toggles, thresholds, live status display, save settings action.
+# 2025-12-27  v0.7.42 b226: Autonomy: Added Back+A gamepad combo to toggle autonomy mode; refactored toggle to _toggle_autonomy() helper.
+# 2025-12-29  v0.7.43 b227: Autonomy: ABXY buttons auto-disable autonomy; added debug output for non-CONTINUE actions; fixed ToF attribute names.
+# 2025-12-29  v0.7.44 b228: PointCloud: WebSocket server for 3D point cloud visualization (SLAM prototype); integrates ToF + IMU; configurable via [pointcloud] section.
+# 2025-12-31  v0.8.0 b229: Architecture: Refactored main loop to Three-Layer Architecture (Firby/Gat); Layer 1=166Hz (timing, Teensy I/O, gait, safety), Layer 2=~33Hz (input, behaviors, display), Layer 3=~1Hz (future SLAM). Configurable via gait.layer2_divisor.
+# 2025-12-31  v0.8.1 b230: Display: Battery voltage now uses average of all servo voltages with low-pass filter (alpha=0.1) for stable display during walking.
+# 2025-12-31  v0.8.2 b231: Safety: Low battery protection - graceful shutdown (stop gait → TUCK → DISABLE) when voltage drops below critical threshold (default 10.0V); configurable via [low_battery] section; SAFETY menu items for enable/thresholds/status; recovery voltage hysteresis prevents servo current spikes from re-enabling.
+# 2025-12-31  v0.8.3 b232: Input: Screen mirror toggle now works in socket mode (joy_controller); Back+Start combo toggles cv2 mirror window.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.6.0"
+CONTROLLER_VERSION = "0.8.3"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 167
+CONTROLLER_BUILD = 232
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -200,6 +257,7 @@ FW_VERSION_BANNER = "0.2.42/b158"
 #----------------------------------------------------------------------------------------------------------------------
 import sys  
 import os
+import signal
 import configparser
 import time
 import struct
@@ -234,18 +292,20 @@ from SteeringMode import SteeringMode
 
 # import the gait engine
 from gait_engine import (GaitEngine, TripodGait, WaveGait, RippleGait, 
-                         StationaryPattern, GaitParams, GaitTransition)
+                         StationaryPattern, StandingGait, GaitParams, GaitTransition)
 
 # import telemetry module (Phase 1 modularization)
 from telemetry import (
     IDX_LOOP_US, IDX_BATTERY_V, IDX_CURRENT_A, IDX_PITCH_DEG,
     IDX_ROLL_DEG, IDX_YAW_DEG, IDX_GAIT, IDX_MODE, IDX_SAFETY, IDX_ROBOT_ENABLED,
     TELEM_SYNC,
-    SystemTelemetry, ServoTelemetry, LegTelemetry, SafetyTelemetry,
+    SystemTelemetry, ServoTelemetry, LegTelemetry, SafetyTelemetry, JointTelemetry,
     BinaryS1Result, BinaryS5Result, TelemetryFrame,
     create_servo_telemetry_array, create_leg_telemetry_array,
     processTelemS1, processTelemS2, processTelemS3, processTelemS4, processTelemS5,
+    processTelemS6,
     parseBinaryS1, parseBinaryS2, parseBinaryS3, parseBinaryS4, parseBinaryS5,
+    parseBinaryS6,
     applyBinaryS1ToState, applyBinaryS5ToState, decodeBinaryFrame,
     get_safety_overlay_text, getGait, GAIT_NAMES,
 )
@@ -256,6 +316,7 @@ from config_manager import (
     save_gait_settings, save_pounce_settings, save_eye_shape,
     save_human_eye_settings, save_eye_center_offset, save_eye_vertical_offset,
     save_eye_crt_mode, save_menu_settings, save_pid_settings, save_imp_settings, save_est_settings,
+    save_tof_settings, save_safety_display_settings, save_low_battery_settings,
 )
 
 # import posture module (Phase 3 modularization)
@@ -274,9 +335,11 @@ from mars_state import (
 # import display_thread module (Phase 5 modularization)
 from display_thread import (
     DisplayThread, UpdateDisplay as UpdateDisplayModule,
-    getColor, drawLogo, drawMarsSplash,
+    DisplayMode, getColor, drawLogo, drawMarsSplash, StartupSplash,
+    draw_engineering_view, draw_tof_heatmap, get_tof_color,
     get_font, reset_frame_hash,
     POWER_COLOR_PALETTE, TEMPERATURE_COLOR_PALETTE,
+    show_mirror_window,
 )
 
 # import input_handler module (Phase 6 modularization)
@@ -292,6 +355,9 @@ from input_handler import (
     JOYSTICK_CENTER, JOYSTICK_RANGE, TRIGGER_MAX, JOYSTICK_MIN_FOR_STICK,
 )
 
+# import joy_client module (socket-based Xbox controller IPC)
+from joy_client import JoyClient, JoyState
+
 # import imu_sensor module (sensor integration)
 from imu_sensor import ImuThread, ImuConfig, ImuFrame, create_imu_thread
 
@@ -299,9 +365,24 @@ from imu_sensor import ImuThread, ImuConfig, ImuFrame, create_imu_thread
 import leveling as leveling_module
 from leveling import LevelingConfig, LevelingState, init_leveling, get_leveling_state
 
-# Gait type cycling order (RB button)
-GAIT_TYPES = [TripodGait, WaveGait, RippleGait, StationaryPattern]
-GAIT_NAMES = ["Tripod", "Wave", "Ripple", "Stationary"]
+# import ToF sensor module (VL53L5CX)
+from tof_sensor import ToFThread, ToFConfig, ToFSensorConfig, ToFFrame, create_tof_thread
+
+# import behavior engine (autonomy)
+from behavior_engine import BehaviorArbiter, Action, ActionRequest
+from behaviors import ObstacleAvoidance, CliffDetection, CaughtFootRecovery, Patrol
+
+# import point cloud server (SLAM prototype)
+try:
+    from pointcloud_server import PointCloudServer, PointCloudConfig
+    POINTCLOUD_AVAILABLE = True
+except ImportError as e:
+    POINTCLOUD_AVAILABLE = False
+    print(f"PointCloud not available: {e}")
+
+# Gait type cycling order (RB button) - Standing first for leveling tests
+GAIT_TYPES = [StandingGait, TripodGait, WaveGait, RippleGait, StationaryPattern]
+GAIT_NAMES = ["Standing", "Tripod", "Wave", "Ripple", "Stationary"]
 
 # import the LCD library and related graphics libraries
 # sys.path.append("..")
@@ -356,8 +437,11 @@ class Controller:
         self.telemetryGraceSeconds = 0.75
         self.telemetryRetrySeconds = 2.0
         # Controller/gamepad state
-        self.controller = None
+        self.controller = None  # Legacy evdev InputDevice (fallback mode)
+        self.joyClient: JoyClient = None  # Socket client for joy_controller daemon
+        self.useJoySocket = True  # When True, prefer socket-based IPC over direct evdev
         self.retryCount = 0
+        self._prevJoyState: JoyState = None  # Previous joy state for edge detection
         # Loop timing
         self.loopStartTime = time.time()
         self.loopdt = 0.0
@@ -395,6 +479,7 @@ class Controller:
         self._gaitSpeedInput = 0.0   # Left stick Y: -1 (back) to +1 (forward)
         # Gait parameter adjustment (left stick button + triggers)
         self._leftStickHeld = False  # True when left stick button is held
+        self._backHeld = False       # True when back button is held (for pounce combo)
         self._gaitWidthMm = _savedGaitWidthMm   # Current gait width (lateral offset from body center)
         self._gaitLiftMm = _savedGaitLiftMm     # Current lift height during swing phase
 
@@ -403,6 +488,7 @@ class Controller:
         self.servo_telem = [ServoTelemetry() for _ in range(18)]
         self.leg_telem = [LegTelemetry() for _ in range(6)]
         self.safety_telem = SafetyTelemetry()
+        self.joint_telem = JointTelemetry()  # S6: 18 joint positions in degrees
 
     @property
     def is_robot_enabled(self) -> bool:
@@ -542,10 +628,15 @@ class Controller:
                 else:
                     robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if (self.state and len(self.state) > IDX_ROBOT_ENABLED) else True
                 safety_active, safety_text = get_safety_overlay_state()
+                # Controller connected status (socket mode or legacy)
+                if self.useJoySocket:
+                    ctrl_connected = (self.joyClient is not None and self.joyClient.xbox_connected)
+                else:
+                    ctrl_connected = (self.controller is not None)
                 UpdateDisplay(self.disp, self.eyes.display_image, self.menu._image, 
                               self.servo, self.legs, self.state, self.mirror, self.menuState,
                               teensy_connected=(self.teensy is not None),
-                              controller_connected=(self.controller is not None),
+                              controller_connected=ctrl_connected,
                               telemetry_stale=telemetry_stale,
                               robot_enabled=robot_enabled,
                               safety_active=safety_active,
@@ -698,6 +789,17 @@ class Controller:
                                         print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
                                 _last_safety_lockout = s5_result.lockout
 
+                        elif telem_type == 6 and ln == 36:
+                            # Parse S6 joint positions using unified parser
+                            angles = parseBinaryS6(payload, ln, self.joint_telem)
+                            if angles is not None:
+                                self.lastTelemetryTime = now
+                                self.telemetryRetryDeadline = None
+                                self.telemBinActive = True
+                                # Update display thread with joint angles for 3D view
+                                if _displayThread is not None:
+                                    _displayThread.update_joint_angles(angles)
+
                     # Consume frame
                     self._telem_rx_buf = buf[total:]
 
@@ -772,6 +874,13 @@ class Controller:
                                         if self.verbose:
                                             print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
                                     _last_safety_lockout = lockout
+                                elif header == 'S6:':
+                                    processTelemS6(elements, self.joint_telem)
+                                    self.lastTelemetryTime = now
+                                    self.telemetryRetryDeadline = None
+                                    # Update display thread with joint angles for 3D view
+                                    if _displayThread is not None and self.joint_telem.angles_deg:
+                                        _displayThread.update_joint_angles(self.joint_telem.angles_deg)
 
                 return teensyData
             except Exception as e:
@@ -853,6 +962,13 @@ class Controller:
                             if self.verbose:
                                 print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
                         _last_safety_lockout = lockout
+                    elif header == 'S6:':
+                        processTelemS6(elements, self.joint_telem)
+                        self.lastTelemetryTime = now
+                        self.telemetryRetryDeadline = None
+                        # Update display thread with joint angles for 3D view
+                        if _displayThread is not None and self.joint_telem.angles_deg:
+                            _displayThread.update_joint_angles(self.joint_telem.angles_deg)
         except (ValueError, IndexError) as e:
             # Malformed telemetry line - skip but log in verbose mode
             if self.verbose:
@@ -860,14 +976,17 @@ class Controller:
         return teensyData
 
     def _updateGaitHeading(self):
-        """Compute speed_scale from left stick Y input.
+        """Compute speed_scale and heading from stick inputs.
         
         Control scheme:
-        - Left stick Y = speed (0 to 1) - magnitude of motion
-        - Right stick X = heading angle (set directly in event handler)
+        - Left stick Y = speed and direction (forward/backward)
+        - Right stick X = strafe heading angle (takes priority when active)
         
-        Speed from left Y controls how far legs stride; heading from right X
-        controls the direction of the crab walk.
+        Forward/backward is implemented via heading_deg:
+        - Forward (stick up, negative value): heading = 0°
+        - Backward (stick down, positive value): heading = 180°
+        
+        Right stick X strafe (-90° to +90°) takes priority when active.
         """
         global _gaitEngine
         if _gaitEngine is None:
@@ -876,12 +995,26 @@ class Controller:
         # Speed from left stick Y: absolute value = magnitude
         speed_magnitude = abs(self._gaitSpeedInput)
         
-        # Apply speed (heading is set directly by right stick X event handler)
+        # Apply speed
         if speed_magnitude > 0.05:
             _gaitEngine.params.speed_scale = min(1.0, speed_magnitude)
         else:
             # Neutral: step in place
             _gaitEngine.params.speed_scale = 0.0
+        
+        # Heading: strafe takes priority, otherwise forward/backward from left stick Y
+        if abs(self._gaitStrafeInput) > 0.05:
+            # Strafe active: heading set by right stick X handler
+            # (heading is set to -strafe * 90 in the event handler)
+            pass
+        elif speed_magnitude > 0.05:
+            # No strafe, use forward/backward based on stick direction
+            if self._gaitSpeedInput > 0.05:
+                # Stick down = backward
+                _gaitEngine.params.heading_deg = 180.0
+            else:
+                # Stick up = forward
+                _gaitEngine.params.heading_deg = 0.0
 
     def poll_gamepad(self):
         """Process pending gamepad events, updating instance state and issuing commands.
@@ -901,25 +1034,42 @@ class Controller:
                             print("\nscreen mirror button pressed", end="\r\n")
                         self.mirror = not self.mirror
                         self.forceDisplayUpdate = True
-                    elif event.code == 315 and event.value == 1:  # Start button - MARS menu toggle
+                    elif event.code == 315 and event.value == 1:  # Start button - cycle display mode
+                        global _displayMode
                         if self.verbose:
-                            print("\nStart button pressed (menu)", end="\r\n")
-                        # Only allow menu when robot is disabled and not in motion
+                            print("\nStart button pressed (cycle display)", end="\r\n")
+                        # Get robot state for menu safety check
                         if self.system_telem.valid:
                             robot_enabled = self.system_telem.robot_enabled
                         else:
                             robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if (self.state and len(self.state) > IDX_ROBOT_ENABLED) else False
-                        if _marsMenu.visible:
-                            # Always allow closing menu
-                            _marsMenu.hide()
-                            self.forceDisplayUpdate = True
-                        elif not robot_enabled and not _gaitActive:
-                            # Safe to open menu
+                        
+                        # Cycle: EYES → ENGINEERING → MENU → EYES (wrap)
+                        # Menu only opens when robot disabled and not in motion
+                        current_mode = _displayMode
+                        next_mode = DisplayMode((current_mode + 1) % DisplayMode.COUNT)
+                        
+                        # If trying to enter MENU mode, check safety
+                        if next_mode == DisplayMode.MENU:
+                            if robot_enabled or _gaitActive:
+                                # Skip menu, go to EYES instead
+                                next_mode = DisplayMode.EYES
+                                if self.verbose:
+                                    print("  Menu blocked: disable robot first", end="\r\n")
+                        
+                        # Apply mode change
+                        _displayMode = next_mode
+                        
+                        # Sync menu visibility with mode
+                        if _displayMode == DisplayMode.MENU:
                             _marsMenu.show()
-                            self.forceDisplayUpdate = True
                         else:
-                            if self.verbose:
-                                print("  Menu blocked: disable robot first", end="\r\n")
+                            _marsMenu.hide()
+                        
+                        self.forceDisplayUpdate = True
+                        if self.verbose:
+                            mode_names = ["EYES", "ENGINEERING", "MENU"]
+                            print(f"  Display mode: {mode_names[_displayMode]}", end="\r\n")
                     elif event.code == 314:  # Back/Select button (used as a modifier)
                         self._backHeld = (event.value == 1)
                         if self.verbose and event.value == 1:
@@ -935,13 +1085,23 @@ class Controller:
                     elif event.code == 304 and event.value == 1:  # A button
                         if self.verbose:
                             print("\nA button pressed", end="\r\n")
-                        if _marsMenu.visible:
+                        if getattr(self, '_backHeld', False):
+                            # Back + A: Toggle autonomy mode
+                            try:
+                                _toggle_autonomy(verbose=self.verbose)
+                            except Exception as e:
+                                print(f"Autonomy toggle error: {e}", end="\r\n")
+                        elif _marsMenu.visible:
                             # Select/activate current menu item
                             _marsMenu.select()
                             self.forceDisplayUpdate = True
                         elif self.teensy is not None and not _safety_state.get("lockout", False):
-                            # Normal A button behavior: Stand
-                            apply_posture(b'STAND', auto_disable_s=4.0)
+                            # Normal A button behavior: Start standing gait (for leveling support)
+                            _disable_autonomy_if_active(verbose=self.verbose)
+                            ensure_enabled()
+                            _start_standing_gait()
+                            if self.verbose:
+                                print("  Standing gait started (leveling enabled)", end="\r\n")
                         elif self.teensy is not None and _safety_state.get("lockout", False) and self.verbose:
                             print("  Stand blocked: firmware safety lockout is active.", end="\r\n")
                     elif event.code == 305 and event.value == 1:  # B button
@@ -953,10 +1113,12 @@ class Controller:
                             self.forceDisplayUpdate = True
                         elif self.teensy is not None:
                             # Normal B button behavior: Home
+                            _disable_autonomy_if_active(verbose=self.verbose)
                             apply_posture(b'HOME', auto_disable_s=4.0)
                     elif event.code == 308 and event.value == 1:  # X toggle test/idle (BTN_WEST)
                         if self.verbose:
                             print("\nX button pressed (Toggle Test/Idle)", end="\r\n")
+                        _disable_autonomy_if_active(verbose=self.verbose)
                         if self.teensy is not None:
                             # Check current mode from telemetry state (assuming test mode tracking)
                             # For now, simple toggle - could be enhanced with state tracking
@@ -977,6 +1139,7 @@ class Controller:
                             # Shortcut: Back + Y = Pounce
                             start_pounce_move(source="pad")
                         elif self.teensy is not None and not _safety_state.get("lockout", False):
+                            _disable_autonomy_if_active(verbose=self.verbose)
                             apply_posture(b'TUCK', auto_disable_s=4.0)
                         elif self.teensy is not None and _safety_state.get("lockout", False) and self.verbose:
                             print("  Tuck blocked: firmware safety lockout is active.", end="\r\n")
@@ -1007,55 +1170,63 @@ class Controller:
                         if _marsMenu.visible:
                             _marsMenu.handle_button('LB')
                             self.forceDisplayUpdate = True
-                        elif not _gaitActive:
-                            if _safety_state.get("lockout", False):
-                                if self.verbose:
-                                    print("\nGait start blocked: firmware safety lockout is active.", end="\r\n")
-                                continue
-                            # Start gait - cancel any pending auto-disable first
-                            _autoDisableAt = None
-                            self.autoDisableAt = None
-                            # Switch Teensy to IDLE mode (stop any built-in gait)
-                            send_cmd(b'MODE IDLE', force=True)
-                            # Enable robot if needed
-                            enabled_now = self.system_telem.robot_enabled if self.system_telem.valid else (self.state[IDX_ROBOT_ENABLED] == 1.0 if (self.state and len(self.state) > IDX_ROBOT_ENABLED) else False)
-                            if not enabled_now:
-                                ensure_enabled()
-                            # Create tripod gait with config params - speed starts at 0 (step in place)
-                            params = GaitParams(
-                                cycle_ms=_gaitCycleMs,
-                                base_x_mm=self._gaitWidthMm,  # Use saved gait width
-                                base_y_mm=_gaitBaseYMm,
-                                step_len_mm=_gaitStepLenMm,
-                                lift_mm=self._gaitLiftMm,     # Use saved lift height
-                                overlap_pct=_gaitOverlapPct,
-                                smoothing_alpha=_gaitSmoothingAlpha,
-                                bezier_p1_height=_bezierP1Height,
-                                bezier_p1_overshoot=_bezierP1Overshoot,
-                                bezier_p2_height=_bezierP2Height,
-                                bezier_p3_height=_bezierP3Height,
-                                bezier_p3_overshoot=_bezierP3Overshoot,
-                                speed_scale=0.0  # Start at zero; joystick controls speed
-                            )
-                            _gaitEngine = TripodGait(params)
-                            _gaitEngine.start()
-                            _gaitActive = True
-                            # Reset stick inputs so gait starts at zero speed until user moves stick
-                            self._gaitStrafeInput = 0.0
-                            self._gaitSpeedInput = 0.0
-                            self._updateGaitHeading()  # Sync gait engine with current (zero) inputs
-                            if self.verbose:
-                                print("\nLB: Gait engine STARTED (tripod)", end="\r\n")
                         else:
-                            # Stop gait
-                            if _gaitEngine is not None:
-                                _gaitEngine.stop()
-                            _gaitActive = False
-                            send_cmd(b'STAND', force=True)
-                            _autoDisableAt = time.time() + _autoDisableS
-                            self.autoDisableAt = _autoDisableAt
-                            if self.verbose:
-                                print("\nLB: Gait engine STOPPED", end="\r\n")
+                            # Check if currently in StandingGait (from A button) - treat as "not walking"
+                            is_standing_gait = _gaitActive and isinstance(_gaitEngine, StandingGait)
+                            if not _gaitActive or is_standing_gait:
+                                if _safety_state.get("lockout", False):
+                                    if self.verbose:
+                                        print("\nGait start blocked: firmware safety lockout is active.", end="\r\n")
+                                    continue
+                                # Stop StandingGait if transitioning
+                                if is_standing_gait and _gaitEngine is not None:
+                                    _gaitEngine.stop()
+                                    if self.verbose:
+                                        print("  Transitioning from StandingGait to TripodGait", end="\r\n")
+                                # Start gait - cancel any pending auto-disable first
+                                _autoDisableAt = None
+                                self.autoDisableAt = None
+                                # Switch Teensy to IDLE mode (stop any built-in gait)
+                                send_cmd(b'MODE IDLE', force=True)
+                                # Enable robot if needed
+                                enabled_now = self.system_telem.robot_enabled if self.system_telem.valid else (self.state[IDX_ROBOT_ENABLED] == 1.0 if (self.state and len(self.state) > IDX_ROBOT_ENABLED) else False)
+                                if not enabled_now:
+                                    ensure_enabled()
+                                # Create tripod gait with config params - speed starts at 0 (step in place)
+                                params = GaitParams(
+                                    cycle_ms=_gaitCycleMs,
+                                    base_x_mm=self._gaitWidthMm,  # Use saved gait width
+                                    base_y_mm=_gaitBaseYMm,
+                                    step_len_mm=_gaitStepLenMm,
+                                    lift_mm=self._gaitLiftMm,     # Use saved lift height
+                                    overlap_pct=_gaitOverlapPct,
+                                    smoothing_alpha=_gaitSmoothingAlpha,
+                                    bezier_p1_height=_bezierP1Height,
+                                    bezier_p1_overshoot=_bezierP1Overshoot,
+                                    bezier_p2_height=_bezierP2Height,
+                                    bezier_p3_height=_bezierP3Height,
+                                    bezier_p3_overshoot=_bezierP3Overshoot,
+                                    speed_scale=0.0  # Start at zero; joystick controls speed
+                                )
+                                _gaitEngine = TripodGait(params)
+                                _gaitEngine.start()
+                                _gaitActive = True
+                                # Reset stick inputs so gait starts at zero speed until user moves stick
+                                self._gaitStrafeInput = 0.0
+                                self._gaitSpeedInput = 0.0
+                                self._updateGaitHeading()  # Sync gait engine with current (zero) inputs
+                                if self.verbose:
+                                    print("\nLB: Gait engine STARTED (tripod)", end="\r\n")
+                            else:
+                                # Stop gait
+                                if _gaitEngine is not None:
+                                    _gaitEngine.stop()
+                                _gaitActive = False
+                                send_cmd(b'STAND', force=True)
+                                _autoDisableAt = time.time() + _autoDisableS
+                                self.autoDisableAt = _autoDisableAt
+                                if self.verbose:
+                                    print("\nLB: Gait engine STOPPED", end="\r\n")
                     elif event.code == 311 and event.value == 1:  # RB - next tab or cycle gait
                         if _marsMenu.visible:
                             _marsMenu.handle_button('RB')
@@ -1164,9 +1335,13 @@ class Controller:
                             strafe = (event.value - 32768.0) / 32768.0
                             if abs(strafe) < 0.05:  # 5% deadzone (reduced from 10%)
                                 strafe = 0.0
+                            # Track strafe input for heading logic in _updateGaitHeading
+                            self._gaitStrafeInput = strafe
                             # Map to heading angle: -90° (left) to +90° (right), 0° = forward
                             # Reverse strafe direction so joystick X matches world left/right motion
-                            _gaitEngine.params.heading_deg = -strafe * 90.0
+                            if abs(strafe) > 0.05:
+                                _gaitEngine.params.heading_deg = -strafe * 90.0
+                            # When strafe returns to center, _updateGaitHeading will set fwd/back heading
                         else:
                             # Eye control when gait not active
                             scaledValue = ((32768.0 - float(event.value)) / 32768.0)
@@ -1296,6 +1471,427 @@ class Controller:
                 print(f"Error reading from gamepad: {e}", end="\r\n")
             self.controller = None
         return processed
+
+    def poll_joy_client(self):
+        """Process joystick state from joy_controller socket daemon.
+        
+        This replaces poll_gamepad when using socket-based IPC.
+        Processes the current JoyState and triggers appropriate actions.
+        
+        Returns:
+            True if state was processed, False if not connected.
+        """
+        global _gaitActive, _gaitEngine, _autoDisableAt, _gaitTransition
+        global _displayMode, _marsMenu
+        
+        if self.joyClient is None:
+            return False
+        
+        # Poll for new state (non-blocking)
+        new_state = self.joyClient.poll()
+        if new_state is None and not self.joyClient.connected:
+            return False
+        
+        # Get current state (may be updated or stale)
+        joy = self.joyClient.state
+        
+        # Initialize previous state on first call
+        if self._prevJoyState is None:
+            self._prevJoyState = JoyState()
+        
+        #----------------------------------------------------------------------
+        # Button processing (edge detection)
+        #----------------------------------------------------------------------
+        
+        # Start button: Back+Start = toggle mirror; Start alone = cycle display mode
+        if joy.button_start and not self._prevJoyState.button_start:
+            if self._backHeld:
+                # Back + Start: Toggle screen mirror
+                self.mirror = not self.mirror
+                self.forceDisplayUpdate = True
+                if self.verbose:
+                    print(f"\nScreen mirror {'ON' if self.mirror else 'OFF'}", end="\r\n")
+            else:
+                # Start alone: Cycle display mode
+                if self.verbose:
+                    print("\nStart button pressed (cycle display)", end="\r\n")
+                # Get robot state for menu safety check
+                if self.system_telem.valid:
+                    robot_enabled = self.system_telem.robot_enabled
+                else:
+                    robot_enabled = (self.state[IDX_ROBOT_ENABLED] == 1.0) if (self.state and len(self.state) > IDX_ROBOT_ENABLED) else False
+                
+                # Cycle: EYES → ENGINEERING → MENU → EYES (wrap)
+                current_mode = _displayMode
+                next_mode = DisplayMode((current_mode + 1) % DisplayMode.COUNT)
+                
+                # If trying to enter MENU mode, check safety
+                if next_mode == DisplayMode.MENU:
+                    if robot_enabled or _gaitActive:
+                        next_mode = DisplayMode.EYES
+                        if self.verbose:
+                            print("  Menu blocked: disable robot first", end="\r\n")
+                
+                # Apply mode change
+                _displayMode = next_mode
+                if _displayMode == DisplayMode.MENU:
+                    _marsMenu.show()
+                else:
+                    _marsMenu.hide()
+                
+                self.forceDisplayUpdate = True
+                if self.verbose:
+                    mode_names = ["EYES", "ENGINEERING", "MENU"]
+                    print(f"  Display mode: {mode_names[_displayMode]}", end="\r\n")
+        
+        # Back button (modifier tracking)
+        if joy.button_back != self._prevJoyState.button_back:
+            self._backHeld = joy.button_back
+            if self.verbose and joy.button_back:
+                print("\nBack/Select pressed", end="\r\n")
+        
+        # A button
+        if joy.button_a and not self._prevJoyState.button_a:
+            if self.verbose:
+                print("\nA button pressed", end="\r\n")
+            if self._backHeld:
+                # Back + A: Toggle autonomy mode
+                try:
+                    _toggle_autonomy(verbose=self.verbose)
+                except Exception as e:
+                    print(f"Autonomy toggle error: {e}", end="\r\n")
+            elif _marsMenu.visible:
+                _marsMenu.select()
+                self.forceDisplayUpdate = True
+            elif self.teensy is not None and not _safety_state.get("lockout", False):
+                _disable_autonomy_if_active(verbose=self.verbose)
+                ensure_enabled()
+                _start_standing_gait()
+                if self.verbose:
+                    print("  Standing gait started (leveling enabled)", end="\r\n")
+            elif self.teensy is not None and _safety_state.get("lockout", False) and self.verbose:
+                print("  Stand blocked: firmware safety lockout is active.", end="\r\n")
+        
+        # B button
+        if joy.button_b and not self._prevJoyState.button_b:
+            if self.verbose:
+                print("\nB button pressed", end="\r\n")
+            if _marsMenu.visible:
+                _marsMenu.hide()
+                self.forceDisplayUpdate = True
+            elif self.teensy is not None:
+                # Stop any active gait first
+                _disable_autonomy_if_active(verbose=self.verbose)
+                if _gaitActive and _gaitEngine is not None:
+                    _gaitEngine.stop()
+                    _gaitActive = False
+                apply_posture(b'HOME', auto_disable_s=4.0)
+        
+        # X button: tuck
+        if joy.button_x and not self._prevJoyState.button_x:
+            if self.verbose:
+                print("\nX button pressed (Tuck)", end="\r\n")
+            if not _marsMenu.visible and self._backHeld:
+                # Shortcut: Back + X = Pounce
+                start_pounce_move(source="pad")
+            elif self.teensy is not None and not _safety_state.get("lockout", False):
+                # Stop any active gait first
+                _disable_autonomy_if_active(verbose=self.verbose)
+                if _gaitActive and _gaitEngine is not None:
+                    _gaitEngine.stop()
+                    _gaitActive = False
+                apply_posture(b'TUCK', auto_disable_s=4.0)
+            elif _safety_state.get("lockout", False) and self.verbose:
+                print("  Tuck blocked: firmware safety lockout is active.", end="\r\n")
+        
+        # Y button: toggle test/idle mode
+        if joy.button_y and not self._prevJoyState.button_y:
+            if self.verbose:
+                print("\nY button pressed (Toggle Test/Idle)", end="\r\n")
+            _disable_autonomy_if_active(verbose=self.verbose)
+            if self.teensy is not None:
+                # Stop any active gait first
+                if _gaitActive and _gaitEngine is not None:
+                    _gaitEngine.stop()
+                    _gaitActive = False
+                if hasattr(self, '_lastMode') and self._lastMode == 'TEST':
+                    send_cmd(b'MODE IDLE', force=True)
+                    self._lastMode = 'IDLE'
+                    if self.verbose:
+                        print("Switched to IDLE mode", end="\r\n")
+                else:
+                    send_cmd(b'MODE TEST', force=True)
+                    self._lastMode = 'TEST'
+                    if self.verbose:
+                        print("Switched to TEST mode", end="\r\n")
+        
+        # LB button: toggle gait
+        if joy.button_lb and not self._prevJoyState.button_lb:
+            if self.verbose:
+                print("\nLB button pressed", end="\r\n")
+            if _marsMenu.visible:
+                _marsMenu.handle_button('LB')
+                self.forceDisplayUpdate = True
+            elif self.teensy is not None:
+                # Check if currently in StandingGait (from A button) - treat as "not walking"
+                is_standing_gait = _gaitActive and isinstance(_gaitEngine, StandingGait)
+                if not _gaitActive or is_standing_gait:
+                    # Start walking gait (or transition from StandingGait)
+                    if is_standing_gait and _gaitEngine is not None:
+                        _gaitEngine.stop()
+                        if self.verbose:
+                            print("  Transitioning from StandingGait to TripodGait", end="\r\n")
+                    ensure_enabled()
+                    _gaitActive = True
+                    params = GaitParams(
+                        cycle_ms=_gaitCycleMs,
+                        base_x_mm=self._gaitWidthMm,
+                        base_y_mm=_gaitBaseYMm,
+                        step_len_mm=_gaitStepLenMm,
+                        lift_mm=self._gaitLiftMm,
+                        overlap_pct=_gaitOverlapPct,
+                        smoothing_alpha=_gaitSmoothingAlpha,
+                        bezier_p1_height=_bezierP1Height,
+                        bezier_p1_overshoot=_bezierP1Overshoot,
+                        bezier_p2_height=_bezierP2Height,
+                        bezier_p3_height=_bezierP3Height,
+                        bezier_p3_overshoot=_bezierP3Overshoot,
+                        speed_scale=0.0
+                    )
+                    _gaitEngine = TripodGait(params)
+                    _gaitEngine.start()
+                    _autoDisableAt = None
+                    self.autoDisableAt = None
+                    # Reset stick inputs so gait starts at zero speed
+                    self._gaitStrafeInput = 0.0
+                    self._gaitSpeedInput = 0.0
+                    self._updateGaitHeading()
+                    if self.verbose:
+                        print("\nLB: Gait engine STARTED (tripod)", end="\r\n")
+                else:
+                    # Stop gait
+                    if _gaitEngine is not None:
+                        _gaitEngine.stop()
+                    _gaitActive = False
+                    send_cmd(b'STAND', force=True)
+                    _autoDisableAt = time.time() + _autoDisableS
+                    self.autoDisableAt = _autoDisableAt
+                    if self.verbose:
+                        print("\nLB: Gait engine STOPPED", end="\r\n")
+        
+        # RB button: next tab or cycle gait
+        if joy.button_rb and not self._prevJoyState.button_rb:
+            if _marsMenu.visible:
+                _marsMenu.handle_button('RB')
+                self.forceDisplayUpdate = True
+            elif _gaitActive and _gaitEngine is not None and not _gaitTransition.is_active():
+                # Cycle gait types
+                params = _gaitEngine.params
+                current_type = type(_gaitEngine)
+                try:
+                    current_idx = GAIT_TYPES.index(current_type)
+                except ValueError:
+                    current_idx = -1
+                next_idx = (current_idx + 1) % len(GAIT_TYPES)
+                next_type = GAIT_TYPES[next_idx]
+                next_name = GAIT_NAMES[next_idx]
+                
+                if next_type == StationaryPattern:
+                    pending_gait = next_type(params, radius_mm=15.0, period_ms=2000)
+                else:
+                    pending_gait = next_type(params)
+                
+                if _gaitTransition.request_transition(_gaitEngine, pending_gait):
+                    if self.verbose:
+                        print(f"\nRB: Transitioning to {next_name} gait", end="\r\n")
+        
+        # Left stick button (modifier)
+        if joy.button_lstick != self._prevJoyState.button_lstick:
+            self._leftStickHeld = joy.button_lstick
+            if self.verbose and joy.button_lstick:
+                print("\nLeft stick button held (param adjust mode)", end="\r\n")
+        
+        # Right stick button: disable
+        if joy.button_rstick and not self._prevJoyState.button_rstick:
+            if self.verbose:
+                print("\nRight stick button pressed (Disable)", end="\r\n")
+            if self.teensy is not None:
+                # Stop any active gait first
+                if _gaitActive and _gaitEngine is not None:
+                    _gaitEngine.stop()
+                    _gaitActive = False
+                send_cmd(b'DISABLE', force=True)
+        
+        # D-pad
+        if joy.dpad_up and not self._prevJoyState.dpad_up:
+            if self.verbose:
+                print(f"DPAD UP", end="\r\n")
+            if _marsMenu.visible:
+                _marsMenu.nav_up()
+                self.forceDisplayUpdate = True
+            elif _displayMode == DisplayMode.ENGINEERING:
+                # Adjust 3D view elevation (more top-down)
+                if _displayThread is not None:
+                    _displayThread.adjust_view_angle(d_elevation=10.0)
+                self.forceDisplayUpdate = True
+            else:
+                # Cycle eye shape down
+                self.eyes.left_shape -= 1
+                if self.eyes.left_shape < EYE_SHAPE.ELLIPSE:
+                    self.eyes.left_shape = EYE_SHAPE.ANIME
+                self.eyes.right_shape -= 1
+                if self.eyes.right_shape < EYE_SHAPE.ELLIPSE:
+                    self.eyes.right_shape = EYE_SHAPE.ANIME
+                self.eyes.eye_color = _eyeColors[self.eyes.left_shape]
+                if self.eyes.left_shape == EYE_SHAPE.HUMAN:
+                    self.eyes.human_eye_color_idx = (self.eyes.human_eye_color_idx - 1) % len(self.eyes.human_eye_colors)
+                self.eyes.update(force_update=True)
+                self.forceDisplayUpdate = True
+                save_eye_shape(self.eyes.left_shape)
+        
+        if joy.dpad_down and not self._prevJoyState.dpad_down:
+            if self.verbose:
+                print(f"DPAD DOWN", end="\r\n")
+            if _marsMenu.visible:
+                _marsMenu.nav_down()
+                self.forceDisplayUpdate = True
+            elif _displayMode == DisplayMode.ENGINEERING:
+                # Adjust 3D view elevation (less top-down / more side view)
+                if _displayThread is not None:
+                    _displayThread.adjust_view_angle(d_elevation=-10.0)
+                self.forceDisplayUpdate = True
+            else:
+                # Cycle eye shape up
+                self.eyes.left_shape += 1
+                if self.eyes.left_shape > EYE_SHAPE.ANIME:
+                    self.eyes.left_shape = EYE_SHAPE.ELLIPSE
+                self.eyes.right_shape += 1
+                if self.eyes.right_shape > EYE_SHAPE.ANIME:
+                    self.eyes.right_shape = EYE_SHAPE.ELLIPSE
+                self.eyes.eye_color = _eyeColors[self.eyes.left_shape]
+                if self.eyes.left_shape == EYE_SHAPE.HUMAN:
+                    self.eyes.human_eye_color_idx = (self.eyes.human_eye_color_idx + 1) % len(self.eyes.human_eye_colors)
+                self.eyes.update(force_update=True)
+                self.forceDisplayUpdate = True
+                save_eye_shape(self.eyes.left_shape)
+        
+        if joy.dpad_left and not self._prevJoyState.dpad_left:
+            if self.verbose:
+                print(f"DPAD LEFT", end="\r\n")
+            if _marsMenu.visible:
+                _marsMenu.nav_left()
+                self.forceDisplayUpdate = True
+            elif _displayMode == DisplayMode.ENGINEERING:
+                # Rotate 3D view counter-clockwise (from top view)
+                if _displayThread is not None:
+                    _displayThread.adjust_view_angle(d_azimuth=-15.0)
+                self.forceDisplayUpdate = True
+            else:
+                self.eyes.crt_mode = not self.eyes.crt_mode
+                self.eyes.update(force_update=True)
+                self.forceDisplayUpdate = True
+        
+        if joy.dpad_right and not self._prevJoyState.dpad_right:
+            if self.verbose:
+                print(f"DPAD RIGHT", end="\r\n")
+            if _marsMenu.visible:
+                _marsMenu.nav_right()
+                self.forceDisplayUpdate = True
+            elif _displayMode == DisplayMode.ENGINEERING:
+                # Rotate 3D view clockwise (from top view)
+                if _displayThread is not None:
+                    _displayThread.adjust_view_angle(d_azimuth=15.0)
+                self.forceDisplayUpdate = True
+            else:
+                self.eyes.crt_mode = not self.eyes.crt_mode
+                self.eyes.update(force_update=True)
+                self.forceDisplayUpdate = True
+        
+        #----------------------------------------------------------------------
+        # Analog axis processing (continuous)
+        #----------------------------------------------------------------------
+        
+        # Left stick Y: gait speed
+        if _gaitActive and _gaitEngine is not None:
+            # Negate to match original: stick up (positive joy.left_y) = forward (negative speed)
+            speed = -joy.left_y  # Forward = negative, back = positive (matches poll_gamepad)
+            if abs(speed) < 0.1:
+                speed = 0.0
+            self._gaitSpeedInput = speed
+            self._updateGaitHeading()
+        
+        # Eye control from left stick Y (always active)
+        value = min(1.0, max(0.0, abs(joy.left_y)))
+        self.eyes.eyelid_percent = value * 75.0
+        self.eyes.eyelid_angle = value * 35.0
+        self.eyes.eye_size = (25, 45 - int(value * 10))
+        if not _gaitActive:
+            self.forceDisplayUpdate = True
+            self.eyes.update(force_update=True)
+        
+        # Left stick X: strafe input
+        if _gaitActive and _gaitEngine is not None:
+            strafe = joy.left_x  # Already -1 to +1
+            if abs(strafe) < 0.1:
+                strafe = 0.0
+            self._gaitStrafeInput = strafe
+        
+        # Right stick X: eye center offset / heading when gait active
+        if _gaitActive and _gaitEngine is not None:
+            # Map to heading angle: -90° (left) to +90° (right)
+            strafe = joy.right_x
+            if abs(strafe) < 0.05:
+                strafe = 0.0
+            if abs(strafe) > 0.05:
+                _gaitEngine.params.heading_deg = -strafe * 90.0
+        else:
+            # Eye control when gait not active
+            # Negate to match original poll_gamepad behavior (stick right = eyes right)
+            self.eyes.eye_center_offset = int(-joy.right_x * 56.0)
+            self.forceDisplayUpdate = True
+            self.eyes.update(force_update=True)
+        
+        # Right stick Y: turn rate when gait active
+        if _gaitActive and _gaitEngine is not None:
+            turn_input = -joy.right_y  # Invert: stick up = CCW
+            if abs(turn_input) < 0.1:
+                turn_input = 0.0
+            _gaitEngine.params.turn_rate_deg_s = turn_input * _gaitTurnMaxDegS
+        
+        # Triggers: gait parameter adjustment (when left stick held)
+        if self._leftStickHeld:
+            # Left trigger: gait width
+            width_range = _gaitWidthMaxMm - _gaitWidthMinMm
+            self._gaitWidthMm = _gaitWidthMinMm + joy.trigger_left * width_range
+            if _gaitEngine is not None:
+                _gaitEngine.params.base_x_mm = self._gaitWidthMm
+            
+            # Right trigger: lift height
+            lift_range = _gaitLiftMaxMm - _gaitLiftMinMm
+            self._gaitLiftMm = _gaitLiftMinMm + joy.trigger_right * lift_range
+            if _gaitEngine is not None:
+                _gaitEngine.params.lift_mm = self._gaitLiftMm
+        
+        #----------------------------------------------------------------------
+        # Save previous state for next iteration
+        #----------------------------------------------------------------------
+        # Deep copy relevant fields for edge detection
+        self._prevJoyState.button_a = joy.button_a
+        self._prevJoyState.button_b = joy.button_b
+        self._prevJoyState.button_x = joy.button_x
+        self._prevJoyState.button_y = joy.button_y
+        self._prevJoyState.button_lb = joy.button_lb
+        self._prevJoyState.button_rb = joy.button_rb
+        self._prevJoyState.button_back = joy.button_back
+        self._prevJoyState.button_start = joy.button_start
+        self._prevJoyState.button_lstick = joy.button_lstick
+        self._prevJoyState.button_rstick = joy.button_rstick
+        self._prevJoyState.dpad_up = joy.dpad_up
+        self._prevJoyState.dpad_down = joy.dpad_down
+        self._prevJoyState.dpad_left = joy.dpad_left
+        self._prevJoyState.dpad_right = joy.dpad_right
+        
+        return True
 
     def housekeeping(self):
         """Handle telemetry auto-start and retry logic using instance state."""
@@ -1492,6 +2088,22 @@ _est_ini = {
     "meas_vel_alpha_milli": None,
 }
 
+# Safety display thresholds (Pi-side visualization, not firmware safety limits)
+_safetyDisplayVoltMin = 10.5
+_safetyDisplayVoltWarn = 11.0
+_safetyDisplayVoltMax = 12.5
+_safetyDisplayTempMin = 25.0
+_safetyDisplayTempMax = 55.0
+_showBatteryIcon = True  # Show battery icon on EYES display
+
+# Low battery protection (Pi-side graceful shutdown)
+_lowBatteryVoltCritical = 10.0   # Below this: TUCK + DISABLE sequence
+_lowBatteryEnabled = True         # Enable/disable low battery protection
+_lowBatteryTriggered = False      # Latch: prevents re-enable until voltage recovers
+_lowBatteryRecoveryVolt = 10.5    # Must exceed this to clear the latch
+_lowBatteryFilteredVoltage = 0.0  # Low-pass filtered voltage for protection
+_lowBatteryFilterAlpha = 0.05     # Slow filter (more stable than display filter)
+
 _pid_state = {
     "enabled": None,        # bool
     "mode": None,           # 'active'|'shadow'
@@ -1627,7 +2239,7 @@ def _parse_est_list_line(line: str):
 
 # initialze the global variables here
 _run = True # controls whether the mail loop is running
-_verbose = True # enables verbose logging and debugging
+_verbose = False # enables verbose logging and debugging
 _showLoopTime = False # flag to show the loop timing
 _logging = True # flage the use of the logging module
 _loopStartTime = time.time() # used to control the loop timing
@@ -1642,10 +2254,12 @@ _teensyLoopUs = 6024  # Teensy loop period in microseconds (default 166Hz = 6024
 _lastS1MonoTime = None  # monotonic timestamp of last S1 receipt
 _telemSyncActive = False  # True when actively syncing to Teensy telemetry
 _telemSyncFallbackMs = 50.0  # fallback to fixed timing if no S1 for this long
-_menuVisible = False # flag to show or hide the menu
+_displayMode = DisplayMode.EYES  # Current display mode: EYES, ENGINEERING, or MENU
+_menuVisible = False # flag to show or hide the menu (legacy, now derived from _displayMode)
 _mirrorDisplay = False # flag to mirror the display to the console
 _forceDisplayUpdate = False # flag to force the display update
 _displayBrightness = 100 # initial brightness of the display
+_startupDelayS = 5.0 # delay after startup splash before switching to eyes (0-30s in 0.5s steps)
 _menuState = None
 _marsMenu = None  # MARS menu instance (created after display init)
 _steeringMode = SteeringMode.OMNI  # initial steering mode
@@ -1678,6 +2292,15 @@ _gaitTickCount = 0      # Tick counter for rate limiting FEET sends
 _gaitSendDivisor = 3    # Send FEET every N ticks (2 = 83Hz, 3 = 55Hz)
 _gaitTransition = GaitTransition(blend_ms=500)  # Transition manager for smooth gait switching
 
+# Three-Layer Architecture tick counters (inspired by biological motor control)
+# Layer 1: Controller (166 Hz) - runs every tick (hardware I/O, safety reflexes)
+# Layer 2: Sequencer (~30 Hz) - runs every N ticks (behaviors, input, display)
+# Layer 3: Deliberator (~1 Hz) - async/on-demand (planning, SLAM) - future
+_layer2TickCount = 0      # Tick counter for Layer 2 phases
+_layer2Divisor = 5        # Run Layer 2 every N ticks (166/5 = 33 Hz)
+_layer3TickCount = 0      # Tick counter for Layer 3 phases (future)
+_layer3Divisor = 166      # Run Layer 3 every N ticks (166/166 = 1 Hz) - future
+
 # Kinematic move state (non-cyclic sequences that send FEET)
 _moveEngine = None
 _moveActive = False
@@ -1692,8 +2315,12 @@ _feetMaxSkipMs = 100.0     # Force send if no FEET sent for this long (prevents 
 
 # create the Teensy serial object
 _teensy = None
-# create the Xbox controller object
+# create the Xbox controller object (legacy evdev - used as fallback)
 _controller = None
+# create the Joy socket client (preferred - connects to joy_controller.py daemon)
+_joyClient: JoyClient = None
+# Joy client vs evdev mode
+_useJoySocket = True  # When True, use socket-based joy_controller; False = direct evdev
 
 # define the state array to store the state telemetry data
 _state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # # 11 elements for the state telemetry data
@@ -1734,7 +2361,7 @@ _eyeSpacingOffset = 10
 _eyeCenterOffset = 5      # Horizontal eye center offset (pixels)
 _eyeVerticalOffset = 0    # Vertical eye center offset from baseline (pixels)
 _eyeEyelidAngle = 0
-_eyeBlinkPercentStep = 0.25
+_eyeBlinkPercentStep = 0.08
 _eyeRotation = -10
 _eyeSizeX = 25
 _eyeSizeY = 45
@@ -1791,7 +2418,8 @@ def _parse_ini_triplet_int(s):
 # Display thread settings
 _displayThreadEnabled = True
 _displayThreadHz = 15.0
-_blinkFrameDivisor = 2  # Skip N-1 out of N frames during blink (1=no skip, 2=half rate, 3=third rate)
+_blinkFrameDivisor = 3  # Skip N-1 out of N frames during blink (1=no skip, 2=half rate, 3=third rate)
+_engineeringLcars = True  # True = LCARS theme for engineering view, False = basic theme
 
 # IMU sensor settings (BNO085)
 _imuEnabled = True  # Set to False if IMU not connected
@@ -1803,14 +2431,54 @@ _imuEnableAccel = False
 _imuEnableGyro = False
 _imuEnableMag = False
 
-# Body leveling settings (IMU-based Z correction)
+# Body leveling settings (IMU-based Y/height correction)
 _levelingEnabled = False  # Enable body leveling
 _levelingGain = 1.0  # Scale factor for corrections (0-2)
-_levelingMaxCorrMm = 30.0  # Max per-leg Z delta
+_levelingMaxCorrMm = 30.0  # Max per-leg Y delta
 _levelingFilterAlpha = 0.15  # EMA filter (lower = smoother)
 _levelingPitchOffset = 0.0  # Pitch bias correction (deg)
 _levelingRollOffset = 0.0  # Roll bias correction (deg)
 _levelingTiltLimitDeg = 25.0  # Safety threshold (deg)
+_levelingDebugCount = 0  # Debug output counter
+# Motion lean settings (tilt into direction of travel)
+_leanEnabled = False  # Enable motion lean
+_leanMaxDeg = 7.0  # Max lean angle (7-10° typical)
+_leanFilterAlpha = 0.1  # Smoothing for lean changes
+
+# ToF sensor settings (VL53L5CX)
+_tofEnabled = True  # Set to False if ToF not connected
+_tofHz = 15.0  # Target update rate (max 15 Hz at 8x8, 60 Hz at 4x4)
+_tofBus = 1  # I2C bus number (run 'i2cdetect -y N' to find device)
+_tofResolution = 64  # 16 (4x4) or 64 (8x8) zones - library format
+_tofSensors = [("front", 0x29)]  # List of (name, address) tuples
+
+# Autonomy / Behavior settings
+_autonomyEnabled = False  # Master switch (keyboard 'a' toggles)
+_autonomyObstacleAvoidance = True
+_autonomyCliffDetection = True
+_autonomyCaughtFootRecovery = True
+_autonomyPatrol = False
+_autonomyStopDistMm = 150
+_autonomySlowDistMm = 300
+_autonomyCliffThresholdMm = 100
+_autonomySnagErrorDeg = 15.0
+_autonomySnagTimeoutMs = 500
+_autonomyRecoveryLiftMm = 30.0
+_autonomyMaxRecoveryAttempts = 3
+_autonomyPatrolDurationS = 60.0
+_autonomyTurnIntervalS = 10.0
+_behaviorArbiter = None  # BehaviorArbiter instance
+_lastAutonomyAction = None  # Last action for display
+
+# Point cloud / SLAM settings
+_pointcloudEnabled = False  # Master switch for point cloud server
+_pointcloudPort = 8765  # WebSocket port
+_pointcloudHttpPort = 8080  # HTTP port for web viewer
+_pointcloudHz = 10.0  # Target streaming rate
+_pointcloudAccumulate = True  # Accumulate points over time (vs live-only)
+_pointcloudMaxPoints = 50000  # Max points to keep in accumulator
+_pointcloudVoxelMm = 20.0  # Voxel size for deduplication
+_pointcloudServer = None  # PointCloudServer instance
 
 try:
     _cfg = configparser.ConfigParser()
@@ -1837,6 +2505,10 @@ try:
         _displayThreadEnabled = _cfg.getboolean('display', 'thread_enabled', fallback=_displayThreadEnabled)
         _displayThreadHz = _cfg.getfloat('display', 'thread_hz', fallback=_displayThreadHz)
         _blinkFrameDivisor = _cfg.getint('display', 'blink_frame_divisor', fallback=_blinkFrameDivisor)
+        _startupDelayS = _cfg.getfloat('display', 'startup_delay_s', fallback=_startupDelayS)
+        _engineeringLcars = _cfg.getboolean('display', 'engineering_lcars', fallback=_engineeringLcars)
+        # Clamp startup delay to valid range (0-30s in 0.5s steps)
+        _startupDelayS = max(0.0, min(30.0, round(_startupDelayS * 2) / 2))
     # Load menu settings
     if 'menu' in _cfg:
         _menuTheme = _cfg.getint('menu', 'theme', fallback=_menuTheme)
@@ -1868,6 +2540,32 @@ try:
         _levelingPitchOffset = _cfg.getfloat('leveling', 'pitch_offset', fallback=_levelingPitchOffset)
         _levelingRollOffset = _cfg.getfloat('leveling', 'roll_offset', fallback=_levelingRollOffset)
         _levelingTiltLimitDeg = _cfg.getfloat('leveling', 'tilt_limit_deg', fallback=_levelingTiltLimitDeg)
+        # Motion lean settings
+        _leanEnabled = _cfg.getboolean('leveling', 'lean_enabled', fallback=_leanEnabled)
+        _leanMaxDeg = _cfg.getfloat('leveling', 'lean_max_deg', fallback=_leanMaxDeg)
+        _leanFilterAlpha = _cfg.getfloat('leveling', 'lean_filter_alpha', fallback=_leanFilterAlpha)
+
+    # Load ToF sensor settings
+    if 'tof' in _cfg:
+        _tofEnabled = _cfg.getboolean('tof', 'enabled', fallback=_tofEnabled)
+        _tofHz = _cfg.getfloat('tof', 'hz', fallback=_tofHz)
+        _tofBus = _cfg.getint('tof', 'bus', fallback=_tofBus)
+        _tof_res_cfg = _cfg.getint('tof', 'resolution', fallback=8)
+        # Convert user-friendly 4/8 to library expected 16/64
+        _tofResolution = 64 if _tof_res_cfg >= 8 else 16
+        # Parse sensors list: "front=0x29,left=0x30" format
+        _tof_sensors_str = _cfg.get('tof', 'sensors', fallback=None)
+        if _tof_sensors_str:
+            _tofSensors = []
+            for pair in _tof_sensors_str.split(','):
+                pair = pair.strip()
+                if '=' in pair:
+                    name, addr_str = pair.split('=', 1)
+                    try:
+                        addr = int(addr_str.strip(), 0)
+                        _tofSensors.append((name.strip(), addr))
+                    except ValueError:
+                        pass
 
     # Load optional PID/IMP/EST defaults
     if 'pid' in _cfg:
@@ -1897,6 +2595,48 @@ try:
         _est_ini['cmd_alpha_milli'] = _cfg.getint('est', 'cmd_alpha_milli', fallback=_est_ini['cmd_alpha_milli'])
         _est_ini['meas_alpha_milli'] = _cfg.getint('est', 'meas_alpha_milli', fallback=_est_ini['meas_alpha_milli'])
         _est_ini['meas_vel_alpha_milli'] = _cfg.getint('est', 'meas_vel_alpha_milli', fallback=_est_ini['meas_vel_alpha_milli'])
+
+    # Load safety display thresholds (Pi-side visualization)
+    if 'safety_display' in _cfg:
+        _safetyDisplayVoltMin = _cfg.getfloat('safety_display', 'volt_min', fallback=_safetyDisplayVoltMin)
+        _safetyDisplayVoltWarn = _cfg.getfloat('safety_display', 'volt_warn', fallback=_safetyDisplayVoltWarn)
+        _safetyDisplayVoltMax = _cfg.getfloat('safety_display', 'volt_max', fallback=_safetyDisplayVoltMax)
+        _safetyDisplayTempMin = _cfg.getfloat('safety_display', 'temp_min', fallback=_safetyDisplayTempMin)
+        _safetyDisplayTempMax = _cfg.getfloat('safety_display', 'temp_max', fallback=_safetyDisplayTempMax)
+        _showBatteryIcon = _cfg.getboolean('safety_display', 'show_battery_icon', fallback=_showBatteryIcon)
+
+    # Load low battery protection settings
+    if 'low_battery' in _cfg:
+        _lowBatteryEnabled = _cfg.getboolean('low_battery', 'enabled', fallback=_lowBatteryEnabled)
+        _lowBatteryVoltCritical = _cfg.getfloat('low_battery', 'volt_critical', fallback=_lowBatteryVoltCritical)
+        _lowBatteryRecoveryVolt = _cfg.getfloat('low_battery', 'volt_recovery', fallback=_lowBatteryRecoveryVolt)
+
+    # Load behavior/autonomy settings
+    if 'behavior' in _cfg:
+        _autonomyEnabled = _cfg.getboolean('behavior', 'enabled', fallback=_autonomyEnabled)
+        _autonomyObstacleAvoidance = _cfg.getboolean('behavior', 'obstacle_avoidance', fallback=_autonomyObstacleAvoidance)
+        _autonomyCliffDetection = _cfg.getboolean('behavior', 'cliff_detection', fallback=_autonomyCliffDetection)
+        _autonomyCaughtFootRecovery = _cfg.getboolean('behavior', 'caught_foot_recovery', fallback=_autonomyCaughtFootRecovery)
+        _autonomyPatrol = _cfg.getboolean('behavior', 'patrol', fallback=_autonomyPatrol)
+        _autonomyStopDistMm = _cfg.getint('behavior', 'stop_distance_mm', fallback=_autonomyStopDistMm)
+        _autonomySlowDistMm = _cfg.getint('behavior', 'slow_distance_mm', fallback=_autonomySlowDistMm)
+        _autonomyCliffThresholdMm = _cfg.getint('behavior', 'cliff_threshold_mm', fallback=_autonomyCliffThresholdMm)
+        _autonomySnagErrorDeg = _cfg.getfloat('behavior', 'snag_position_error_deg', fallback=_autonomySnagErrorDeg)
+        _autonomySnagTimeoutMs = _cfg.getint('behavior', 'snag_timeout_ms', fallback=_autonomySnagTimeoutMs)
+        _autonomyRecoveryLiftMm = _cfg.getfloat('behavior', 'recovery_lift_mm', fallback=_autonomyRecoveryLiftMm)
+        _autonomyMaxRecoveryAttempts = _cfg.getint('behavior', 'max_recovery_attempts', fallback=_autonomyMaxRecoveryAttempts)
+        _autonomyPatrolDurationS = _cfg.getfloat('behavior', 'patrol_duration_s', fallback=_autonomyPatrolDurationS)
+        _autonomyTurnIntervalS = _cfg.getfloat('behavior', 'turn_interval_s', fallback=_autonomyTurnIntervalS)
+
+    # Load point cloud / SLAM settings
+    if 'pointcloud' in _cfg:
+        _pointcloudEnabled = _cfg.getboolean('pointcloud', 'enabled', fallback=_pointcloudEnabled)
+        _pointcloudPort = _cfg.getint('pointcloud', 'port', fallback=_pointcloudPort)
+        _pointcloudHttpPort = _cfg.getint('pointcloud', 'http_port', fallback=_pointcloudHttpPort)
+        _pointcloudHz = _cfg.getfloat('pointcloud', 'stream_hz', fallback=_pointcloudHz)
+        _pointcloudAccumulate = _cfg.getboolean('pointcloud', 'accumulate', fallback=_pointcloudAccumulate)
+        _pointcloudMaxPoints = _cfg.getint('pointcloud', 'max_points', fallback=_pointcloudMaxPoints)
+        _pointcloudVoxelMm = _cfg.getfloat('pointcloud', 'voxel_mm', fallback=_pointcloudVoxelMm)
 
     # Merge controller.ini defaults into live PID/IMP/EST menu state (until firmware LIST overwrites)
     try:
@@ -1950,6 +2690,7 @@ try:
         _gaitOverlapPct = _cfg.getfloat('gait', 'overlap_pct', fallback=_gaitOverlapPct)
         _gaitSmoothingAlpha = _cfg.getfloat('gait', 'smoothing_alpha', fallback=_gaitSmoothingAlpha)
         _gaitSendDivisor = _cfg.getint('gait', 'send_divisor', fallback=_gaitSendDivisor)
+        _layer2Divisor = _cfg.getint('gait', 'layer2_divisor', fallback=_layer2Divisor)
         _feetToleranceMm = _cfg.getfloat('gait', 'feet_tolerance_mm', fallback=_feetToleranceMm)
         _feetMaxSkipMs = _cfg.getfloat('gait', 'feet_max_skip_ms', fallback=_feetMaxSkipMs)
         _cmdThrottleMs = _cfg.getfloat('gait', 'cmd_throttle_ms', fallback=_cmdThrottleMs)
@@ -2050,25 +2791,30 @@ _backGroundImage = Image.new("RGB", (_disp.width, _disp.height), "BLACK")  # cre
 #_backGroundImage = _backGroundImage.rotate(270, expand=True)  # rotate the image to fit the display
 #_backGroundImage = _backGroundImage.convert("BGR")  # convert the image to RGB
 #_backGroundImage = _backGroundImage.resize((_disp.width, _disp.height), Image.Resampling.LANCZOS)  # resize the image to fit the display
-drawMarsSplash(_disp, FW_VERSION_BANNER, CONTROLLER_VERSION, CONTROLLER_BUILD)
-time.sleep(3)
+
+# Create startup splash with scrolling log
+_startupSplash = StartupSplash(_disp, FW_VERSION_BANNER, CONTROLLER_VERSION, CONTROLLER_BUILD)
+_startupSplash.log("MARS - Modular Autonomous Robotic System", "CYAN")
 
 # Startup banner (printed to stdout for logs/USB serial capture)
 print("MARS - Modular Autonomous Robotic System", end="\r\n")
 print(f"Firmware {FW_VERSION_BANNER} · Controller {CONTROLLER_VERSION}/b{CONTROLLER_BUILD}", end="\r\n")
 
-# initizlizxe the touch screen
+# Initialize the touch screen
+_startupSplash.log("Initializing touch screen...", "WHITE")
 _touch = cst816d.cst816d()
+_startupSplash.log("Touch screen OK", "GREEN")
 
-#create the menu object (legacy menu, kept for compatibility)
+# Create the menu object (legacy menu, kept for compatibility)
+_startupSplash.log("Creating menu systems...", "WHITE")
 _menu = GUIMenu(_touch)
 
 # Create new MARS menu system
 _marsMenu = MarsMenu(_touch)
-
-time.sleep(1) # take a short nap
+_startupSplash.log("Menu systems OK", "GREEN")
 
 # create and initialize the SimpleEyes object
+_startupSplash.log("Initializing eye display...", "WHITE")
 _eyes = SimpleEyes((_backGroundImage.height, _backGroundImage.width), eye_color=(10,120,255))
 # Eye colors from config: ELLIPSE, RECTANGLE, ROUNDRECTANGLE, X, SPIDER, HUMAN, CAT, HYPNO, ANIME
 _eyeColors = [_eyeColorEllipse, _eyeColorRectangle, _eyeColorRoundRect, _eyeColorX, _eyeColorSpider, _eyeColorHuman, _eyeColorCat, _eyeColorHypno, _eyeColorAnime]
@@ -2093,7 +2839,10 @@ _eyes.human_eye_color_idx = _humanEyeColorIdx
 _eyes.human_eye_colors = _humanEyeColorPalette  # Pass loaded palette to SimpleEyes
 _eyes.crt_mode = _eyeCrtMode  # Set CRT mode from config
 _eyes.update(force_update=True)  # force the initial update to draw the eyes
-UpdateDisplay(_disp, _eyes.display_image, _menu.image, _servo, _legs, _state, _mirrorDisplay, _menuState)  # display the eyes on the display
+_startupSplash.log("Eye display OK", "GREEN")
+
+# Don't switch to eyes yet - keep splash showing during remaining startup
+# UpdateDisplay(_disp, _eyes.display_image, _menu.image, _servo, _legs, _state, _mirrorDisplay, _menuState)
 
 # --- Setup MARS menu callbacks and sync initial values ---
 def _setup_mars_menu():
@@ -2174,8 +2923,10 @@ def _setup_mars_menu():
         save_menu_settings(theme=val)
     
     def on_palette_change(val):
-        global _marsMenu
+        global _marsMenu, _displayThread
         _marsMenu.lcars_palette = val
+        if _displayThread is not None:
+            _displayThread.set_lcars_palette(val)
         save_menu_settings(palette=val)
     
     def on_save_all():
@@ -2426,6 +3177,114 @@ def _setup_mars_menu():
         if _verbose:
             print(f"Leveling tilt limit: {val:.0f}°", end="\r\n")
     
+    def on_lean_enabled_change(val):
+        """Toggle motion lean on/off."""
+        global _levelingState, _leanEnabled
+        _leanEnabled = (val == 1)
+        if _levelingState is not None:
+            _levelingState.config.lean_enabled = _leanEnabled
+            if not _leanEnabled:
+                _levelingState._filtered_lean_pitch = 0.0
+                _levelingState._filtered_lean_roll = 0.0
+        if _verbose:
+            print(f"Motion lean: {'ON' if _leanEnabled else 'OFF'}", end="\r\n")
+    
+    def on_lean_max_change(val):
+        """Update max lean angle."""
+        global _levelingState, _leanMaxDeg
+        _leanMaxDeg = val
+        if _levelingState is not None:
+            _levelingState.config.lean_max_deg = val
+        if _verbose:
+            print(f"Lean max: {val:.0f}°", end="\r\n")
+    
+    # === ToF callbacks ===
+    def on_tof_enabled_change(val):
+        """Update ToF enabled setting (requires restart to take effect)."""
+        global _tofEnabled
+        _tofEnabled = (val == 1)
+        if _verbose:
+            print(f"ToF enabled: {'On' if _tofEnabled else 'Off'} (restart required)", end="\r\n")
+    
+    def on_tof_resolution_change(val):
+        """Update ToF resolution setting (requires restart to take effect)."""
+        global _tofResolution
+        # val: 0=4x4, 1=8x8
+        _tofResolution = 64 if val == 1 else 16
+        if _verbose:
+            grid = 8 if _tofResolution >= 64 else 4
+            print(f"ToF resolution: {grid}x{grid} (restart required)", end="\r\n")
+    
+    def on_tof_framerate_change(val):
+        """Update ToF frame rate setting (requires restart to take effect)."""
+        global _tofHz
+        _tofHz = float(val)
+        if _verbose:
+            print(f"ToF frame rate: {_tofHz:.0f} Hz (restart required)", end="\r\n")
+    
+    def on_tof_bus_change(val):
+        """Update ToF I2C bus setting (requires restart to take effect)."""
+        global _tofBus
+        _tofBus = int(val)
+        if _verbose:
+            print(f"ToF I2C bus: {_tofBus} (restart required)", end="\r\n")
+    
+    def on_tof_add_sensor():
+        """Add a new ToF sensor (placeholder for future dynamic sensor management)."""
+        global _tofSensors
+        # Find next available address (0x29 + N)
+        used_addrs = {addr for _, addr in _tofSensors}
+        next_addr = 0x29
+        for i in range(16):
+            if (0x29 + i) not in used_addrs:
+                next_addr = 0x29 + i
+                break
+        sensor_num = len(_tofSensors) + 1
+        _tofSensors.append((f"sensor{sensor_num}", next_addr))
+        if _verbose:
+            print(f"Added ToF sensor{sensor_num} at 0x{next_addr:02X} (restart required)", end="\r\n")
+    
+    def on_tof_remove_sensor1():
+        """Remove first ToF sensor."""
+        global _tofSensors
+        if _tofSensors:
+            removed = _tofSensors.pop(0)
+            if _verbose:
+                print(f"Removed ToF sensor '{removed[0]}' (restart required)", end="\r\n")
+    
+    def on_tof_apply_restart():
+        """Save ToF settings and restart the ToF thread."""
+        global _tofThread, _tofEnabled, _tofHz, _tofBus, _tofResolution, _tofSensors
+        # Save settings to config
+        tof_state = {
+            'enabled': _tofEnabled,
+            'hz': _tofHz,
+            'bus': _tofBus,
+            'resolution': 8 if _tofResolution >= 64 else 4,
+            'sensors': _tofSensors,
+        }
+        if save_tof_settings(tof_state):
+            if _verbose:
+                print("ToF settings saved", end="\r\n")
+        else:
+            if _verbose:
+                print("ToF settings save failed", end="\r\n")
+        
+        # Stop existing thread if running
+        if _tofThread is not None and _tofThread.is_alive():
+            _tofThread.stop()
+            if _verbose:
+                print("ToF thread stopped", end="\r\n")
+            _tofThread = None
+        
+        # Restart if enabled (note: sensor init must happen on main thread for VL53L5CX)
+        if _tofEnabled:
+            if _verbose:
+                print("ToF restart: settings saved. Full restart recommended for sensor re-init.", end="\r\n")
+        else:
+            if _verbose:
+                print("ToF disabled and stopped", end="\r\n")
+    
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Theme", "on_change", on_theme_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Palette", "on_change", on_palette_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Brightness", "on_change", on_brightness_change)
@@ -2474,6 +3333,191 @@ def _setup_mars_menu():
     _marsMenu.set_callback(MenuCategory.IMU, "LVL Gain", "on_change", on_leveling_gain_change)
     _marsMenu.set_callback(MenuCategory.IMU, "Max Corr", "on_change", on_leveling_max_corr_change)
     _marsMenu.set_callback(MenuCategory.IMU, "Tilt Limit", "on_change", on_leveling_tilt_limit_change)
+    _marsMenu.set_callback(MenuCategory.IMU, "Motion Lean", "on_change", on_lean_enabled_change)
+    _marsMenu.set_callback(MenuCategory.IMU, "Lean Max", "on_change", on_lean_max_change)
+
+    _marsMenu.set_callback(MenuCategory.TOF, "Enabled", "on_change", on_tof_enabled_change)
+    _marsMenu.set_callback(MenuCategory.TOF, "Resolution", "on_change", on_tof_resolution_change)
+    _marsMenu.set_callback(MenuCategory.TOF, "Frame Rate", "on_change", on_tof_framerate_change)
+    _marsMenu.set_callback(MenuCategory.TOF, "I2C Bus", "on_change", on_tof_bus_change)
+    _marsMenu.set_callback(MenuCategory.TOF, "Add Sensor", "on_select", on_tof_add_sensor)
+    _marsMenu.set_callback(MenuCategory.TOF, "Remove Sensor 1", "on_select", on_tof_remove_sensor1)
+    _marsMenu.set_callback(MenuCategory.TOF, "Apply & Restart", "on_select", on_tof_apply_restart)
+
+    # === Autonomy callbacks ===
+    def on_autonomy_enabled_change(val):
+        """Toggle autonomy mode on/off."""
+        global _autonomyEnabled, _behaviorArbiter
+        _autonomyEnabled = (val == 1)
+        if _autonomyEnabled and _behaviorArbiter is None:
+            _behaviorArbiter = _init_behavior_arbiter()
+        if _verbose:
+            print(f"Autonomy: {'ENABLED' if _autonomyEnabled else 'DISABLED'}", end="\r\n")
+
+    def on_obstacle_avoid_change(val):
+        """Toggle obstacle avoidance behavior."""
+        global _autonomyObstacleAvoidance, _behaviorArbiter
+        _autonomyObstacleAvoidance = (val == 1)
+        if _behaviorArbiter is not None:
+            _behaviorArbiter.set_behavior_enabled("ObstacleAvoidance", _autonomyObstacleAvoidance)
+        if _verbose:
+            print(f"Obstacle avoidance: {'On' if _autonomyObstacleAvoidance else 'Off'}", end="\r\n")
+
+    def on_cliff_detect_change(val):
+        """Toggle cliff detection behavior."""
+        global _autonomyCliffDetection, _behaviorArbiter
+        _autonomyCliffDetection = (val == 1)
+        if _behaviorArbiter is not None:
+            _behaviorArbiter.set_behavior_enabled("CliffDetection", _autonomyCliffDetection)
+        if _verbose:
+            print(f"Cliff detection: {'On' if _autonomyCliffDetection else 'Off'}", end="\r\n")
+
+    def on_caught_foot_change(val):
+        """Toggle caught foot recovery behavior."""
+        global _autonomyCaughtFootRecovery, _behaviorArbiter
+        _autonomyCaughtFootRecovery = (val == 1)
+        if _behaviorArbiter is not None:
+            _behaviorArbiter.set_behavior_enabled("CaughtFootRecovery", _autonomyCaughtFootRecovery)
+        if _verbose:
+            print(f"Caught foot recovery: {'On' if _autonomyCaughtFootRecovery else 'Off'}", end="\r\n")
+
+    def on_patrol_change(val):
+        """Toggle patrol behavior."""
+        global _autonomyPatrol, _behaviorArbiter
+        _autonomyPatrol = (val == 1)
+        if _behaviorArbiter is not None:
+            _behaviorArbiter.set_behavior_enabled("Patrol", _autonomyPatrol)
+        if _verbose:
+            print(f"Patrol: {'On' if _autonomyPatrol else 'Off'}", end="\r\n")
+
+    def on_stop_dist_change(val):
+        """Update obstacle stop distance."""
+        global _autonomyStopDistMm
+        _autonomyStopDistMm = int(val)
+        # Update behavior if arbiter exists
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("ObstacleAvoidance")
+            if behavior is not None:
+                behavior.stop_distance_mm = _autonomyStopDistMm
+        if _verbose:
+            print(f"Stop distance: {_autonomyStopDistMm}mm", end="\r\n")
+
+    def on_slow_dist_change(val):
+        """Update obstacle slow distance."""
+        global _autonomySlowDistMm
+        _autonomySlowDistMm = int(val)
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("ObstacleAvoidance")
+            if behavior is not None:
+                behavior.slow_distance_mm = _autonomySlowDistMm
+        if _verbose:
+            print(f"Slow distance: {_autonomySlowDistMm}mm", end="\r\n")
+
+    def on_cliff_thresh_change(val):
+        """Update cliff detection threshold."""
+        global _autonomyCliffThresholdMm
+        _autonomyCliffThresholdMm = int(val)
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("CliffDetection")
+            if behavior is not None:
+                behavior.cliff_threshold_mm = _autonomyCliffThresholdMm
+        if _verbose:
+            print(f"Cliff threshold: {_autonomyCliffThresholdMm}mm", end="\r\n")
+
+    def on_snag_error_change(val):
+        """Update snag position error threshold."""
+        global _autonomySnagErrorDeg
+        _autonomySnagErrorDeg = float(val)
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("CaughtFootRecovery")
+            if behavior is not None:
+                behavior.position_error_threshold = _autonomySnagErrorDeg
+        if _verbose:
+            print(f"Snag error threshold: {_autonomySnagErrorDeg:.1f}°", end="\r\n")
+
+    def on_snag_timeout_change(val):
+        """Update snag timeout."""
+        global _autonomySnagTimeoutMs
+        _autonomySnagTimeoutMs = int(val)
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("CaughtFootRecovery")
+            if behavior is not None:
+                behavior.timeout_ms = _autonomySnagTimeoutMs
+        if _verbose:
+            print(f"Snag timeout: {_autonomySnagTimeoutMs}ms", end="\r\n")
+
+    def on_recovery_lift_change(val):
+        """Update recovery lift height."""
+        global _autonomyRecoveryLiftMm
+        _autonomyRecoveryLiftMm = float(val)
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("CaughtFootRecovery")
+            if behavior is not None:
+                behavior.recovery_lift_mm = _autonomyRecoveryLiftMm
+        if _verbose:
+            print(f"Recovery lift: {_autonomyRecoveryLiftMm:.0f}mm", end="\r\n")
+
+    def on_patrol_time_change(val):
+        """Update patrol duration."""
+        global _autonomyPatrolDurationS
+        _autonomyPatrolDurationS = float(val)
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("Patrol")
+            if behavior is not None:
+                behavior.patrol_duration_s = _autonomyPatrolDurationS
+        if _verbose:
+            print(f"Patrol duration: {_autonomyPatrolDurationS:.0f}s", end="\r\n")
+
+    def on_turn_interval_change(val):
+        """Update patrol turn interval."""
+        global _autonomyTurnIntervalS
+        _autonomyTurnIntervalS = float(val)
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("Patrol")
+            if behavior is not None:
+                behavior.turn_interval_s = _autonomyTurnIntervalS
+        if _verbose:
+            print(f"Turn interval: {_autonomyTurnIntervalS:.0f}s", end="\r\n")
+
+    def on_autonomy_save():
+        """Save autonomy settings to config."""
+        from config_manager import save_behavior_settings
+        settings = {
+            'enabled': _autonomyEnabled,
+            'obstacle_avoidance': _autonomyObstacleAvoidance,
+            'cliff_detection': _autonomyCliffDetection,
+            'caught_foot_recovery': _autonomyCaughtFootRecovery,
+            'patrol': _autonomyPatrol,
+            'stop_distance_mm': _autonomyStopDistMm,
+            'slow_distance_mm': _autonomySlowDistMm,
+            'cliff_threshold_mm': _autonomyCliffThresholdMm,
+            'snag_position_error_deg': _autonomySnagErrorDeg,
+            'snag_timeout_ms': _autonomySnagTimeoutMs,
+            'recovery_lift_mm': _autonomyRecoveryLiftMm,
+            'patrol_duration_s': _autonomyPatrolDurationS,
+            'turn_interval_s': _autonomyTurnIntervalS,
+        }
+        if save_behavior_settings(settings):
+            if _verbose:
+                print("Autonomy settings saved", end="\r\n")
+        else:
+            if _verbose:
+                print("Failed to save autonomy settings", end="\r\n")
+
+    _marsMenu.set_callback(MenuCategory.AUTO, "Autonomy", "on_change", on_autonomy_enabled_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Obstacle Avoid", "on_change", on_obstacle_avoid_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Cliff Detect", "on_change", on_cliff_detect_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Caught Foot", "on_change", on_caught_foot_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Patrol", "on_change", on_patrol_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Stop Dist", "on_change", on_stop_dist_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Slow Dist", "on_change", on_slow_dist_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Cliff Thresh", "on_change", on_cliff_thresh_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Snag Error", "on_change", on_snag_error_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Snag Timeout", "on_change", on_snag_timeout_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Recovery Lift", "on_change", on_recovery_lift_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Patrol Time", "on_change", on_patrol_time_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Turn Interval", "on_change", on_turn_interval_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Save Settings", "on_select", on_autonomy_save)
 
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Verbose", "on_change", on_verbose_change)
     _marsMenu.set_callback(MenuCategory.SYSTEM, "Mirror Display", "on_change", on_mirror_change)
@@ -2557,7 +3601,13 @@ def _setup_mars_menu():
     
     # === POSTURE callbacks ===
     def on_stand():
-        apply_posture(b'STAND', auto_disable_s=_autoDisableS)
+        """Start standing gait (uses gait engine for leveling support)."""
+        global _enabledLocal
+        # Ensure robot is enabled
+        if _teensy is not None and not _enabledLocal:
+            send_cmd(b'ENABLE', force=True)
+            _enabledLocal = True
+        _start_standing_gait()
         _marsMenu.hide()
     
     def on_tuck():
@@ -2695,11 +3745,71 @@ def _setup_mars_menu():
     def on_override_none():
         _send_safety_override(b'NONE', 'NONE')
 
+    # Safety display threshold callbacks
+    def on_volt_min_change(value):
+        global _safetyDisplayVoltMin
+        _safetyDisplayVoltMin = float(value)
+        if _displayThread:
+            _displayThread.set_safety_thresholds(volt_min=_safetyDisplayVoltMin)
+        save_safety_display_settings({'volt_min': _safetyDisplayVoltMin})
+    
+    def on_volt_warn_change(value):
+        global _safetyDisplayVoltWarn
+        _safetyDisplayVoltWarn = float(value)
+        if _displayThread:
+            _displayThread.set_safety_thresholds(volt_warn=_safetyDisplayVoltWarn)
+        save_safety_display_settings({'volt_warn': _safetyDisplayVoltWarn})
+    
+    def on_volt_max_change(value):
+        global _safetyDisplayVoltMax
+        _safetyDisplayVoltMax = float(value)
+        if _displayThread:
+            _displayThread.set_safety_thresholds(volt_max=_safetyDisplayVoltMax)
+        save_safety_display_settings({'volt_max': _safetyDisplayVoltMax})
+    
+    def on_temp_min_change(value):
+        global _safetyDisplayTempMin
+        _safetyDisplayTempMin = float(value)
+        if _displayThread:
+            _displayThread.set_safety_thresholds(temp_min=_safetyDisplayTempMin)
+        save_safety_display_settings({'temp_min': _safetyDisplayTempMin})
+    
+    def on_temp_max_change(value):
+        global _safetyDisplayTempMax
+        _safetyDisplayTempMax = float(value)
+        if _displayThread:
+            _displayThread.set_safety_thresholds(temp_max=_safetyDisplayTempMax)
+        save_safety_display_settings({'temp_max': _safetyDisplayTempMax})
+
+    # Low battery protection callbacks
+    def on_lowbatt_prot_change(value):
+        global _lowBatteryEnabled
+        _lowBatteryEnabled = (value == 1)
+        save_low_battery_settings({'enabled': _lowBatteryEnabled})
+    
+    def on_volt_critical_change(value):
+        global _lowBatteryVoltCritical
+        _lowBatteryVoltCritical = float(value)
+        save_low_battery_settings({'volt_critical': _lowBatteryVoltCritical})
+    
+    def on_volt_recovery_change(value):
+        global _lowBatteryRecoveryVolt
+        _lowBatteryRecoveryVolt = float(value)
+        save_low_battery_settings({'volt_recovery': _lowBatteryRecoveryVolt})
+
     _marsMenu.set_callback(MenuCategory.SAFETY, "Clear Safety", "on_select", on_clear_safety)
     _marsMenu.set_callback(MenuCategory.SAFETY, "Override ALL", "on_select", on_override_all)
     _marsMenu.set_callback(MenuCategory.SAFETY, "Override TEMP", "on_select", on_override_temp)
     _marsMenu.set_callback(MenuCategory.SAFETY, "Override COLLISION", "on_select", on_override_collision)
     _marsMenu.set_callback(MenuCategory.SAFETY, "Override NONE", "on_select", on_override_none)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Volt Min", "on_change", on_volt_min_change)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Volt Warn", "on_change", on_volt_warn_change)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Volt Max", "on_change", on_volt_max_change)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Temp Min", "on_change", on_temp_min_change)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Temp Max", "on_change", on_temp_max_change)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "LowBatt Prot", "on_change", on_lowbatt_prot_change)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Volt Critical", "on_change", on_volt_critical_change)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "Volt Recovery", "on_change", on_volt_recovery_change)
     
     # === Sync initial values ===
     _marsMenu.set_value(MenuCategory.EYES, "Style", _eyes.left_shape)
@@ -2731,6 +3841,19 @@ def _setup_mars_menu():
     _marsMenu.set_value(MenuCategory.GAIT, "Turn Rate", int(_gaitTurnMaxDegS))
     _marsMenu.set_value(MenuCategory.GAIT, "Cycle Time", int(_gaitCycleMs))
     _marsMenu.set_value(MenuCategory.INFO, "Ctrl Version", f"{CONTROLLER_VERSION} b{CONTROLLER_BUILD}")
+    
+    # Safety display thresholds
+    _marsMenu.set_value(MenuCategory.SAFETY, "Volt Min", _safetyDisplayVoltMin)
+    _marsMenu.set_value(MenuCategory.SAFETY, "Volt Warn", _safetyDisplayVoltWarn)
+    _marsMenu.set_value(MenuCategory.SAFETY, "Volt Max", _safetyDisplayVoltMax)
+    _marsMenu.set_value(MenuCategory.SAFETY, "Temp Min", _safetyDisplayTempMin)
+    _marsMenu.set_value(MenuCategory.SAFETY, "Temp Max", _safetyDisplayTempMax)
+    
+    # Low battery protection settings
+    _marsMenu.set_value(MenuCategory.SAFETY, "LowBatt Prot", 1 if _lowBatteryEnabled else 0)
+    _marsMenu.set_value(MenuCategory.SAFETY, "Volt Critical", _lowBatteryVoltCritical)
+    _marsMenu.set_value(MenuCategory.SAFETY, "Volt Recovery", _lowBatteryRecoveryVolt)
+    _marsMenu.set_value(MenuCategory.SAFETY, "LowBatt Status", "OK")
     
     # Apply saved theme/palette
     _marsMenu.theme = _menuTheme
@@ -2883,6 +4006,17 @@ def update_menu_info(ctrl: Controller | None = None):
     _marsMenu.set_value(MenuCategory.SAFETY, "Soft Limits", "On" if soft_limits else "Off")
     _marsMenu.set_value(MenuCategory.SAFETY, "Collision", "On" if collision else "Off")
     _marsMenu.set_value(MenuCategory.SAFETY, "Temp Lock", f"{int(temp_c)}C")
+    
+    # Low battery protection status
+    if _lowBatteryTriggered:
+        lowbatt_status = f"SHUT {_lowBatteryFilteredVoltage:.1f}V"
+    elif _lowBatteryFilteredVoltage > 0 and _lowBatteryFilteredVoltage < _lowBatteryVoltCritical + 0.5:
+        lowbatt_status = f"LOW {_lowBatteryFilteredVoltage:.1f}V"
+    elif _lowBatteryFilteredVoltage > 0:
+        lowbatt_status = f"OK {_lowBatteryFilteredVoltage:.1f}V"
+    else:
+        lowbatt_status = "---"
+    _marsMenu.set_value(MenuCategory.SAFETY, "LowBatt Status", lowbatt_status)
 
     # PID/IMP/EST tabs: mirror latest LIST snapshots (if available)
     if _pid_state.get("enabled") is not None:
@@ -2974,6 +4108,9 @@ def update_menu_info(ctrl: Controller | None = None):
             _marsMenu.set_value(MenuCategory.IMU, "LVL Corrections", corr_str)
         else:
             _marsMenu.set_value(MenuCategory.IMU, "LVL Corrections", "---")
+        # Motion lean settings
+        _marsMenu.set_value(MenuCategory.IMU, "Motion Lean", 1 if _leanEnabled else 0)
+        _marsMenu.set_value(MenuCategory.IMU, "Lean Max", _leanMaxDeg)
     else:
         _marsMenu.set_value(MenuCategory.IMU, "Status", "Disabled")
         _marsMenu.set_value(MenuCategory.IMU, "Roll", None)
@@ -2988,10 +4125,80 @@ def update_menu_info(ctrl: Controller | None = None):
         _marsMenu.set_value(MenuCategory.IMU, "Max Corr", _levelingMaxCorrMm)
         _marsMenu.set_value(MenuCategory.IMU, "Tilt Limit", _levelingTiltLimitDeg)
         _marsMenu.set_value(MenuCategory.IMU, "LVL Corrections", "---")
+        # Motion lean defaults when IMU disabled (lean works without IMU)
+        _marsMenu.set_value(MenuCategory.IMU, "Motion Lean", 1 if _leanEnabled else 0)
+        _marsMenu.set_value(MenuCategory.IMU, "Lean Max", _leanMaxDeg)
+
+    # ToF tab: update live sensor data
+    # Settings (editable) - sync from config variables
+    _marsMenu.set_value(MenuCategory.TOF, "Enabled", 1 if _tofEnabled else 0)
+    _tof_grid_size = 8 if _tofResolution >= 64 else 4
+    _marsMenu.set_value(MenuCategory.TOF, "Resolution", 1 if _tof_grid_size == 8 else 0)  # 0=4x4, 1=8x8
+    _marsMenu.set_value(MenuCategory.TOF, "Frame Rate", int(_tofHz))
+    _marsMenu.set_value(MenuCategory.TOF, "I2C Bus", _tofBus)
+    _marsMenu.set_value(MenuCategory.TOF, "Sensors", len(_tofSensors))
+    # Sensor info (first sensor only for now; dynamic sensors would need menu rebuild)
+    if _tofSensors:
+        _marsMenu.set_value(MenuCategory.TOF, "Sensor 1 Name", _tofSensors[0][0])
+        _marsMenu.set_value(MenuCategory.TOF, "Sensor 1 Addr", _tofSensors[0][1])
+    else:
+        _marsMenu.set_value(MenuCategory.TOF, "Sensor 1 Name", "---")
+        _marsMenu.set_value(MenuCategory.TOF, "Sensor 1 Addr", 0x29)
+    
+    # Live data (read-only)
+    if _tofThread is not None:
+        tof_connected = _tofThread.connected
+        _marsMenu.set_value(MenuCategory.TOF, "Status", "Connected" if tof_connected else "Disconnected")
+        if tof_connected:
+            tof_frame = _tofThread.get_frame()
+            # Find closest obstacle
+            closest_dist, closest_sensor = tof_frame.get_closest_obstacle()
+            if closest_dist > 0:
+                _marsMenu.set_value(MenuCategory.TOF, "Closest", closest_dist)
+            else:
+                _marsMenu.set_value(MenuCategory.TOF, "Closest", "---")
+            # Get first sensor frame for temperature
+            sensor_names = _tofThread.get_sensor_names()
+            sensor_name = sensor_names[0] if sensor_names else None
+            if sensor_name and sensor_name in tof_frame.sensors:
+                sensor_frame = tof_frame.sensors[sensor_name]
+                _marsMenu.set_value(MenuCategory.TOF, "Temperature", sensor_frame.temperature_c)
+            else:
+                _marsMenu.set_value(MenuCategory.TOF, "Temperature", None)
+        else:
+            _marsMenu.set_value(MenuCategory.TOF, "Closest", "---")
+            _marsMenu.set_value(MenuCategory.TOF, "Temperature", None)
+        _marsMenu.set_value(MenuCategory.TOF, "Read Count", _tofThread.read_count)
+        _marsMenu.set_value(MenuCategory.TOF, "Error Count", _tofThread.error_count)
+    else:
+        _marsMenu.set_value(MenuCategory.TOF, "Status", "Disabled")
+        _marsMenu.set_value(MenuCategory.TOF, "Read Count", 0)
+        _marsMenu.set_value(MenuCategory.TOF, "Error Count", 0)
+        _marsMenu.set_value(MenuCategory.TOF, "Closest", "---")
+        _marsMenu.set_value(MenuCategory.TOF, "Temperature", None)
+
+    # === Initialize Autonomy menu values ===
+    _marsMenu.set_value(MenuCategory.AUTO, "Autonomy", 1 if _autonomyEnabled else 0)
+    _marsMenu.set_value(MenuCategory.AUTO, "Obstacle Avoid", 1 if _autonomyObstacleAvoidance else 0)
+    _marsMenu.set_value(MenuCategory.AUTO, "Cliff Detect", 1 if _autonomyCliffDetection else 0)
+    _marsMenu.set_value(MenuCategory.AUTO, "Caught Foot", 1 if _autonomyCaughtFootRecovery else 0)
+    _marsMenu.set_value(MenuCategory.AUTO, "Patrol", 1 if _autonomyPatrol else 0)
+    _marsMenu.set_value(MenuCategory.AUTO, "Stop Dist", _autonomyStopDistMm)
+    _marsMenu.set_value(MenuCategory.AUTO, "Slow Dist", _autonomySlowDistMm)
+    _marsMenu.set_value(MenuCategory.AUTO, "Cliff Thresh", _autonomyCliffThresholdMm)
+    _marsMenu.set_value(MenuCategory.AUTO, "Snag Error", _autonomySnagErrorDeg)
+    _marsMenu.set_value(MenuCategory.AUTO, "Snag Timeout", _autonomySnagTimeoutMs)
+    _marsMenu.set_value(MenuCategory.AUTO, "Recovery Lift", _autonomyRecoveryLiftMm)
+    _marsMenu.set_value(MenuCategory.AUTO, "Patrol Time", int(_autonomyPatrolDurationS))
+    _marsMenu.set_value(MenuCategory.AUTO, "Turn Interval", int(_autonomyTurnIntervalS))
+    _marsMenu.set_value(MenuCategory.AUTO, "Status", "Off" if not _autonomyEnabled else "Idle")
+    _marsMenu.set_value(MenuCategory.AUTO, "Active Behavior", "---")
+    _marsMenu.set_value(MenuCategory.AUTO, "Last Action", "---")
 
 # Create and start display thread if enabled
 _displayThread = None
 if _displayThreadEnabled:
+    _startupSplash.log("Starting display thread...")
     _displayThread = DisplayThread(_disp, _eyes, _menu, target_hz=_displayThreadHz,
                                    look_range_x=_eyeLookRangeX, look_range_y=_eyeLookRangeY,
                                    blink_frame_divisor=_blinkFrameDivisor)
@@ -3004,13 +4211,27 @@ if _displayThreadEnabled:
                                 safety_active=_safety_state.get("lockout", False),
                                 safety_text=get_safety_overlay_state()[1])
     _displayThread.set_mars_menu(_marsMenu)
+    _displayThread.set_safety_thresholds(
+        volt_min=_safetyDisplayVoltMin,
+        volt_warn=_safetyDisplayVoltWarn,
+        volt_max=_safetyDisplayVoltMax,
+        temp_min=_safetyDisplayTempMin,
+        temp_max=_safetyDisplayTempMax,
+    )
+    _displayThread.set_show_battery_icon(_showBatteryIcon)
+    _displayThread.set_engineering_lcars(_engineeringLcars)
+    _displayThread.set_lcars_palette(_menuPalette)
     _displayThread.start()
+    _startupSplash.log(f"Display thread OK ({_displayThreadHz} Hz)", "GREEN")
     if _verbose:
         print(f"Display thread started at {_displayThreadHz} Hz (blink divisor: {_blinkFrameDivisor})", end="\r\n")
+else:
+    _startupSplash.log("Display thread disabled", "YELLOW")
 
 # Create and start IMU thread if enabled
 _imuThread = None
 if _imuEnabled:
+    _startupSplash.log("Initializing IMU...")
     _imuConfig = ImuConfig(
         enabled=True,
         i2c_bus=_imuBus,
@@ -3026,18 +4247,24 @@ if _imuEnabled:
     # Give it time to connect - BNO085 initialization can take ~1.5s
     for _wait_i in range(20):  # Up to 2 seconds
         time.sleep(0.1)
+        _startupSplash.log(".", append=True)  # Progress dots
         if _imuThread.connected:
             break
         if _imuThread.last_error:
             break
     if _imuThread.connected:
+        _startupSplash.log(f"IMU OK ({_imuHz} Hz)", "GREEN")
         if _verbose:
             print(f"IMU thread started at {_imuHz} Hz (bus {_imuBus}, addr 0x{_imuAddress:02X})", end="\r\n")
     else:
+        _startupSplash.log(f"IMU not detected: {_imuThread.last_error}", "RED")
         if _verbose:
             print(f"IMU not detected (bus {_imuBus}, addr 0x{_imuAddress:02X}): {_imuThread.last_error}", end="\r\n")
+else:
+    _startupSplash.log("IMU disabled", "YELLOW")
 
 # Initialize body leveling state
+_startupSplash.log("Initializing leveling...")
 _levelingConfig = LevelingConfig(
     enabled=_levelingEnabled,
     gain=_levelingGain,
@@ -3046,8 +4273,12 @@ _levelingConfig = LevelingConfig(
     pitch_offset_deg=_levelingPitchOffset,
     roll_offset_deg=_levelingRollOffset,
     tilt_limit_deg=_levelingTiltLimitDeg,
+    lean_enabled=_leanEnabled,
+    lean_max_deg=_leanMaxDeg,
+    lean_filter_alpha=_leanFilterAlpha,
 )
 _levelingState = init_leveling(_levelingConfig)
+_startupSplash.log("Leveling OK", "GREEN")
 
 
 def _on_tilt_safety_triggered(pitch_deg: float, roll_deg: float) -> None:
@@ -3064,6 +4295,72 @@ def _on_tilt_safety_triggered(pitch_deg: float, roll_deg: float) -> None:
 
 # Set up tilt safety callback
 _levelingState.set_tilt_safety_callback(_on_tilt_safety_triggered)
+
+# Create and start ToF thread if enabled
+_tofThread = None
+if _tofEnabled:
+    _startupSplash.log("Initializing ToF sensors...")
+    # Build sensor config list
+    _tof_sensor_configs = [ToFSensorConfig(name=name, i2c_address=addr) for name, addr in _tofSensors]
+    _tofConfig = ToFConfig(
+        i2c_bus=_tofBus,
+        target_hz=_tofHz,
+        resolution=_tofResolution,
+        sensors=_tof_sensor_configs,
+    )
+    _tofThread = ToFThread(_tofConfig)
+    # Initialize sensors on main thread (VL53L5CX ctypes library segfaults if init from thread)
+    _tof_grid_size = 8 if _tofResolution >= 64 else 4
+    if _verbose:
+        print(f"ToF sensors initializing (bus {_tofBus}, resolution {_tof_grid_size}x{_tof_grid_size})...", end="\r\n")
+        for name, addr in _tofSensors:
+            print(f"  {name}: 0x{addr:02X}", end="\r\n")
+    _tof_count = _tofThread.init_sensors()
+    if _tof_count > 0:
+        _tofThread.start()
+        _startupSplash.log(f"ToF OK ({_tof_count} sensor(s) @ {_tofHz} Hz)", "GREEN")
+        if _verbose:
+            print(f"ToF thread started at {_tofHz} Hz ({_tof_count} sensor(s))", end="\r\n")
+    else:
+        err_msg = _tofThread.last_error or "unknown error"
+        _startupSplash.log(f"ToF not detected: {err_msg}", "RED")
+        if _verbose:
+            print(f"ToF not detected: {err_msg}", end="\r\n")
+else:
+    _startupSplash.log("ToF sensors disabled", "YELLOW")
+
+# --------------------------------------------------------------------------------------------------
+# Point Cloud Server: WebSocket server for 3D visualization (SLAM prototype)
+# --------------------------------------------------------------------------------------------------
+if _pointcloudEnabled and PointCloudServer is not None:
+    try:
+        from pointcloud_server import PointCloudConfig as PCConfig
+        _pc_config = PCConfig(
+            port=_pointcloudPort,
+            http_port=_pointcloudHttpPort,
+            stream_rate_hz=_pointcloudHz,
+            accumulate_enabled=_pointcloudAccumulate,
+            max_points=_pointcloudMaxPoints,
+            voxel_size_mm=_pointcloudVoxelMm,
+        )
+        # Configure ToF sensor mount (front sensor, centered, tilted down 15 degrees)
+        # Format: (x_mm, y_mm, z_mm, roll_deg, pitch_deg, yaw_deg)
+        _pc_config.sensor_mounts["front"] = (0.0, 60.0, 40.0, 0.0, -15.0, 0.0)
+        _pointcloudServer = PointCloudServer(_pc_config)
+        _pointcloudServer.start()
+        _startupSplash.log(f"PointCloud http://:{_pointcloudHttpPort}", "GREEN")
+        if _verbose:
+            print(f"Point cloud viewer: http://0.0.0.0:{_pointcloudHttpPort}/", end="\r\n")
+            print(f"Point cloud WebSocket: ws://0.0.0.0:{_pointcloudPort}", end="\r\n")
+    except Exception as e:
+        _startupSplash.log(f"PointCloud failed: {e}", "RED")
+        if _verbose:
+            print(f"Point cloud server failed: {e}", end="\r\n")
+        _pointcloudServer = None
+elif _pointcloudEnabled:
+    _startupSplash.log("PointCloud: module not found", "YELLOW")
+else:
+    pass  # Point cloud disabled in config
 
 # --------------------------------------------------------------------------------------------------
 # Command helper: centralizes Teensy command emission (newline termination + throttling/dedup)
@@ -3139,6 +4436,30 @@ def is_imu_connected() -> bool:
     return _imuThread is not None and _imuThread.connected
 
 
+def _start_standing_gait(params: GaitParams = None) -> None:
+    """Start a standing gait for leveling support.
+    
+    Unlike firmware STAND, this continuously sends FEET commands
+    so body leveling corrections can be applied.
+    """
+    global _gaitActive, _gaitEngine, _savedGaitWidthMm, _gaitBaseYMm, _savedGaitLiftMm, _verbose
+    if _gaitEngine is not None:
+        _gaitEngine.stop()
+    # Force MODE IDLE to ensure FEET commands are accepted by firmware
+    send_cmd(b'MODE IDLE', force=True)
+    if params is None:
+        params = GaitParams(
+            base_x_mm=_savedGaitWidthMm,
+            base_y_mm=_gaitBaseYMm,
+            lift_mm=_savedGaitLiftMm,
+        )
+    _gaitEngine = StandingGait(params)
+    _gaitEngine.start()
+    _gaitActive = True
+    if _verbose:
+        print("Standing gait started (leveling enabled)", end="\r\n")
+
+
 def send_feet_cmd(feet_cmd: bytes, force: bool = False) -> bool:
     """Send FEET command with optional tolerance filtering and body leveling.
     Applies IMU-based Z corrections if leveling is enabled.
@@ -3147,22 +4468,65 @@ def send_feet_cmd(feet_cmd: bytes, force: bool = False) -> bool:
     Set force=True to bypass tolerance check (e.g., for initial/final positions).
     Returns True if command was actually transmitted."""
     global _lastFeetPositions, _feetToleranceMm, _lastFeetSendTime, _feetMaxSkipMs
-    global _levelingState, _imuThread
+    global _levelingState, _imuThread, _gaitEngine, _gaitActive
     
     now = time.monotonic()
     time_since_last = (now - _lastFeetSendTime) * 1000.0  # ms
     
-    # Apply body leveling if enabled and IMU is connected
+    # Apply body leveling and motion lean if enabled
     cmd_to_send = feet_cmd
-    if _levelingState is not None and _levelingState.config.enabled:
-        if _imuThread is not None and _imuThread.connected:
-            roll_deg, pitch_deg, _ = _imuThread.get_orientation()
-            # Update leveling state with filtered orientation (also checks tilt safety)
-            _levelingState.update(pitch_deg, roll_deg)
-            # Only apply corrections if tilt is safe
-            if _levelingState.is_tilt_safe():
+    global _levelingDebugCount
+    _levelingDebugCount += 1
+    
+    # Check leveling conditions
+    leveling_state_ok = _levelingState is not None
+    leveling_enabled = leveling_state_ok and _levelingState.config.enabled
+    lean_enabled = leveling_state_ok and _levelingState.config.lean_enabled
+    imu_ok = _imuThread is not None and _imuThread.connected
+    
+    # Update motion lean based on gait direction (works without IMU)
+    if lean_enabled and _gaitActive and _gaitEngine is not None:
+        heading_deg = getattr(_gaitEngine.params, 'heading_deg', 0.0)
+        speed_scale = getattr(_gaitEngine.params, 'speed_scale', 0.0)
+        _levelingState.update_motion_lean(heading_deg, speed_scale)
+    elif leveling_state_ok:
+        # Not moving - decay lean to zero
+        _levelingState.update_motion_lean(0.0, 0.0)
+    
+    if leveling_enabled and imu_ok:
+        roll_deg, pitch_deg, _ = _imuThread.get_orientation()
+        # Update leveling state with filtered orientation (also checks tilt safety)
+        _levelingState.update(pitch_deg, roll_deg)
+        # Only apply corrections if tilt is safe
+        if _levelingState.is_tilt_safe():
+            # Use combined corrections (leveling + lean)
+            if lean_enabled:
+                corrections = _levelingState.compute_combined_corrections()
+            else:
                 corrections = _levelingState.compute_corrections()
-                cmd_to_send = leveling_module.build_corrected_feet_cmd(feet_cmd, corrections)
+            cmd_to_send = leveling_module.build_corrected_feet_cmd(feet_cmd, corrections)
+            # Debug: show roll/pitch and max correction applied
+            if _levelingDebugCount % 100 == 0:
+                max_corr = max(abs(c) for c in corrections)
+                lean_p, lean_r = _levelingState.get_lean_offset()
+                if lean_enabled and (abs(lean_p) > 0.1 or abs(lean_r) > 0.1):
+                    print(f"[LVL] R:{roll_deg:+.1f}° P:{pitch_deg:+.1f}° lean:P{lean_p:+.1f}°/R{lean_r:+.1f}° max:{max_corr:.1f}mm", end="\r\n")
+                else:
+                    print(f"[LVL] R:{roll_deg:+.1f}° P:{pitch_deg:+.1f}° max_corr:{max_corr:.1f}mm", end="\r\n")
+        elif _levelingDebugCount % 50 == 0:
+            print(f"[LVL] TILT UNSAFE - skipping corrections", end="\r\n")
+    elif lean_enabled and leveling_state_ok:
+        # Lean only (no IMU/leveling) - still apply lean corrections
+        corrections = _levelingState.compute_lean_corrections()
+        if any(abs(c) > 0.1 for c in corrections):
+            cmd_to_send = leveling_module.build_corrected_feet_cmd(feet_cmd, corrections)
+            if _levelingDebugCount % 100 == 0:
+                lean_p, lean_r = _levelingState.get_lean_offset()
+                max_corr = max(abs(c) for c in corrections)
+                print(f"[LEAN] P:{lean_p:+.1f}° R:{lean_r:+.1f}° max:{max_corr:.1f}mm", end="\r\n")
+    elif _levelingDebugCount % 250 == 0:
+        # Periodic diagnostic if leveling not active
+        print(f"[LVL] OFF: state={leveling_state_ok} en={leveling_enabled} lean={lean_enabled} imu={imu_ok}", end="\r\n")
     
     if not force and time_since_last < _feetMaxSkipMs:
         positions = _parse_feet_positions(cmd_to_send)
@@ -3397,14 +4761,31 @@ def phase_teensy_connection(ctrl):
 def phase_gamepad_connection(ctrl):
     """Phase 3: Manage Xbox controller connection.
     
+    Supports two modes:
+    - Socket mode (preferred): Connect to joy_controller.py daemon via Unix socket
+    - Legacy mode (fallback): Direct evdev connection to Xbox controller
+    
     Args:
         ctrl: Controller instance
     """
-    if ctrl.retryCount == 0 and ctrl.controller is None:
-        ctrl.controller = testForGamePad(ctrl.verbose)
-        ctrl.retryCount = 100
-    elif ctrl.controller is None:
-        ctrl.retryCount -= 1
+    global _joyClient, _useJoySocket
+    
+    if ctrl.useJoySocket:
+        # Socket mode: connect to joy_controller daemon
+        if ctrl.joyClient is None:
+            ctrl.joyClient = JoyClient(verbose=ctrl.verbose)
+            _joyClient = ctrl.joyClient  # Update global reference
+        
+        # Attempt connection (non-blocking, rate-limited internally)
+        if not ctrl.joyClient.connected:
+            ctrl.joyClient.connect()
+    else:
+        # Legacy evdev mode: direct Xbox controller access
+        if ctrl.retryCount == 0 and ctrl.controller is None:
+            ctrl.controller = testForGamePad(ctrl.verbose)
+            ctrl.retryCount = 100
+        elif ctrl.controller is None:
+            ctrl.retryCount -= 1
 
 
 def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
@@ -3438,6 +4819,12 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
             robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if (ctrl.state and len(ctrl.state) > IDX_ROBOT_ENABLED) else True
         safety_active, safety_text = get_safety_overlay_state()
         
+        # Determine controller connection status (socket mode or legacy)
+        if ctrl.useJoySocket:
+            controller_connected = (ctrl.joyClient is not None and ctrl.joyClient.xbox_connected)
+        else:
+            controller_connected = (ctrl.controller is not None)
+        
         # Update thread state - it handles rendering at its own rate
         displayThread.update_state(
             servo=ctrl.servo, legs=ctrl.legs, state=ctrl.state,
@@ -3445,7 +4832,7 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
             force_update=ctrl.forceDisplayUpdate, verbose=ctrl.verbose,
             look_x=look_x, look_y=look_y,
             teensy_connected=(ctrl.teensy is not None),
-            controller_connected=(ctrl.controller is not None),
+            controller_connected=controller_connected,
                 telemetry_stale=telemetry_stale,
                 robot_enabled=robot_enabled,
                 safety_active=safety_active,
@@ -3461,7 +4848,30 @@ def phase_display_update(ctrl, displayThread, gaitEngine, gaitActive):
             yaw=imu_frame.yaw_deg,
         )
         
+        # Update ToF state for display (engineering view)
+        if _tofThread is not None and _tofThread.connected:
+            tof_frame = _tofThread.get_frame()
+            # Get first sensor's data (typically "front")
+            sensor_names = list(tof_frame.sensors.keys())
+            if sensor_names:
+                sensor_frame = tof_frame.sensors[sensor_names[0]]
+                displayThread.update_tof(
+                    connected=sensor_frame.valid,
+                    distances=sensor_frame.distance_mm,
+                    statuses=sensor_frame.status,
+                )
+            else:
+                displayThread.update_tof(connected=False)
+        else:
+            displayThread.update_tof(connected=False)
+        
+        # Update display mode
+        displayThread.set_display_mode(_displayMode)
+        
         ctrl.forceDisplayUpdate = False
+        
+        # Show mirror window from main thread (cv2 GUI requires main thread on Linux)
+        show_mirror_window(force_update_callback=lambda: setattr(ctrl, 'forceDisplayUpdate', True))
     elif not gaitActive:
         # Direct update when thread not running and gait not active
         ctrl.update_display()
@@ -3605,7 +5015,7 @@ def phase_keyboard_input(ctrl):
             _autoDisableAt = time.time() + _autoDisableS
             ctrl.autoDisableAt = _autoDisableAt
     
-    elif key in (ord('s'), ord('S')):  # Stand posture
+    elif key in (ord('s'), ord('S')):  # Stand posture (gait-based for leveling)
         if _safety_state.get("lockout", False):
             if _verbose:
                 print("\nSTAND blocked: firmware safety lockout is active.", end="\r\n")
@@ -3614,29 +5024,42 @@ def phase_keyboard_input(ctrl):
                            else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
             if not enabled_now:
                 ensure_enabled()
-            send_cmd(b'STAND', force=True)
-            _autoDisableAt = time.time() + _autoDisableS
-            ctrl.autoDisableAt = _autoDisableAt
+            # Use standing gait instead of firmware STAND command
+            _start_standing_gait()
     
-    elif key in (ord('n'), ord('N')):  # Menu toggle (MARS menu)
-        # Mirror Start-button behavior: only allow menu when disabled & not in motion
+    elif key in (ord('n'), ord('N')):  # Cycle display mode (EYES → ENGINEERING → MENU)
+        global _displayMode
+        # Get robot state for menu safety check
         if getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid:
             robot_enabled = ctrl.system_telem.robot_enabled
         else:
             robot_enabled = (_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False
-        if _marsMenu.visible:
-            _marsMenu.hide()
-            ctrl.forceDisplayUpdate = True
-            if _verbose:
-                print("\nMARS menu closed (keyboard 'n')", end="\r\n")
-        elif not robot_enabled and not _gaitActive:
+        
+        # Cycle: EYES → ENGINEERING → MENU → EYES (wrap)
+        current_mode = _displayMode
+        next_mode = DisplayMode((current_mode + 1) % DisplayMode.COUNT)
+        
+        # If trying to enter MENU mode, check safety
+        if next_mode == DisplayMode.MENU:
+            if robot_enabled or _gaitActive:
+                # Skip menu, go to EYES instead
+                next_mode = DisplayMode.EYES
+                if _verbose:
+                    print("\nMenu blocked: disable robot first", end="\r\n")
+        
+        # Apply mode change
+        _displayMode = next_mode
+        
+        # Sync menu visibility with mode
+        if _displayMode == DisplayMode.MENU:
             _marsMenu.show()
-            ctrl.forceDisplayUpdate = True
-            if _verbose:
-                print("\nMARS menu opened (keyboard 'n')", end="\r\n")
         else:
-            if _verbose:
-                print("\nMARS menu blocked: disable robot first", end="\r\n")
+            _marsMenu.hide()
+        
+        ctrl.forceDisplayUpdate = True
+        if _verbose:
+            mode_names = ["EYES", "ENGINEERING", "MENU"]
+            print(f"\nDisplay mode: {mode_names[_displayMode]} (keyboard 'n')", end="\r\n")
     
     elif key in (ord('m'), ord('M')):  # Mirror toggle
         _mirrorDisplay = not _mirrorDisplay
@@ -3751,7 +5174,262 @@ def phase_keyboard_input(ctrl):
             print("\n'x' key pressed, exiting loop", end="\r\n")
         return False
     
+    elif key in (ord('a'), ord('A')):  # Toggle autonomy mode
+        _toggle_autonomy(verbose=_verbose)
+    
     return True
+
+
+def _toggle_autonomy(verbose: bool = True) -> None:
+    """Toggle autonomy mode on/off.
+    
+    Used by keyboard 'a' key and Back+A gamepad combo.
+    
+    Args:
+        verbose: Print status messages if True
+    """
+    global _autonomyEnabled, _behaviorArbiter
+    _autonomyEnabled = not _autonomyEnabled
+    if _autonomyEnabled:
+        # Initialize arbiter if not already done
+        if _behaviorArbiter is None:
+            _behaviorArbiter = _init_behavior_arbiter()
+        if verbose:
+            print(f"\nAUTONOMY MODE ENABLED ({_behaviorArbiter.behavior_count} behaviors)", end="\r\n")
+    else:
+        if verbose:
+            print("\nAUTONOMY MODE DISABLED", end="\r\n")
+
+
+def _disable_autonomy_if_active(verbose: bool = True) -> None:
+    """Disable autonomy mode if currently active.
+    
+    Called when ABXY buttons are pressed to give user manual control.
+    
+    Args:
+        verbose: Print status message if True and autonomy was active
+    """
+    global _autonomyEnabled
+    if _autonomyEnabled:
+        _autonomyEnabled = False
+        if verbose:
+            print("  (Autonomy auto-disabled)", end="\r\n")
+
+
+def _init_behavior_arbiter():
+    """Initialize behavior arbiter with configured behaviors.
+    
+    Returns:
+        BehaviorArbiter: Configured arbiter instance
+    """
+    arbiter = BehaviorArbiter()
+    
+    # Add behaviors based on config enables
+    if _autonomyCliffDetection:
+        arbiter.add_behavior(CliffDetection(
+            cliff_threshold_mm=_autonomyCliffThresholdMm,
+            normal_floor_mm=200,  # Will be calibrated
+            priority=90,
+            enabled=True
+        ))
+    
+    if _autonomyCaughtFootRecovery:
+        arbiter.add_behavior(CaughtFootRecovery(
+            position_error_threshold_deg=_autonomySnagErrorDeg,
+            timeout_ms=_autonomySnagTimeoutMs,
+            recovery_lift_mm=_autonomyRecoveryLiftMm,
+            max_attempts=_autonomyMaxRecoveryAttempts,
+            priority=85,
+            enabled=True
+        ))
+    
+    if _autonomyObstacleAvoidance:
+        arbiter.add_behavior(ObstacleAvoidance(
+            stop_distance_mm=_autonomyStopDistMm,
+            slow_distance_mm=_autonomySlowDistMm,
+            priority=80,
+            enabled=True
+        ))
+    
+    if _autonomyPatrol:
+        arbiter.add_behavior(Patrol(
+            turn_interval_s=_autonomyTurnIntervalS,
+            patrol_duration_s=_autonomyPatrolDurationS,
+            priority=20,
+            enabled=True
+        ))
+    
+    return arbiter
+
+
+def _gather_sensor_state(ctrl):
+    """Gather current sensor state for behavior engine.
+    
+    Returns:
+        dict: Sensor state for behavior compute() methods
+    """
+    state = {
+        'tof_connected': False,
+        'tof_distances': [],
+        'tof_statuses': [],
+        'servo_positions': [],
+        'servo_targets': [],
+        'gait_active': _gaitActive,
+    }
+    
+    # ToF data
+    if _tofThread is not None and _tofThread.connected:
+        tof_frame = _tofThread.get_frame()
+        if tof_frame is not None:
+            state['tof_connected'] = True
+            # Get first sensor's data (front)
+            sensor_names = _tofThread.get_sensor_names()
+            if sensor_names and sensor_names[0] in tof_frame.sensors:
+                sensor_data = tof_frame.sensors[sensor_names[0]]
+                state['tof_distances'] = list(sensor_data.distance_mm)
+                state['tof_statuses'] = list(sensor_data.status)
+    
+    # Servo positions from telemetry
+    if hasattr(ctrl, 'joint_telem') and ctrl.joint_telem.valid:
+        angles = ctrl.joint_telem.angles_deg
+        if angles and len(angles) >= 18:
+            state['servo_positions'] = list(angles)
+    
+    # Servo targets from gait engine
+    if _gaitEngine is not None and hasattr(_gaitEngine, 'get_joint_targets'):
+        targets = _gaitEngine.get_joint_targets()
+        if targets and len(targets) >= 18:
+            state['servo_targets'] = list(targets)
+    
+    return state
+
+
+def phase_autonomy(ctrl):
+    """Phase 7b: Run autonomy behaviors and apply actions.
+    
+    Runs behavior arbiter to get navigation action, then modifies
+    gait parameters or stops motion as needed.
+    
+    Args:
+        ctrl: Controller instance
+    """
+    global _lastAutonomyAction, _gaitActive, _gaitEngine, _autonomyEnabled
+    
+    if not _autonomyEnabled or _behaviorArbiter is None:
+        _lastAutonomyAction = None
+        return
+    
+    # Gather sensor state
+    sensor_state = _gather_sensor_state(ctrl)
+    
+    # Run arbiter
+    action_req = _behaviorArbiter.update(sensor_state)
+    _lastAutonomyAction = action_req
+    
+    # Debug: show what autonomy is doing (only when action != CONTINUE)
+    if _verbose and action_req.action != Action.CONTINUE:
+        print(f"\n[Autonomy] {action_req.action.name}: {action_req.reason}", end="\r\n")
+    
+    # Apply action
+    if action_req.action == Action.EMERGENCY_STOP:
+        # Immediate stop and disable
+        if _gaitActive and _gaitEngine is not None:
+            _gaitEngine.stop()
+        _gaitActive = False
+        _autonomyEnabled = False
+        send_cmd(b'DISABLE', force=True)
+        if _verbose:
+            print(f"\n!!! AUTONOMY E-STOP: {action_req.reason}", end="\r\n")
+    
+    elif action_req.action == Action.STOP:
+        # Stop gait but remain enabled
+        if _gaitActive and _gaitEngine is not None:
+            _gaitEngine.stop()
+            _gaitActive = False
+            send_cmd(b'STAND', force=True)
+        if _verbose and action_req.reason:
+            print(f"\nAutonomy STOP: {action_req.reason}", end="\r\n")
+    
+    elif action_req.action == Action.BACK_UP:
+        # Set gait heading to reverse
+        if _gaitActive and _gaitEngine is not None:
+            _gaitEngine.params.heading_deg = 180.0
+            _gaitEngine.params.speed_scale = 0.5 * action_req.intensity
+    
+    elif action_req.action == Action.TURN_LEFT:
+        # Apply left turn via heading (strafe left = -90 deg)
+        if _gaitActive and _gaitEngine is not None:
+            _gaitEngine.params.heading_deg = -90.0 * action_req.intensity
+            _gaitEngine.params.speed_scale = 0.5
+    
+    elif action_req.action == Action.TURN_RIGHT:
+        # Apply right turn via heading (strafe right = +90 deg)
+        if _gaitActive and _gaitEngine is not None:
+            _gaitEngine.params.heading_deg = 90.0 * action_req.intensity
+            _gaitEngine.params.speed_scale = 0.5
+    
+    elif action_req.action == Action.SLOW_DOWN:
+        # Reduce speed
+        if _gaitActive and _gaitEngine is not None:
+            _gaitEngine.params.speed_scale = 0.3 + 0.5 * (1.0 - action_req.intensity)
+    
+    elif action_req.action == Action.WALK_FORWARD:
+        # Start/maintain forward walking
+        if not _gaitActive:
+            # Gait not running - need to start it
+            # Enable robot if needed
+            enabled_now = ctrl.system_telem.robot_enabled if ctrl.system_telem.valid else False
+            if not enabled_now:
+                ensure_enabled()
+            
+            # Create gait engine if needed
+            if _gaitEngine is None:
+                params = GaitParams(
+                    cycle_ms=_gaitCycleMs,
+                    base_x_mm=_savedGaitWidthMm,
+                    base_y_mm=_gaitBaseYMm,
+                    step_len_mm=_gaitStepLenMm,
+                    lift_mm=_savedGaitLiftMm,
+                    overlap_pct=_gaitOverlapPct,
+                    smoothing_alpha=_gaitSmoothingAlpha,
+                    bezier_p1_height=_bezierP1Height,
+                    bezier_p1_overshoot=_bezierP1Overshoot,
+                    bezier_p2_height=_bezierP2Height,
+                    bezier_p3_height=_bezierP3Height,
+                    bezier_p3_overshoot=_bezierP3Overshoot,
+                    speed_scale=action_req.intensity,
+                    heading_deg=0.0,  # Forward
+                )
+                _gaitEngine = TripodGait(params)
+                send_cmd(b'MODE IDLE', force=True)  # Switch Teensy to IDLE mode
+            
+            _gaitEngine.start()
+            _gaitActive = True
+            if _verbose:
+                print("\n[Autonomy] Started gait engine (WALK_FORWARD)", end="\r\n")
+        
+        # Set forward direction and speed (even if gait was already running)
+        if _gaitActive and _gaitEngine is not None:
+            _gaitEngine.params.heading_deg = 0.0  # Forward
+            _gaitEngine.params.speed_scale = action_req.intensity  # 0.7 from patrol
+    
+    elif action_req.action == Action.CONTINUE:
+        # Normal operation - check if we need to apply recovery data
+        if action_req.data and action_req.data.get('recovery_type') == 'lift':
+            # Caught foot recovery - increase step height
+            extra_lift = action_req.data.get('extra_lift_mm', 30.0)
+            if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
+                _gaitEngine.params.lift_mm += extra_lift
+                if _verbose:
+                    print(f"\nAutonomy: Lifting leg {action_req.data.get('leg')} +{extra_lift}mm", end="\r\n")
+    
+    # Update autonomy menu status
+    if _marsMenu is not None:
+        active_name = _behaviorArbiter.active_behavior_name or "---"
+        action_name = action_req.action.name if action_req.action != Action.CONTINUE else "OK"
+        _marsMenu.set_value(MenuCategory.AUTO, "Status", "Running" if _gaitActive else "Idle")
+        _marsMenu.set_value(MenuCategory.AUTO, "Active Behavior", active_name)
+        _marsMenu.set_value(MenuCategory.AUTO, "Last Action", action_name)
 
 
 def phase_gait_tick(ctrl, gaitEngine, gaitActive):
@@ -3843,14 +5521,62 @@ def phase_gait_tick(ctrl, gaitEngine, gaitActive):
             send_feet_cmd(feet_cmd)
 
 
+def phase_pointcloud(ctrl):
+    """Phase 7c: Push sensor data to point cloud server for 3D visualization.
+    
+    Feeds ToF frames and IMU orientation to the point cloud server which
+    transforms points to world frame and streams to connected WebSocket clients.
+    
+    Args:
+        ctrl: Controller instance
+    """
+    global _pointcloudServer, _tofThread, _imuThread
+    
+    if _pointcloudServer is None:
+        return
+    
+    # Update IMU orientation (world-frame rotation)
+    if _imuThread is not None and _imuThread.connected:
+        try:
+            roll, pitch, yaw = _imuThread.get_orientation()
+            if roll is not None and pitch is not None and yaw is not None:
+                _pointcloudServer.update_imu(roll, pitch, yaw)
+        except Exception:
+            pass  # Ignore IMU read errors
+    
+    # Push ToF frame data (converted to 3D points by server)
+    if _tofThread is not None and _tofThread.connected:
+        try:
+            tof_frame = _tofThread.get_frame()
+            if tof_frame is not None:
+                for sensor_name, sensor_data in tof_frame.sensors.items():
+                    _pointcloudServer.push_tof_frame(
+                        sensor_name=sensor_name,
+                        distances_mm=list(sensor_data.distance_mm),
+                        statuses=list(sensor_data.status),
+                    )
+        except Exception:
+            pass  # Ignore ToF read errors
+    
+    # Update velocity estimate from gait engine (for position integration)
+    if _gaitEngine is not None and hasattr(_gaitEngine, 'get_body_velocity'):
+        try:
+            vx, vy = _gaitEngine.get_body_velocity()
+            _pointcloudServer.update_velocity(vx, vy)
+        except Exception:
+            pass
+
+
 def phase_auto_disable(ctrl):
-    """Phase 8: Check and execute scheduled auto-disable.
+    """Phase 8: Check and execute scheduled auto-disable and low battery protection.
     
     Args:
         ctrl: Controller instance
     """
     global _autoDisableAt, _autoDisableReason, _autoDisableGen
+    global _lowBatteryTriggered, _lowBatteryFilteredVoltage
 
+    # --- Scheduled auto-disable (posture timeouts) ---
     if ctrl.autoDisableAt is not None and time.time() >= ctrl.autoDisableAt:
         # Only honor auto-disable if reason/generation still match and robot is enabled
         reason = getattr(ctrl, 'autoDisableReason', None)
@@ -3870,6 +5596,97 @@ def phase_auto_disable(ctrl):
         ctrl.autoDisableGen = gen
         _autoDisableAt = None
         _autoDisableReason = None
+
+    # --- Low battery protection ---
+    if not _lowBatteryEnabled:
+        return
+    
+    # Get current voltage from servo telemetry (average of all servos)
+    raw_voltage = 0.0
+    servo_telem = getattr(ctrl, 'servo_telem', None)
+    if servo_telem is not None:
+        v_sum = 0.0
+        v_count = 0
+        for s in servo_telem:
+            if s is None or not getattr(s, 'valid_s3', False):
+                continue
+            v = getattr(s, 'voltage_v', 0.0)
+            if v and v > 0:
+                v_sum += float(v)
+                v_count += 1
+        if v_count > 0:
+            raw_voltage = v_sum / v_count
+    elif ctrl.servo is not None:
+        # Fallback to legacy servo array
+        v_sum = 0.0
+        v_count = 0
+        for s in ctrl.servo:
+            if not s or len(s) < 1:
+                continue
+            v = s[0]
+            if v is None:
+                continue
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                continue
+            if v > 0:
+                v_sum += v
+                v_count += 1
+        if v_count > 0:
+            raw_voltage = v_sum / v_count
+    
+    # Apply low-pass filter (slower than display filter for stability)
+    if raw_voltage > 0:
+        if _lowBatteryFilteredVoltage <= 0:
+            _lowBatteryFilteredVoltage = raw_voltage  # Initialize
+        else:
+            _lowBatteryFilteredVoltage = (
+                _lowBatteryFilterAlpha * raw_voltage +
+                (1.0 - _lowBatteryFilterAlpha) * _lowBatteryFilteredVoltage
+            )
+    
+    # Check for voltage recovery (clears the triggered latch)
+    if _lowBatteryTriggered and _lowBatteryFilteredVoltage >= _lowBatteryRecoveryVolt:
+        _lowBatteryTriggered = False
+        if ctrl.verbose:
+            print(f"\n[LOW BATTERY] Voltage recovered to {_lowBatteryFilteredVoltage:.2f}V - protection cleared", end="\r\n")
+    
+    # Check for critical low battery
+    if (_lowBatteryFilteredVoltage > 0 and 
+        _lowBatteryFilteredVoltage < _lowBatteryVoltCritical and 
+        not _lowBatteryTriggered):
+        
+        # Check if robot is currently enabled
+        if getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid:
+            robot_enabled = ctrl.system_telem.robot_enabled
+        else:
+            robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if (ctrl.state and len(ctrl.state) > IDX_ROBOT_ENABLED) else False
+        
+        if robot_enabled and ctrl.teensy is not None:
+            # Set triggered latch (prevents re-enable until voltage recovers)
+            _lowBatteryTriggered = True
+            
+            print(f"\n[LOW BATTERY] Critical voltage {_lowBatteryFilteredVoltage:.2f}V < {_lowBatteryVoltCritical:.1f}V", end="\r\n")
+            print("[LOW BATTERY] Executing graceful shutdown: TUCK → DISABLE", end="\r\n")
+            
+            # Stop any active gait first
+            global _gaitActive
+            if _gaitActive:
+                _gaitActive = False
+                if _gaitEngine is not None:
+                    _gaitEngine.stop()
+            
+            # Execute TUCK posture for graceful kneel
+            send_cmd(b'TUCK', force=True)
+            
+            # Schedule DISABLE after TUCK settles (2 seconds)
+            ctrl.autoDisableAt = time.time() + 2.0
+            ctrl.autoDisableReason = "LOW_BATTERY"
+            ctrl.autoDisableGen += 1
+            _autoDisableAt = ctrl.autoDisableAt
+            _autoDisableReason = "LOW_BATTERY"
+            _autoDisableGen = ctrl.autoDisableGen
 
 
 def phase_loop_sleep(ctrl):
@@ -3905,6 +5722,118 @@ def phase_loop_sleep(ctrl):
         _nextTickTime = time.monotonic()
     
     return effectivePeriodMs
+
+
+# =============================================================================
+# THREE-LAYER ARCHITECTURE: Layer wrapper functions
+# =============================================================================
+# Based on robotics research (Firby/Gat Three-Layer, Brooks Subsumption) and
+# biological motor control (spinal reflexes → CPG → cortex hierarchy).
+#
+# Layer 1 (Controller): 166 Hz - Hardware I/O, safety reflexes, gait execution
+# Layer 2 (Sequencer):  ~30 Hz - Behaviors, input processing, display updates
+# Layer 3 (Deliberator): ~1 Hz - Planning, SLAM (future - async/on-demand)
+# =============================================================================
+
+def run_layer1_controller(ctrl):
+    """Layer 1: Controller (166 Hz) - runs every tick.
+    
+    Fast, reflexive operations that must happen every cycle:
+    - Timing synchronization
+    - Hardware I/O (Teensy serial)
+    - Safety checks (auto-disable, limits)
+    - Gait tick (CPG-like FEET generation)
+    
+    Returns:
+        tuple: (loop_dt, continue_running)
+    """
+    global _run
+    
+    # L1.1: Timing update
+    loop_dt, _ = phase_timing_update()
+    
+    # L1.2: Teensy connection and serial I/O
+    phase_teensy_connection(ctrl)
+    
+    # L1.3: Housekeeping (telemetry auto-start/retry)
+    ctrl.housekeeping()
+    
+    # L1.4: Telemetry debug (optional - fast, just printing)
+    if _debugTelemetry:
+        if ctrl.lastRawS1:
+            print(f"RAW S1: {ctrl.lastRawS1}", end="\r\n")
+            print(f"PARSED S1: {ctrl.lastParsedS1}", end="\r\n")
+        if ctrl.lastRawS2:
+            print(f"RAW S2: {ctrl.lastRawS2}", end="\r\n")
+            print(f"PARSED S2 ENABLES: {ctrl.lastParsedS2}", end="\r\n")
+    
+    # L1.5: Gait tick (CPG-like - generates FEET commands)
+    phase_gait_tick(ctrl, _gaitEngine, _gaitActive)
+    
+    # L1.6: Safety - auto-disable check
+    phase_auto_disable(ctrl)
+    
+    # L1.7: Point cloud server update (fast - just pushing data to async server)
+    phase_pointcloud(ctrl)
+    
+    return loop_dt, True
+
+
+def run_layer2_sequencer(ctrl):
+    """Layer 2: Sequencer (~30 Hz) - runs every N ticks.
+    
+    Behavioral operations that don't need 166 Hz updates:
+    - User input (gamepad, touch, keyboard)
+    - Behavior arbitration (obstacle avoidance, patrol, etc.)
+    - Display updates (eye animations, menu rendering)
+    - Gamepad connection management
+    
+    Returns:
+        bool: continue_running (False to exit main loop)
+    """
+    global _run
+    
+    # L2.1: Gamepad connection check
+    phase_gamepad_connection(ctrl)
+    
+    # L2.2: Gamepad polling
+    if ctrl.useJoySocket:
+        ctrl.poll_joy_client()
+    else:
+        ctrl.poll_gamepad()
+        if ctrl.requestExit:
+            if _verbose:
+                print("Exit requested via power button.", end="\r\n")
+            return False
+    
+    # L2.3: Touch input
+    phase_touch_input(_menu, ctrl)
+    
+    # L2.4: Keyboard input
+    if not phase_keyboard_input(ctrl):
+        return False
+    
+    # L2.5: Autonomy behaviors (arbiter)
+    phase_autonomy(ctrl)
+    
+    # L2.6: Display update (push state to display thread)
+    phase_display_update(ctrl, _displayThread, _gaitEngine, _gaitActive)
+    
+    return True
+
+
+def run_layer3_deliberator(ctrl):
+    """Layer 3: Deliberator (~1 Hz) - runs async/on-demand.
+    
+    Planning and world modeling operations (future):
+    - Waypoint navigation
+    - SLAM map updates
+    - Mission planning
+    
+    Currently a placeholder for future development.
+    """
+    # Future: Waypoint planning, SLAM updates
+    pass
 
 
 def sync_globals_to_ctrl(ctrl):
@@ -3979,97 +5908,142 @@ def sync_ctrl_to_globals(ctrl):
 # Main Loop Initialization
 #----------------------------------------------------------------------------------------------------------------------
 
-# start the main loop
-# Construct controller instance and mirror initial state
+# Signal handler for graceful termination (SIGTERM from joy_controller)
+def _sigterm_handler(signum, frame):
+    """Handle SIGTERM for graceful shutdown."""
+    global _run
+    _run = False
+    print("\n[CTRL] SIGTERM received, shutting down...", end="\r\n")
+
+signal.signal(signal.SIGTERM, _sigterm_handler)
+
+# Construct controller instance early so we can use its connection methods
+_startupSplash.log("Initializing controller...")
 ctrl = Controller.from_current_globals()
+_startupSplash.log("Controller initialized", "GREEN")
+
+# Attempt Teensy connection during startup
+_startupSplash.log("Connecting to Teensy...")
+_teensy_connected = False
+# Read serial port config (same logic as phase_teensy_connection)
+_teensy_port_override = _cfg.get('serial', 'port', fallback='').strip() if 'serial' in _cfg else ''
+_teensy_baud_override = _cfg.getint('serial', 'baud', fallback=1000000) if 'serial' in _cfg else 1000000
+for _attempt in range(10):  # Up to 1 second
+    if ctrl.connect_teensy(_teensy_port_override if _teensy_port_override else None, _teensy_baud_override):
+        _teensy = ctrl.teensy
+        _teensy_connected = True
+        _startupSplash.log("Teensy OK", "GREEN")
+        break
+    time.sleep(0.1)
+else:
+    _startupSplash.log("Teensy not found (will retry)", "YELLOW")
+
+# Attempt controller connection during startup
+_startupSplash.log("Connecting to controller...")
+_controller_connected = False
+if _useJoySocket:
+    ctrl.joyClient = JoyClient(verbose=_verbose)
+    for _attempt in range(10):  # Up to 1 second
+        ctrl.joyClient.connect()
+        if ctrl.joyClient.connected:
+            _controller_connected = True
+            _startupSplash.log("Controller OK (joy daemon)", "GREEN")
+            break
+        time.sleep(0.1)
+    else:
+        _startupSplash.log("Controller not found (will retry)", "YELLOW")
+else:
+    _controller = testForGamePad(_verbose)
+    if _controller is not None:
+        _controller_connected = True
+        _startupSplash.log("Controller OK (direct)", "GREEN")
+    else:
+        _startupSplash.log("Controller not found (will retry)", "YELLOW")
+
+# Start telemetry if Teensy connected
+_telemetry_started = False
+if _teensy_connected and ctrl.teensy is not None:
+    _startupSplash.log("Starting telemetry...")
+    try:
+        ctrl.teensy.write(b'Y 1\n')
+        ctrl.telemetryStartedByScript = True
+        ctrl.telemetryGraceDeadline = time.time() + _telemetryGraceSeconds
+        _telemetry_started = True
+        # Wait briefly for first telemetry
+        time.sleep(0.3)
+        _startupSplash.log("Telemetry started", "GREEN")
+    except Exception as e:
+        _startupSplash.log(f"Telemetry error: {e}", "RED")
+
+_startupSplash.finish(True)
+if _startupDelayS > 0:
+    time.sleep(_startupDelayS)  # Configurable pause to see startup messages
+
+# Switch to eyes display (display thread takes over from here)
+if _displayThread is not None:
+    _displayThread.update_state(servo=_servo, legs=_legs, state=_state,
+                                mirror=_mirrorDisplay, menu_state=_menuState, verbose=_verbose,
+                                teensy_connected=_teensy_connected,
+                                controller_connected=_controller_connected,
+                                telemetry_stale=(not _telemetry_started),
+                                robot_enabled=False,
+                                safety_active=False,
+                                safety_text="")
+    # Signal display thread that startup is complete - it can now render
+    _displayThread.set_startup_complete(True)
+else:
+    # Fallback: draw eyes directly if no display thread
+    UpdateDisplay(_disp, _eyes.display_image, None)
+
+# start the main loop
+# Sync controller state after startup connections
+sync_globals_to_ctrl(ctrl)
 # Initialize monotonic loop timing
 _nextTickTime = time.monotonic()
 # Initialize persistent keyboard input
 init_keyboard()
 
+# =========================================================================
+# THREE-LAYER ARCHITECTURE (Firby/Gat, 1990s adaptation)
+#   Layer 1 - Controller:  166 Hz  — reflexive, hardware I/O, safety
+#   Layer 2 - Sequencer:   ~33 Hz  — behaviors, input, display
+#   Layer 3 - Deliberator: ~1 Hz   — planning (future SLAM)
+# =========================================================================
+
 while _run:
 
-    # Phase 0: Sync globals to controller
     sync_globals_to_ctrl(ctrl)
-    
+    _layer2TickCount += 1
+    _layer3TickCount += 1
+
     try:
         #----------------------------------------------------------------------
-        # Phase 1: Timing update
+        # LAYER 1 — Controller (every tick, 166 Hz)
+        #   Timing, Teensy I/O, housekeeping, gait tick, safety, point cloud
         #----------------------------------------------------------------------
-        _loopdt, _ = phase_timing_update()
+        run_layer1_controller(ctrl)
 
         #----------------------------------------------------------------------
-        # Phase 2: Teensy connection and polling
+        # LAYER 2 — Sequencer (every _layer2Divisor ticks, ~33 Hz)
+        #   Gamepad connection/polling, touch, keyboard, autonomy, display
         #----------------------------------------------------------------------
-        phase_teensy_connection(ctrl)
+        if _layer2TickCount >= _layer2Divisor:
+            _layer2TickCount = 0
+            if not run_layer2_sequencer(ctrl):
+                _run = False
 
         #----------------------------------------------------------------------
-        # Phase 3: Xbox controller connection
+        # LAYER 3 — Deliberator (every _layer3Divisor ticks, ~1 Hz)
+        #   Future: path planning, SLAM integration, high-level decisions
         #----------------------------------------------------------------------
-        phase_gamepad_connection(ctrl)
+        if _layer3TickCount >= _layer3Divisor:
+            _layer3TickCount = 0
+            run_layer3_deliberator(ctrl)
 
         #----------------------------------------------------------------------
-        # Phase 3b: Housekeeping (telemetry auto-start/retry)
-        #----------------------------------------------------------------------
-        ctrl.housekeeping()
-
-        #----------------------------------------------------------------------
-        # Phase 3c: Telemetry debug (optional)
-        #----------------------------------------------------------------------
-        if _debugTelemetry:
-            if ctrl.lastRawS1:
-                print(f"RAW S1: {ctrl.lastRawS1}", end="\r\n")
-                print(f"PARSED S1: {ctrl.lastParsedS1}", end="\r\n")
-            if ctrl.lastRawS2:
-                print(f"RAW S2: {ctrl.lastRawS2}", end="\r\n")
-                print(f"PARSED S2 ENABLES: {ctrl.lastParsedS2}", end="\r\n")
-
-        #----------------------------------------------------------------------
-        # Phase 4: Gamepad polling (before display so button presses render immediately)
-        #----------------------------------------------------------------------
-        ctrl.poll_gamepad()
-
-        # Check for exit request from Controller (power button)
-        if ctrl.requestExit:
-            if _verbose:
-                print("Exit requested via power button.", end="\r\n")
-            _run = False
-            break
-
-        #----------------------------------------------------------------------
-        # Phase 6: Touch input (before display update so changes show immediately)
-        #----------------------------------------------------------------------
-        phase_touch_input(_menu, ctrl)
-
-        #----------------------------------------------------------------------
-        # Phase 6b: Display update (after touch so menu changes render immediately)
-        #----------------------------------------------------------------------
-        phase_display_update(ctrl, _displayThread, _gaitEngine, _gaitActive)
-
-        #----------------------------------------------------------------------
-        # Phase 7: Keyboard input
-        #----------------------------------------------------------------------
-        if not phase_keyboard_input(ctrl):
-            _run = False
-
-        #----------------------------------------------------------------------
-        # Phase 8: Gait engine tick
-        #----------------------------------------------------------------------
-        phase_gait_tick(ctrl, _gaitEngine, _gaitActive)
-
-        #----------------------------------------------------------------------
-        # Phase 9: Auto-disable check
-        #----------------------------------------------------------------------
-        phase_auto_disable(ctrl)
-
-        #----------------------------------------------------------------------
-        # Phase 10: Loop timing / sleep
+        # End of tick: sleep and sync state back
         #----------------------------------------------------------------------
         phase_loop_sleep(ctrl)
-
-        #----------------------------------------------------------------------
-        # Phase 11: Sync controller state back to globals
-        #----------------------------------------------------------------------
         sync_ctrl_to_globals(ctrl)
 
     except KeyboardInterrupt as keyExcept:
@@ -4091,6 +6065,16 @@ if _imuThread is not None and _imuThread.is_alive():
     if _verbose:
         print("Stopping IMU thread...", end="\r\n")
     _imuThread.stop()
+# Stop ToF thread
+if _tofThread is not None and _tofThread.is_alive():
+    if _verbose:
+        print("Stopping ToF thread...", end="\r\n")
+    _tofThread.stop()
+# Stop Point Cloud server
+if _pointcloudServer is not None:
+    if _verbose:
+        print("Stopping Point Cloud server...", end="\r\n")
+    _pointcloudServer.stop()
 # Restore terminal from curses FIRST (endwin() clears screen)
 cleanup_keyboard()
 # NOW print debug info so it persists after script exits

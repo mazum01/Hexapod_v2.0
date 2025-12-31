@@ -83,10 +83,21 @@ class SimpleEyes:
         self.display_image = Image.new("RGB", display_size, "BLACK")
         self.render_flag = True
         self.crt_mode = True # whether to simulate CRT mode by blanking out some of the lines
+        
+        # Time-based blink animation tracking
+        self._last_blink_update = time.time()
+        self.blink_speed = 8.0  # Blink percent change per second (higher = faster blink)
 
     def blink(self):
 
         self.last_blink_state = self.blinkState
+        
+        # Calculate time-based blink increment (frame-rate independent)
+        now = time.time()
+        dt = now - self._last_blink_update
+        self._last_blink_update = now
+        blink_delta = self.blink_speed * dt  # Amount to change blink_percent this frame
+        
         if self.blinkState == BLINKSTATE.WAITING:
             # check the blink timer to start a new blink
             if time.time() - self.blink_timer > self.blink_interval:
@@ -99,7 +110,7 @@ class SimpleEyes:
                 self.blink_percent = 0.0
 
         elif self.blinkState == BLINKSTATE.BLINKING:    
-            self.blink_percent += self.blink_percent_step
+            self.blink_percent += blink_delta  # Time-based increment
             if self.blink_percent >= self.blink_max_percent:
                 # set the blink state to closed
                 self.blinkState = BLINKSTATE.CLOSED
@@ -108,7 +119,7 @@ class SimpleEyes:
                 # set the blink interval to a random value
                 self.blink_interval = self.blink_min_interval + self.blink_rnd_interval * random.random()
         elif self.blinkState == BLINKSTATE.CLOSED:
-            self.blink_percent -= self.blink_percent_step
+            self.blink_percent -= blink_delta  # Time-based decrement
             if self.blink_percent <= 0.0:
                 # set the blink state to waiting
                 self.blinkState = BLINKSTATE.WAITING
@@ -159,31 +170,8 @@ class SimpleEyes:
                 # Anime mode: draw large kawaii-style eyes
                 self.render_anime_eyes()
             else:
-                # Normal mode: draw left and right eyes separately
-                self.eye_image_left = Image.new("RGB", (self.eye_size[0]*2,self.eye_size[1]*2), "BLACK")
-                self.eye_draw_left = ImageDraw.Draw(self.eye_image_left)
-                self.eye_image_right = Image.new("RGB", (self.eye_size[0]*2,self.eye_size[1]*2), "BLACK")
-                self.eye_draw_right = ImageDraw.Draw(self.eye_image_right)
-                self.render_eye()
-                
-                # draw the right eye
-                middle = (self.eye_center_offset + self.eye_spacing_offset + self.display_size[0] * .25, 
-                          self.eye_vertical_offset + (self.display_size[1] - 2) * .45)
-                eye_rot = self.eye_image_right.rotate(-self.rotation, resample = 3, expand=True)
-                self.display_image.paste(eye_rot, (int(middle[0] - eye_rot.width/2), int(middle[1] - eye_rot.height/2)))
-
-                # draw the left eye
-                middle = (self.eye_center_offset - self.eye_spacing_offset + self.display_size[0] * .75, 
-                          self.eye_vertical_offset + (self.display_size[1] - 2) * .45)
-                eye_rot = self.eye_image_left.rotate(self.rotation, resample = 3, expand=True)
-                self.display_image.paste(eye_rot, (int(middle[0] - eye_rot.width/2), int(middle[1] - eye_rot.height/2)))
-
-                # Simulate CRT by blanking out some of the lines
-                if self.crt_mode:
-                    # draw horizontal lines to simulate CRT
-                    display_image_draw = ImageDraw.Draw(self.display_image)
-                    for i in range(int(middle[1] - int(eye_rot.height/2)), int(middle[1] + eye_rot.height/2),3):
-                        display_image_draw.line((0, i, self.display_size[0], i), fill="BLACK", width=2)
+                # Basic eye modes: draw directly to display (like special eyes)
+                self.render_basic_eyes()
             
             # flag to update the display
             self.render_flag = True
@@ -193,6 +181,98 @@ class SimpleEyes:
         # return the render flag to indicate if the image was updated    
         return self.render_flag
     
+    def render_basic_eyes(self):
+        """Render basic eye shapes (ELLIPSE, RECTANGLE, ROUNDRECTANGLE, X) directly to display_image.
+        
+        This method draws to a small temp image per eye, rotates it, then pastes to display_image.
+        Uses NEAREST resampling (not bicubic) to avoid floating-point flicker.
+        """
+        # Eye positioning - same as special eyes for consistency
+        # Right eye is on left side of screen (robot's right), left eye on right side
+        right_cx = int(self.display_size[0] * 0.25) + self.eye_center_offset + self.eye_spacing_offset
+        left_cx = int(self.display_size[0] * 0.75) + self.eye_center_offset - self.eye_spacing_offset
+        cy = int(self.display_size[1] * 0.45) + self.eye_vertical_offset
+        
+        # Eye dimensions
+        eye_w = self.eye_size[0]
+        eye_h = self.eye_size[1]
+        
+        # Blink factor - shrink height from top during blink
+        blink_offset = int(eye_h * self.blink_percent)
+        
+        # Eyelid angle calculation
+        eyelid_dy = int(eye_w * math.tan(self.eyelid_angle * math.pi / 180)) if self.eyelid_angle != 0 else 0
+        
+        # Helper to draw and paste a single rotated eye
+        def draw_rotated_eye(cx, cy, shape, rotation, is_left):
+            # Create temp image for this eye (2x size for drawing)
+            temp_w = eye_w * 2
+            temp_h = eye_h * 2
+            temp_img = Image.new("RGB", (temp_w, temp_h), "BLACK")
+            temp_draw = ImageDraw.Draw(temp_img)
+            
+            # Calculate bounding box within temp image
+            top = blink_offset
+            bottom = temp_h - blink_offset
+            left_b = 0
+            right_b = temp_w
+            
+            # For very closed eyes, don't draw
+            if bottom - top < 4:
+                return
+            
+            if shape == EYE_SHAPE.ELLIPSE:
+                temp_draw.ellipse((left_b, top, right_b, bottom), fill=self.eye_color, outline=self.eye_color)
+            elif shape == EYE_SHAPE.RECTANGLE:
+                temp_draw.rectangle((left_b, top, right_b, bottom), fill=self.eye_color, outline=self.eye_color)
+            elif shape == EYE_SHAPE.ROUNDRECTANGLE:
+                radius = min(10, (bottom - top) // 3, (right_b - left_b) // 3)
+                temp_draw.rounded_rectangle((left_b, top, right_b, bottom), radius=radius, fill=self.eye_color, outline=self.eye_color)
+            elif shape == EYE_SHAPE.X:
+                # X shape - two crossing lines
+                temp_draw.line((left_b, top, right_b, bottom), fill=self.eye_color, width=8)
+                temp_draw.line((left_b, bottom, right_b, top), fill=self.eye_color, width=8)
+            
+            # Draw eyelid (black polygon from top) if there's blink or eyelid angle
+            if (blink_offset > 0 or eyelid_dy != 0) and shape != EYE_SHAPE.X:
+                # Eyelid polygon - angled based on eyelid_angle and which eye
+                if is_left:
+                    if self.eyelid_angle > 0:
+                        lid_poly = [(left_b, -5), (left_b, top + eyelid_dy), 
+                                   (right_b, top - eyelid_dy), (right_b, -5)]
+                    else:
+                        lid_poly = [(left_b, -5), (left_b, top - eyelid_dy), 
+                                   (right_b, top + eyelid_dy), (right_b, -5)]
+                else:
+                    if self.eyelid_angle > 0:
+                        lid_poly = [(left_b, -5), (left_b, top - eyelid_dy), 
+                                   (right_b, top + eyelid_dy), (right_b, -5)]
+                    else:
+                        lid_poly = [(left_b, -5), (left_b, top + eyelid_dy), 
+                                   (right_b, top - eyelid_dy), (right_b, -5)]
+                temp_draw.polygon(lid_poly, fill="BLACK", outline="BLACK")
+            
+            # Rotate using NEAREST resampling (no interpolation = no flicker)
+            if rotation != 0:
+                rotated = temp_img.rotate(rotation, resample=Image.NEAREST, expand=True)
+            else:
+                rotated = temp_img
+            
+            # Paste centered at target position
+            paste_x = int(cx - rotated.width / 2)
+            paste_y = int(cy - rotated.height / 2)
+            self.display_image.paste(rotated, (paste_x, paste_y))
+        
+        # Draw both eyes with their respective rotations
+        # Right eye (on left of screen) gets negative rotation, left eye gets positive
+        draw_rotated_eye(right_cx, cy, self.right_shape, -self.rotation, is_left=False)
+        draw_rotated_eye(left_cx, cy, self.left_shape, self.rotation, is_left=True)
+        
+        # Apply CRT effect if enabled
+        if self.crt_mode:
+            for i in range(0, self.display_size[1], 3):
+                draw.line((0, i, self.display_size[0], i), fill="BLACK", width=1)
+
     def render_eye(self):
 
         # how much is the sys closed
