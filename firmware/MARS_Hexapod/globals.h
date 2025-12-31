@@ -252,12 +252,14 @@ extern void     telemetryPrintS2();
 extern void     telemetryPrintS3();
 extern void     telemetryPrintS4();
 extern void     telemetryPrintS5();
+extern void     telemetryPrintS6();
 extern void     telemetryBinS1(uint16_t tick_us, uint8_t lockout, uint8_t test_mode,
                                uint8_t test_phase, uint8_t rr, uint8_t enabled);
 extern void     telemetryBinS2();
 extern void     telemetryBinS3();
 extern void     telemetryBinS4();
 extern void     telemetryBinS5();
+extern void     telemetryBinS6();
 
 // -----------------------------------------------------------------------------
 // Command handler externs — implemented in commandprocessor.ino

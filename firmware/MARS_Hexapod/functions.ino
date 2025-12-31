@@ -374,6 +374,42 @@ void telemetryBinS5()
   _telem_write_frame(5, p, (uint8_t)sizeof(p));
 }
 
+// Prints compact S6 segment with joint positions for all 18 servos.
+// Format:
+//   S6:<p0>,<p1>,...,<p17>
+// Where each pN is the joint position in centidegrees (leg-major order:
+// LF_C,LF_F,LF_T,LM_C,...,RR_T). Uses measured position if valid,
+// otherwise falls back to last commanded position.
+void telemetryPrintS6()
+{
+  if (!Serial) return;
+  Serial.print(F("S6:"));
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    for (uint8_t j = 0; j < 3; ++j) {
+      int16_t pos = g_meas_pos_valid[leg][j] ? g_meas_pos_cd[leg][j] : g_last_sent_cd[leg][j];
+      Serial.print(pos);
+      if (!(leg == 5 && j == 2)) Serial.print(',');
+    }
+  }
+  Serial.print('\n');
+}
+
+// Binary S6: joint positions for all 18 servos (36 bytes, 18×int16 LE centidegrees)
+// Uses measured position if valid, otherwise last commanded position.
+void telemetryBinS6()
+{
+  uint8_t p[36];
+  uint8_t off = 0;
+  for (uint8_t leg = 0; leg < 6; ++leg) {
+    for (uint8_t j = 0; j < 3; ++j) {
+      int16_t pos = g_meas_pos_valid[leg][j] ? g_meas_pos_cd[leg][j] : g_last_sent_cd[leg][j];
+      _telem_put_i16_le(&p[off], pos);
+      off += 2;
+    }
+  }
+  _telem_write_frame(6, p, (uint8_t)sizeof(p));
+}
+
 
 static inline char* ltrim(char* s)
 {

@@ -319,6 +319,9 @@ class ImuThread(threading.Thread):
             # Convert to Euler angles
             roll_deg, pitch_deg, yaw_deg = quaternion_to_euler(w, x, y, z)
             
+            # Correct for upside-down mounting: shift ±180° to 0°
+            roll_deg = roll_deg - 180.0 if roll_deg > 0 else roll_deg + 180.0
+            
             # Read optional raw data
             accel = None
             gyro = None

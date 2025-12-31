@@ -88,6 +88,21 @@ class SafetyTelemetry:
     valid: bool = False
 
 
+@dataclass(slots=True)
+class JointTelemetry:
+    """Joint position telemetry from S6 segment.
+    
+    Contains 18 joint angles in degrees (leg-major order:
+    LF_C, LF_F, LF_T, LM_C, ..., RR_T).
+    """
+    angles_deg: List[float] = None  # 18 joint angles in degrees
+    valid: bool = False
+    
+    def __post_init__(self):
+        if self.angles_deg is None:
+            self.angles_deg = [0.0] * 18
+
+
 #----------------------------------------------------------------------------------------------------------------------
 # Factory functions for telemetry arrays
 #----------------------------------------------------------------------------------------------------------------------
@@ -303,6 +318,48 @@ def processTelemS5(elements: List[str], safety_state: Dict[str, Any],
         print(f"Error processing S5 telemetry data: {e}", end="\r\n")
 
 
+def processTelemS6(elements: List[str], 
+                   out_joint: Optional[JointTelemetry] = None,
+                   verbose: bool = False) -> Optional[List[float]]:
+    """Process S6 joint position telemetry.
+
+    Expected format (18 fields):
+        18 joint positions in centidegrees, leg-major order:
+        LF_C, LF_F, LF_T, LM_C, LM_F, LM_T, LR_C, LR_F, LR_T,
+        RF_C, RF_F, RF_T, RM_C, RM_F, RM_T, RR_C, RR_F, RR_T
+    
+    Args:
+        elements: List of string values from comma-separated S6 payload
+        out_joint: Optional JointTelemetry dataclass to populate
+        verbose: Whether to print warnings
+        
+    Returns:
+        List of 18 joint angles in degrees, or None on error
+    """
+    expected = 18
+    count = len(elements)
+    if count < expected:
+        if verbose:
+            print(f"WARN S6 length {count} < expected {expected}, skipping.", end="\r\n")
+        return None
+    if count > expected and verbose:
+        print(f"WARN S6 length {count} > expected {expected}, truncating.", end="\r\n")
+    try:
+        angles_deg = []
+        for i in range(expected):
+            cd = int(elements[i])
+            angles_deg.append(cd / 100.0)  # centidegrees → degrees
+        
+        if out_joint is not None:
+            out_joint.angles_deg = angles_deg
+            out_joint.valid = True
+        
+        return angles_deg
+    except ValueError as e:
+        print(f"Error processing S6 telemetry data: {e}", end="\r\n")
+        return None
+
+
 #----------------------------------------------------------------------------------------------------------------------
 # Binary Telemetry Parsing Functions
 #----------------------------------------------------------------------------------------------------------------------
@@ -490,6 +547,32 @@ def parseBinaryS5(payload: bytes, ln: int) -> Optional[BinaryS5Result]:
         temp_c=int(temp_c),
         valid=True
     )
+
+
+def parseBinaryS6(payload: bytes, ln: int, 
+                  out_joint: Optional[JointTelemetry] = None) -> Optional[List[float]]:
+    """Parse binary S6 telemetry payload (joint positions).
+    
+    Args:
+        payload: Raw payload bytes (36 bytes = 18 × int16 LE centidegrees)
+        ln: Payload length (expected 36)
+        out_joint: Optional JointTelemetry dataclass to populate
+        
+    Returns:
+        List of 18 joint angles in degrees, or None if invalid
+    """
+    if ln != 36:
+        return None
+    angles_deg = []
+    for i in range(18):
+        cd, = struct.unpack_from('<h', payload, i * 2)
+        angles_deg.append(cd / 100.0)
+    
+    if out_joint is not None:
+        out_joint.angles_deg = angles_deg
+        out_joint.valid = True
+    
+    return angles_deg
 
 
 def applyBinaryS1ToState(result: BinaryS1Result, state: List[float],
@@ -687,13 +770,16 @@ __all__ = [
     'TELEM_SYNC',
     # Dataclasses
     'SystemTelemetry', 'ServoTelemetry', 'LegTelemetry', 'SafetyTelemetry',
+    'JointTelemetry',
     'BinaryS1Result', 'BinaryS5Result', 'TelemetryFrame',
     # Factory functions
     'create_servo_telemetry_array', 'create_leg_telemetry_array',
     # ASCII parsing functions
     'processTelemS1', 'processTelemS2', 'processTelemS3', 'processTelemS4', 'processTelemS5',
+    'processTelemS6',
     # Binary parsing functions
     'parseBinaryS1', 'parseBinaryS2', 'parseBinaryS3', 'parseBinaryS4', 'parseBinaryS5',
+    'parseBinaryS6',
     'applyBinaryS1ToState', 'applyBinaryS5ToState', 'decodeBinaryFrame',
     # Helpers
     'get_safety_overlay_text', 'getGait', 'GAIT_NAMES',

@@ -26,7 +26,9 @@ class MenuCategory:
     IMP = 7
     EST = 8
     IMU = 9
-    COUNT = 10  # Total number of categories
+    TOF = 10
+    AUTO = 11  # Autonomy behaviors
+    COUNT = 12  # Total number of categories
 
 
 class MenuTheme:
@@ -218,8 +220,8 @@ class MarsMenu:
     }
     
     # Tab labels (ASCII text for font compatibility)
-    TAB_LABELS = ["EYE", "GAIT", "POSE", "INFO", "SAFE", "SYS", "PID", "IMP", "EST", "IMU"]
-    TAB_NAMES = ["Eyes", "Gait", "Pose", "Info", "Safety", "Sys", "PID", "IMP", "EST", "IMU"]
+    TAB_LABELS = ["EYE", "GAIT", "POSE", "INFO", "SAFE", "SYS", "PID", "IMP", "EST", "IMU", "TOF", "AUTO"]
+    TAB_NAMES = ["Eyes", "Gait", "Pose", "Info", "Safety", "Sys", "PID", "IMP", "EST", "IMU", "ToF", "Auto"]
 
     # Visual ordering for the sidebar tab stack.
     # Keep MenuCategory numeric IDs stable (they are used as keys) and
@@ -227,6 +229,8 @@ class MarsMenu:
     TAB_ORDER = [
         MenuCategory.INFO,
         MenuCategory.IMU,
+        MenuCategory.TOF,
+        MenuCategory.AUTO,
         MenuCategory.SYSTEM,
         MenuCategory.EYES,
         MenuCategory.GAIT,
@@ -268,6 +272,8 @@ class MarsMenu:
             MenuCategory.IMP: [],
             MenuCategory.EST: [],
             MenuCategory.IMU: [],
+            MenuCategory.TOF: [],
+            MenuCategory.AUTO: [],
         }
         
         # Callbacks will be set by controller
@@ -390,6 +396,25 @@ class MarsMenu:
             MenuItem("Soft Limits", "info", value="On"),
             MenuItem("Collision", "info", value="On"),
             MenuItem("Temp Lock", "info", value="80C"),
+            MenuItem("---Display---", "info", value=""),
+            MenuItem("Volt Min", "value", value=10.5, min_val=9.0, max_val=11.5, step=0.1, unit="V",
+                     format_func=lambda v: f"{v:.1f}V"),
+            MenuItem("Volt Warn", "value", value=11.0, min_val=10.0, max_val=12.0, step=0.1, unit="V",
+                     format_func=lambda v: f"{v:.1f}V"),
+            MenuItem("Volt Max", "value", value=12.5, min_val=11.0, max_val=14.0, step=0.1, unit="V",
+                     format_func=lambda v: f"{v:.1f}V"),
+            MenuItem("Temp Min", "value", value=25.0, min_val=15.0, max_val=40.0, step=1.0, unit="°C",
+                     format_func=lambda v: f"{v:.0f}°C"),
+            MenuItem("Temp Max", "value", value=55.0, min_val=40.0, max_val=80.0, step=1.0, unit="°C",
+                     format_func=lambda v: f"{v:.0f}°C"),
+            MenuItem("---Low Battery---", "info", value=""),
+            MenuItem("LowBatt Prot", "option", value=1, options=["Off", "On"]),
+            MenuItem("Volt Critical", "value", value=10.0, min_val=9.0, max_val=11.0, step=0.1, unit="V",
+                     format_func=lambda v: f"{v:.1f}V"),
+            MenuItem("Volt Recovery", "value", value=10.5, min_val=9.5, max_val=11.5, step=0.1, unit="V",
+                     format_func=lambda v: f"{v:.1f}V"),
+            MenuItem("LowBatt Status", "info", value="OK"),
+            MenuItem("---Actions---", "info", value=""),
             MenuItem("Clear Safety", "action"),
             MenuItem("Override ALL", "action"),
             MenuItem("Override TEMP", "action"),
@@ -481,16 +506,85 @@ class MarsMenu:
                      format_func=lambda v: f"0x{v:02X}" if v is not None else "---"),
             MenuItem("Show Overlay", "option", value=1, options=["Off", "On"]),
             # Body leveling items
-            MenuItem("", "separator"),  # Visual separator
             MenuItem("Leveling", "option", value=0, options=["Off", "On"]),
-            MenuItem("LVL Gain", "slider", value=1.0, min_value=0.0, max_value=2.0, step=0.1,
+            MenuItem("LVL Gain", "value", value=1.0, min_val=0.0, max_val=2.0, step=0.1,
                      format_func=lambda v: f"{v:.1f}"),
-            MenuItem("Max Corr", "slider", value=30.0, min_value=5.0, max_value=50.0, step=5.0,
+            MenuItem("Max Corr", "value", value=30.0, min_val=5.0, max_val=50.0, step=5.0,
                      format_func=lambda v: f"{v:.0f}mm"),
-            MenuItem("Tilt Limit", "slider", value=25.0, min_value=10.0, max_value=45.0, step=5.0,
+            MenuItem("Tilt Limit", "value", value=25.0, min_val=10.0, max_val=45.0, step=5.0,
                      format_func=lambda v: f"{v:.0f}°"),
             MenuItem("LVL Corrections", "info", value="---",
                      format_func=lambda v: v if isinstance(v, str) else "---"),
+            # Motion lean items (tilt into direction of travel)
+            MenuItem("Motion Lean", "option", value=0, options=["Off", "On"]),
+            MenuItem("Lean Max", "value", value=7.0, min_val=3.0, max_val=15.0, step=1.0,
+                     format_func=lambda v: f"{v:.0f}°"),
+        ]
+
+        # === ToF (Time of Flight) ===
+        self._items[MenuCategory.TOF] = [
+            MenuItem("Enabled", "option", value=1, options=["Off", "On"]),
+            MenuItem("Status", "info", value="---"),
+            MenuItem("Resolution", "option", value=1, options=["4x4", "8x8"]),
+            MenuItem("Frame Rate", "value", value=15, min_val=1, max_val=60, step=1,
+                     format_func=lambda v: f"{v} Hz"),
+            MenuItem("I2C Bus", "value", value=1, min_val=1, max_val=6, step=1,
+                     format_func=lambda v: f"Bus {v}"),
+            MenuItem("Sensors", "info", value=0,
+                     format_func=lambda v: f"{v} sensor(s)" if v is not None else "---"),
+            MenuItem("Add Sensor", "action"),
+            # Sensor 1 (default)
+            MenuItem("Sensor 1 Name", "info", value="front",
+                     format_func=lambda v: v if isinstance(v, str) else "---"),
+            MenuItem("Sensor 1 Addr", "info", value=0x29,
+                     format_func=lambda v: f"0x{v:02X}" if v is not None else "---"),
+            MenuItem("Remove Sensor 1", "action"),
+            # Statistics (read-only)
+            MenuItem("Read Count", "info", value=0,
+                     format_func=lambda v: f"{v}" if v is not None else "---"),
+            MenuItem("Error Count", "info", value=0,
+                     format_func=lambda v: f"{v}" if v is not None else "---"),
+            MenuItem("Closest", "info", value="---",
+                     format_func=lambda v: f"{v} mm" if isinstance(v, int) and v > 0 else v if isinstance(v, str) else "---"),
+            MenuItem("Temperature", "info", value=0,
+                     format_func=lambda v: f"{v}°C" if v is not None else "---"),
+            MenuItem("Apply & Restart", "action"),
+        ]
+
+        # === Autonomy (Behavior Engine) ===
+        self._items[MenuCategory.AUTO] = [
+            # Master enable
+            MenuItem("Autonomy", "option", value=0, options=["Off", "On"]),
+            MenuItem("Status", "info", value="Idle"),
+            MenuItem("Active Behavior", "info", value="---"),
+            MenuItem("Last Action", "info", value="---"),
+            # Individual behavior toggles
+            MenuItem("Obstacle Avoid", "option", value=1, options=["Off", "On"]),
+            MenuItem("Cliff Detect", "option", value=1, options=["Off", "On"]),
+            MenuItem("Caught Foot", "option", value=1, options=["Off", "On"]),
+            MenuItem("Patrol", "option", value=0, options=["Off", "On"]),
+            # Obstacle avoidance thresholds
+            MenuItem("Stop Dist", "value", value=150, min_val=50, max_val=500, step=25,
+                     format_func=lambda v: f"{v}mm"),
+            MenuItem("Slow Dist", "value", value=300, min_val=100, max_val=800, step=25,
+                     format_func=lambda v: f"{v}mm"),
+            # Cliff detection
+            MenuItem("Cliff Thresh", "value", value=100, min_val=50, max_val=300, step=25,
+                     format_func=lambda v: f"{v}mm"),
+            # Caught foot recovery
+            MenuItem("Snag Error", "value", value=15.0, min_val=5.0, max_val=45.0, step=2.5,
+                     format_func=lambda v: f"{v:.1f}°"),
+            MenuItem("Snag Timeout", "value", value=500, min_val=100, max_val=2000, step=100,
+                     format_func=lambda v: f"{v}ms"),
+            MenuItem("Recovery Lift", "value", value=30.0, min_val=10.0, max_val=80.0, step=5.0,
+                     format_func=lambda v: f"{v:.0f}mm"),
+            # Patrol settings
+            MenuItem("Patrol Time", "value", value=60, min_val=0, max_val=600, step=30,
+                     format_func=lambda v: f"{v}s" if v > 0 else "∞"),
+            MenuItem("Turn Interval", "value", value=10, min_val=2, max_val=60, step=2,
+                     format_func=lambda v: f"{v}s"),
+            # Actions
+            MenuItem("Save Settings", "action"),
         ]
     
     def set_callback(self, category, item_label, callback_type, callback):

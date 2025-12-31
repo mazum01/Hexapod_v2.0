@@ -4,6 +4,7 @@
 
   Change log (top N entries)
   DIRECTIVE: Every code change (any file) must update BOTH this header list (add a concise dated bullet with FW version) AND `CHANGELOG.md`, bump `FW_VERSION` (patch) and `FW_BUILD`.
+  - 2025-12-26: Telemetry S6: Added joint position telemetry segment streaming 18 joint angles (centidegrees) for 3D wireframe visualization. ASCII format S6:<c0>,<f0>,<t0>,...,<t17> and binary (36 bytes, 18×int16 LE). FW 0.2.45. (author: copilot)
   - 2025-12-19: Refactor: Consolidated ~100+ scattered extern declarations from functions.ino and commandprocessor.ino into new globals.h header. Improves maintainability and eliminates duplicate extern blocks. FW 0.2.44. (author: copilot)
   - 2025-12-18: Refactor: Extracted tickSafetyChecks() and tickLogging() inline phase helpers from loopTick() for maintainability. Uses lambda for log row deduplication. Added PHASE section markers. No runtime behavior changes. FW 0.2.43. (author: copilot)
   - 2025-12-18: Bugfix: Removed duplicate jitter metrics calculation block in loopTick() that was wasting cycles and double-counting jitter stats. FW 0.2.42. (author: copilot)
@@ -181,11 +182,13 @@ void telemetryPrintS2();
 void telemetryPrintS3();
 void telemetryPrintS4();
 void telemetryPrintS5();
+void telemetryPrintS6();
 void telemetryBinS1(uint16_t loop_us, uint8_t lockout, uint8_t mode, uint8_t test_phase, uint8_t rr_index, uint8_t enabled);
 void telemetryBinS2();
 void telemetryBinS3();
 void telemetryBinS4();
 void telemetryBinS5();
+void telemetryBinS6();
 #if defined(MARS_ENABLE_SD) && MARS_ENABLE_SD
 #include <FS.h>
 #include <SD.h>
@@ -199,11 +202,11 @@ void telemetryBinS5();
 // changes behavior or completes a TODO item. Keep MAJOR/MINOR stable unless
 // explicitly requested.
 #ifndef FW_VERSION
-#define FW_VERSION "0.2.44"
+#define FW_VERSION "0.2.45"
 #endif
 // Monotonic build number (never resets across minor/major). Increment every code edit.
 #ifndef FW_BUILD
-#define FW_BUILD 160
+#define FW_BUILD 161
 #endif
 
 // -----------------------------------------------------------------------------
@@ -2106,6 +2109,7 @@ static void loopTick() {
         telemetryBinS3();
         telemetryBinS4();
         telemetryBinS5();
+        telemetryBinS6();
       } else {
         telemetryPrintS1((uint8_t)leg,
                          (uint16_t)g_probe_tick_us,
@@ -2122,6 +2126,7 @@ static void loopTick() {
         telemetryPrintS3();
         telemetryPrintS4();
         telemetryPrintS5();
+        telemetryPrintS6();
       }
     }
 #endif

@@ -1,1 +1,5 @@
-python3 /home/starter/OneDrive/Projects/Robots/Hexapod_Simple/main.py
+#!/bin/bash
+# MARS Hexapod Startup Script
+# Starts the joy_controller daemon via systemd service
+
+sudo systemctl start mars-joy.service

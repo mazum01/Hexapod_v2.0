@@ -121,7 +121,7 @@ class EyeConfig:
     center_offset: int = 5
     vertical_offset: int = 0
     eyelid_angle: int = 0
-    blink_percent_step: float = 0.25
+    blink_percent_step: float = 0.08
     rotation: int = -10
     size_x: int = 25
     size_y: int = 45
@@ -181,6 +181,22 @@ class ESTConfig:
 
 
 @dataclass
+class SafetyDisplayConfig:
+    """Configuration for safety display thresholds (Pi-side visualization only).
+    
+    These thresholds control the color gradients for voltage/temperature
+    displays on the engineering view and are separate from firmware safety limits.
+    """
+    # Voltage thresholds for display color gradient
+    volt_min: float = 10.5     # Red (low) threshold
+    volt_warn: float = 11.0    # Warning threshold (triggers low battery overlay)
+    volt_max: float = 12.5     # Green (high) threshold
+    # Temperature thresholds for display color gradient
+    temp_min: float = 25.0     # Green (cool) threshold
+    temp_max: float = 55.0     # Red (hot) threshold
+
+
+@dataclass
 class ControllerConfig:
     """Master configuration container holding all subsystem configs."""
     verbose: bool = False
@@ -195,6 +211,7 @@ class ControllerConfig:
     pid: PIDConfig = field(default_factory=PIDConfig)
     imp: IMPConfig = field(default_factory=IMPConfig)
     est: ESTConfig = field(default_factory=ESTConfig)
+    safety_display: SafetyDisplayConfig = field(default_factory=SafetyDisplayConfig)
 
 
 # -----------------------------------------------------------------------------
@@ -408,6 +425,19 @@ def load_config(config_path: Optional[str] = None) -> ControllerConfig:
             cfg.est.cmd_alpha_milli = _cfg.getint('est', 'cmd_alpha_milli', fallback=None) if 'cmd_alpha_milli' in _cfg['est'] else None
             cfg.est.meas_alpha_milli = _cfg.getint('est', 'meas_alpha_milli', fallback=None) if 'meas_alpha_milli' in _cfg['est'] else None
             cfg.est.meas_vel_alpha_milli = _cfg.getint('est', 'meas_vel_alpha_milli', fallback=None) if 'meas_vel_alpha_milli' in _cfg['est'] else None
+        
+        # Safety display section (Pi-side visualization thresholds)
+        if 'safety_display' in _cfg:
+            cfg.safety_display.volt_min = _cfg.getfloat('safety_display', 'volt_min', 
+                                                         fallback=cfg.safety_display.volt_min)
+            cfg.safety_display.volt_warn = _cfg.getfloat('safety_display', 'volt_warn', 
+                                                         fallback=cfg.safety_display.volt_warn)
+            cfg.safety_display.volt_max = _cfg.getfloat('safety_display', 'volt_max', 
+                                                         fallback=cfg.safety_display.volt_max)
+            cfg.safety_display.temp_min = _cfg.getfloat('safety_display', 'temp_min', 
+                                                         fallback=cfg.safety_display.temp_min)
+            cfg.safety_display.temp_max = _cfg.getfloat('safety_display', 'temp_max', 
+                                                         fallback=cfg.safety_display.temp_max)
     
     except (configparser.Error, ValueError, KeyError) as e:
         print(f"Config parse error (using defaults): {e}", end="\r\n")
@@ -663,6 +693,163 @@ def save_est_settings(est_state: dict) -> bool:
         return False
 
 
+def save_tof_settings(tof_state: dict) -> bool:
+    """Persist ToF settings to controller.ini [tof].
+    
+    Args:
+        tof_state: Dictionary with keys:
+            - enabled (bool): Enable ToF system
+            - hz (float): Frame rate in Hz
+            - bus (int): I2C bus number
+            - resolution (int): 4 or 8 for grid size
+            - sensors (list): List of (name, address) tuples
+    
+    Returns:
+        True on success, False on error.
+    """
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'tof' not in _cfg:
+            _cfg.add_section('tof')
+        if 'enabled' in tof_state:
+            _cfg.set('tof', 'enabled', 'true' if tof_state['enabled'] else 'false')
+        if 'hz' in tof_state:
+            _cfg.set('tof', 'hz', str(float(tof_state['hz'])))
+        if 'bus' in tof_state:
+            _cfg.set('tof', 'bus', str(int(tof_state['bus'])))
+        if 'resolution' in tof_state:
+            _cfg.set('tof', 'resolution', str(int(tof_state['resolution'])))
+        if 'sensors' in tof_state and tof_state['sensors']:
+            # Format: "front=0x29,left=0x30"
+            sensor_strs = [f"{name}=0x{addr:02X}" for name, addr in tof_state['sensors']]
+            _cfg.set('tof', 'sensors', ','.join(sensor_strs))
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error, ValueError, TypeError):
+        return False
+
+
+def save_safety_display_settings(safety_state: dict) -> bool:
+    """Persist safety display thresholds to controller.ini [safety_display].
+    
+    Args:
+        safety_state: Dictionary with keys:
+            - volt_min (float): Low voltage threshold for display (red)
+            - volt_warn (float): Low battery warning threshold for overlay
+            - volt_max (float): High voltage threshold for display (green)
+            - temp_min (float): Low temperature threshold for display (green)
+            - temp_max (float): High temperature threshold for display (red)
+    
+    Returns:
+        True on success, False on error.
+    """
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'safety_display' not in _cfg:
+            _cfg.add_section('safety_display')
+        if 'volt_min' in safety_state:
+            _cfg.set('safety_display', 'volt_min', f"{float(safety_state['volt_min']):.1f}")
+        if 'volt_warn' in safety_state:
+            _cfg.set('safety_display', 'volt_warn', f"{float(safety_state['volt_warn']):.1f}")
+        if 'volt_max' in safety_state:
+            _cfg.set('safety_display', 'volt_max', f"{float(safety_state['volt_max']):.1f}")
+        if 'temp_min' in safety_state:
+            _cfg.set('safety_display', 'temp_min', f"{float(safety_state['temp_min']):.1f}")
+        if 'temp_max' in safety_state:
+            _cfg.set('safety_display', 'temp_max', f"{float(safety_state['temp_max']):.1f}")
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error, ValueError, TypeError):
+        return False
+
+
+def save_behavior_settings(behavior_state: dict) -> bool:
+    """Persist autonomy/behavior settings to controller.ini [behavior].
+    
+    Args:
+        behavior_state: Dictionary with keys:
+            - enabled (bool): Master autonomy enable
+            - obstacle_avoidance (bool): Enable obstacle avoidance
+            - cliff_detection (bool): Enable cliff detection
+            - caught_foot_recovery (bool): Enable caught foot recovery
+            - patrol (bool): Enable patrol behavior
+            - stop_distance_mm (int): Obstacle stop distance
+            - slow_distance_mm (int): Obstacle slow distance
+            - cliff_threshold_mm (int): Cliff detection threshold
+            - snag_position_error_deg (float): Snag detection error
+            - snag_timeout_ms (int): Snag detection timeout
+            - recovery_lift_mm (float): Recovery lift height
+            - patrol_duration_s (float): Patrol duration
+            - turn_interval_s (float): Patrol turn interval
+    
+    Returns:
+        True on success, False on error.
+    """
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'behavior' not in _cfg:
+            _cfg.add_section('behavior')
+        # Boolean settings
+        for key in ('enabled', 'obstacle_avoidance', 'cliff_detection', 
+                    'caught_foot_recovery', 'patrol'):
+            if key in behavior_state:
+                _cfg.set('behavior', key, 'true' if behavior_state[key] else 'false')
+        # Integer settings
+        for key in ('stop_distance_mm', 'slow_distance_mm', 'cliff_threshold_mm', 
+                    'snag_timeout_ms', 'max_recovery_attempts'):
+            if key in behavior_state:
+                _cfg.set('behavior', key, str(int(behavior_state[key])))
+        # Float settings
+        for key in ('snag_position_error_deg', 'recovery_lift_mm', 
+                    'patrol_duration_s', 'turn_interval_s'):
+            if key in behavior_state:
+                _cfg.set('behavior', key, f"{float(behavior_state[key]):.1f}")
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error, ValueError, TypeError):
+        return False
+
+
+def save_low_battery_settings(low_batt_state: dict) -> bool:
+    """Persist low battery protection settings to controller.ini [low_battery].
+    
+    Args:
+        low_batt_state: Dictionary with keys:
+            - enabled (bool): Enable low battery protection
+            - volt_critical (float): Voltage threshold for TUCK+DISABLE
+            - volt_recovery (float): Voltage to clear protection latch
+    
+    Returns:
+        True on success, False on error.
+    """
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'low_battery' not in _cfg:
+            _cfg.add_section('low_battery')
+        if 'enabled' in low_batt_state:
+            _cfg.set('low_battery', 'enabled', 'true' if low_batt_state['enabled'] else 'false')
+        if 'volt_critical' in low_batt_state:
+            _cfg.set('low_battery', 'volt_critical', f"{float(low_batt_state['volt_critical']):.1f}")
+        if 'volt_recovery' in low_batt_state:
+            _cfg.set('low_battery', 'volt_recovery', f"{float(low_batt_state['volt_recovery']):.1f}")
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error, ValueError, TypeError):
+        return False
+
+
 # -----------------------------------------------------------------------------
 # Module exports
 # -----------------------------------------------------------------------------
@@ -671,11 +858,12 @@ __all__ = [
     'set_config_state',
     # Dataclasses
     'SerialConfig', 'TelemetryConfig', 'GaitConfig', 'EyeConfig',
-    'DisplayConfig', 'PounceConfig', 'TimingConfig',
+    'DisplayConfig', 'PounceConfig', 'TimingConfig', 'SafetyDisplayConfig',
     # Save functions
     'save_gait_settings', 'save_pounce_settings',
     'save_eye_shape', 'save_eye_color', 'save_eye_spacing', 'save_eye_vertical_offset',
     'save_eye_crt_mode', 'save_eye_center_offset',
     'save_menu_settings',
-    'save_pid_settings', 'save_imp_settings', 'save_est_settings',
+    'save_pid_settings', 'save_imp_settings', 'save_est_settings', 'save_tof_settings',
+    'save_safety_display_settings', 'save_behavior_settings', 'save_low_battery_settings',
 ]
