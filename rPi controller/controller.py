@@ -246,7 +246,7 @@
 # Controller semantic version (bump on behavior-affecting changes)
 CONTROLLER_VERSION = "0.8.4"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 234
+CONTROLLER_BUILD = 235
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -5748,7 +5748,8 @@ def phase_dashboard(ctrl):
     # Xbox connection
     xbox_connected = False
     if ctrl.useJoySocket and _joyClient is not None:
-        xbox_connected = _joyClient.connected and getattr(_joyClient.state, 'connected', False)
+        # Use xbox_connected property which checks socket + controller state
+        xbox_connected = _joyClient.xbox_connected
     elif ctrl.controller is not None:
         xbox_connected = True
     
