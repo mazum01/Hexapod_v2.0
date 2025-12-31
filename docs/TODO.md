@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-12-31 (Control loop refactor COMPLETE)
+Last updated: 2025-12-31 (Web Dashboard Phase 1 COMPLETE)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -283,6 +283,50 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
   - Useful for detecting entanglement, debris, mechanical failure
 - [ ] Requires camera + AI accelerator for real-time pose estimation
   - Could use lightweight pose model (MediaPipe, MoveNet)
+
+---
+
+## Web Dashboard — Remote Configuration & Monitoring
+
+### W1. Phase 1: Telemetry Dashboard ✅ COMPLETE (v0.8.4)
+- [x] TelemetryServer module for WebSocket streaming (telemetry_server.py)
+- [x] Dashboard HTML/JS with real-time telemetry display (dashboard.html)
+  - Power: battery voltage, current, low-battery status
+  - IMU: pitch/roll/yaw with visual gauges
+  - Status: Xbox/Teensy connection, gait state, safety
+  - Servos: max temp, min voltage, error count
+  - System: loop time, firmware/controller versions
+- [x] Read-only configuration view (gait, safety settings)
+- [x] Integration with Layer 2 (phase_dashboard at ~30 Hz)
+- [x] Configurable via [dashboard] in controller.ini
+  - enabled=true, port=8766, stream_hz=10
+
+### W2. Phase 2: Enhanced Config View
+- [ ] Expand configuration sections displayed
+  - All menu categories: EYES, GAIT, POSTURE, SAFETY, PID, IMP, EST, IMU, TOF, AUTO
+  - Show current values from menu state
+- [ ] Add configuration search/filter
+- [ ] Collapsible sections for better organization
+
+### W3. Phase 3: Configuration Editing
+- [ ] Add set_config WebSocket command support
+- [ ] Implement config change callback in controller
+- [ ] Edit gait parameters (cycle_ms, step_height, step_length)
+- [ ] Edit safety thresholds (volt limits, temp limits)
+- [ ] Edit PID/IMP/EST tuning parameters
+- [ ] Save to controller.ini from dashboard
+
+### W4. Phase 4: Graphs & Historical Data
+- [ ] Rolling graph for battery voltage over time
+- [ ] Loop time jitter histogram
+- [ ] Servo temperature trends
+- [ ] Export telemetry data as CSV
+
+### W5. Phase 5: Enhanced Integration
+- [ ] Link to point cloud viewer (already available at /pointcloud)
+- [ ] Embed point cloud in dashboard (iframe or integrated Three.js)
+- [ ] Add camera feed view (when camera module added)
+- [ ] Mobile-responsive layout
 
 ---
 

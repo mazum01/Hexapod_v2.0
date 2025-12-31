@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MARS Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --bg-dark: #1a1a2e;
+            --bg-panel: rgba(0, 0, 0, 0.7);
+            --accent-orange: #ff6b35;
+            --accent-teal: #4ecdc4;
+            --text-primary: #eee;
+            --text-secondary: #888;
+            --success: #44ff44;
+            --warning: #ffaa00;
+            --danger: #ff4444;
+            --border: #444;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid var(--accent-orange);
+        }
+        
+        .header h1 {
+            color: var(--accent-orange);
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .header h1 .robot-icon {
+            font-size: 28px;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--danger);
+        }
+        
+        .status-dot.connected {
+            background: var(--success);
+        }
+        
+        /* Grid layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        /* Panel styling */
+        .panel {
+            background: var(--bg-panel);
+            border-radius: 12px;
+            padding: 15px;
+            border: 1px solid var(--border);
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .panel-title {
+            color: var(--accent-orange);
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .panel-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--accent-teal);
+            color: var(--bg-dark);
+            font-weight: bold;
+        }
+        
+        /* Stat rows */
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            font-size: 13px;
+        }
+        
+        .stat-label {
+            color: var(--text-secondary);
+        }
+        
+        .stat-value {
+            color: var(--accent-teal);
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-weight: 500;
+        }
+        
+        .stat-value.warning {
+            color: var(--warning);
+        }
+        
+        .stat-value.danger {
+            color: var(--danger);
+        }
+        
+        .stat-value.success {
+            color: var(--success);
+        }
+        
+        /* Big metrics */
+        .big-metric {
+            text-align: center;
+            padding: 15px;
+        }
+        
+        .big-metric .value {
+            font-size: 36px;
+            font-weight: bold;
+            color: var(--accent-teal);
+            font-family: 'Consolas', 'Monaco', monospace;
+        }
+        
+        .big-metric .label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 5px;
+        }
+        
+        .big-metric .unit {
+            font-size: 18px;
+            color: var(--text-secondary);
+        }
+        
+        .metric-row {
+            display: flex;
+            justify-content: space-around;
+        }
+        
+        /* Status indicators */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+        }
+        
+        .status-icon {
+            font-size: 18px;
+        }
+        
+        .status-text {
+            font-size: 12px;
+        }
+        
+        .status-text .name {
+            color: var(--text-secondary);
+        }
+        
+        .status-text .state {
+            font-weight: bold;
+        }
+        
+        .status-text .state.on { color: var(--success); }
+        .status-text .state.off { color: var(--danger); }
+        .status-text .state.warn { color: var(--warning); }
+        
+        /* Progress bars */
+        .progress-bar {
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-fill.battery {
+            background: linear-gradient(90deg, var(--danger), var(--warning), var(--success));
+        }
+        
+        .progress-fill.temp {
+            background: linear-gradient(90deg, var(--accent-teal), var(--warning), var(--danger));
+        }
+        
+        /* IMU visualization */
+        .imu-visual {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            padding: 15px 0;
+        }
+        
+        .imu-gauge {
+            text-align: center;
+        }
+        
+        .imu-gauge .gauge-ring {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 3px solid var(--border);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .imu-gauge .gauge-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: var(--accent-teal);
+        }
+        
+        .imu-gauge .gauge-needle {
+            position: absolute;
+            width: 3px;
+            height: 35px;
+            background: var(--accent-orange);
+            transform-origin: bottom center;
+            bottom: 50%;
+            left: calc(50% - 1.5px);
+            border-radius: 2px;
+            transition: transform 0.2s ease;
+        }
+        
+        .imu-gauge .gauge-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            text-transform: uppercase;
+        }
+        
+        /* Config section */
+        .config-section {
+            margin-top: 10px;
+        }
+        
+        .config-category {
+            margin-bottom: 15px;
+        }
+        
+        .config-category-header {
+            font-size: 12px;
+            color: var(--accent-orange);
+            padding: 5px 0;
+            border-bottom: 1px dashed var(--border);
+            margin-bottom: 8px;
+        }
+        
+        /* Links */
+        .nav-links {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .nav-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: rgba(78, 205, 196, 0.2);
+            border: 1px solid var(--accent-teal);
+            border-radius: 6px;
+            color: var(--accent-teal);
+            text-decoration: none;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        
+        .nav-link:hover {
+            background: var(--accent-teal);
+            color: var(--bg-dark);
+        }
+        
+        /* Robot enabled banner */
+        .robot-state-banner {
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        
+        .robot-state-banner.enabled {
+            background: rgba(68, 255, 68, 0.2);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+        
+        .robot-state-banner.disabled {
+            background: rgba(255, 68, 68, 0.2);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+        }
+        
+        /* Connection dialog */
+        .connection-dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            z-index: 1000;
+            border: 2px solid var(--accent-orange);
+        }
+        
+        .connection-dialog.hidden {
+            display: none;
+        }
+        
+        .connection-dialog h2 {
+            color: var(--accent-orange);
+            margin-bottom: 20px;
+        }
+        
+        .connection-dialog input {
+            background: #333;
+            border: 1px solid #555;
+            color: var(--text-primary);
+            padding: 12px;
+            border-radius: 6px;
+            width: 280px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        .connection-dialog input:focus {
+            outline: none;
+            border-color: var(--accent-teal);
+        }
+        
+        .connection-dialog button {
+            background: var(--accent-teal);
+            border: none;
+            color: var(--bg-dark);
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        
+        .connection-dialog button:hover {
+            background: #45b7aa;
+        }
+        
+        /* Footer */
+        .footer {
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 18px;
+            }
+            
+            .imu-visual {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Connection dialog -->
+    <div class="connection-dialog" id="connection-dialog">
+        <h2>🤖 MARS Dashboard</h2>
+        <p style="margin-bottom: 15px; color: var(--text-secondary);">Enter WebSocket server address:</p>
+        <input type="text" id="ws-address" placeholder="ws://192.168.1.100:8766">
+        <br>
+        <button onclick="connect()">Connect</button>
+    </div>
+    
+    <!-- Main dashboard (hidden until connected) -->
+    <div id="dashboard" style="display: none;">
+        <!-- Header -->
+        <header class="header">
+            <h1>
+                <span class="robot-icon">🤖</span>
+                MARS Dashboard
+            </h1>
+            <div class="connection-status">
+                <span class="status-dot" id="ws-status"></span>
+                <span id="connection-text">Disconnected</span>
+            </div>
+        </header>
+        
+        <!-- Robot state banner -->
+        <div class="robot-state-banner disabled" id="robot-banner">
+            🔴 ROBOT DISABLED
+        </div>
+        
+        <!-- Dashboard grid -->
+        <div class="dashboard-grid">
+            
+            <!-- Power panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">⚡ Power</span>
+                </div>
+                <div class="metric-row">
+                    <div class="big-metric">
+                        <div class="value"><span id="battery-v">--</span><span class="unit">V</span></div>
+                        <div class="label">Battery</div>
+                        <div class="progress-bar" style="width: 100px; margin: 8px auto 0;">
+                            <div class="progress-fill battery" id="battery-bar" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="big-metric">
+                        <div class="value"><span id="current-a">--</span><span class="unit">A</span></div>
+                        <div class="label">Current</div>
+                    </div>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Low Battery Protection</span>
+                    <span class="stat-value" id="low-battery-status">---</span>
+                </div>
+            </div>
+            
+            <!-- Status panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">📊 Status</span>
+                </div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <span class="status-icon">🎮</span>
+                        <div class="status-text">
+                            <div class="name">Xbox</div>
+                            <div class="state off" id="xbox-status">---</div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-icon">🔌</span>
+                        <div class="status-text">
+                            <div class="name">Teensy</div>
+                            <div class="state off" id="teensy-status">---</div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-icon">🦿</span>
+                        <div class="status-text">
+                            <div class="name">Gait</div>
+                            <div class="state off" id="gait-status">---</div>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-icon">🛡️</span>
+                        <div class="status-text">
+                            <div class="name">Safety</div>
+                            <div class="state" id="safety-status">---</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="stat-row" style="margin-top: 10px;">
+                    <span class="stat-label">Safety Cause</span>
+                    <span class="stat-value" id="safety-cause">---</span>
+                </div>
+            </div>
+            
+            <!-- IMU panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">🧭 IMU</span>
+                </div>
+                <div class="imu-visual">
+                    <div class="imu-gauge">
+                        <div class="gauge-ring">
+                            <div class="gauge-needle" id="pitch-needle"></div>
+                            <span class="gauge-value" id="pitch-value">0°</span>
+                        </div>
+                        <div class="gauge-label">Pitch</div>
+                    </div>
+                    <div class="imu-gauge">
+                        <div class="gauge-ring">
+                            <div class="gauge-needle" id="roll-needle"></div>
+                            <span class="gauge-value" id="roll-value">0°</span>
+                        </div>
+                        <div class="gauge-label">Roll</div>
+                    </div>
+                    <div class="imu-gauge">
+                        <div class="gauge-ring">
+                            <div class="gauge-needle" id="yaw-needle"></div>
+                            <span class="gauge-value" id="yaw-value">0°</span>
+                        </div>
+                        <div class="gauge-label">Yaw</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Servos panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">⚙️ Servos</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Max Temperature</span>
+                    <span class="stat-value" id="servo-temp">--°C</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill temp" id="temp-bar" style="width: 0%"></div>
+                </div>
+                <div class="stat-row" style="margin-top: 12px;">
+                    <span class="stat-label">Min Voltage</span>
+                    <span class="stat-value" id="servo-volt">--V</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Error Count</span>
+                    <span class="stat-value" id="servo-errors">0</span>
+                </div>
+            </div>
+            
+            <!-- Gait panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">🦶 Gait</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Type</span>
+                    <span class="stat-value" id="gait-type">---</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Speed</span>
+                    <span class="stat-value" id="gait-speed">---</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Running</span>
+                    <span class="stat-value" id="gait-running">No</span>
+                </div>
+            </div>
+            
+            <!-- System panel -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">💻 System</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Loop Time</span>
+                    <span class="stat-value" id="loop-time">---</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Firmware</span>
+                    <span class="stat-value" id="fw-version">---</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Controller</span>
+                    <span class="stat-value" id="ctrl-version">---</span>
+                </div>
+                <div class="nav-links">
+                    <a href="/pointcloud" class="nav-link" target="_blank">
+                        📍 Point Cloud
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Config panel -->
+            <div class="panel" style="grid-column: span 2;">
+                <div class="panel-header">
+                    <span class="panel-title">⚙️ Configuration</span>
+                    <span class="panel-badge">READ-ONLY</span>
+                </div>
+                <div class="config-section" id="config-container">
+                    <p style="color: var(--text-secondary); font-size: 13px;">
+                        Configuration will appear here when connected...
+                    </p>
+                </div>
+            </div>
+            
+        </div>
+        
+        <!-- Footer -->
+        <footer class="footer">
+            <span>MARS — Modular Autonomous Robotic System</span>
+            <span id="last-update">Last update: ---</span>
+        </footer>
+    </div>
+    
+    <script>
+        // =================================================================
+        // Global state
+        // =================================================================
+        let ws = null;
+        let config = {};
+        let lastUpdateTime = 0;
+        
+        // =================================================================
+        // Initialization
+        // =================================================================
+        
+        function init() {
+            // Try to auto-detect address
+            const hostname = window.location.hostname || 'localhost';
+            document.getElementById('ws-address').value = `ws://${hostname}:8766`;
+        }
+        
+        // =================================================================
+        // WebSocket connection
+        // =================================================================
+        
+        function connect() {
+            const address = document.getElementById('ws-address').value;
+            
+            if (ws) {
+                ws.close();
+            }
+            
+            try {
+                ws = new WebSocket(address);
+                
+                ws.onopen = () => {
+                    console.log('Connected to', address);
+                    document.getElementById('ws-status').classList.add('connected');
+                    document.getElementById('connection-text').textContent = 'Connected';
+                    document.getElementById('connection-dialog').classList.add('hidden');
+                    document.getElementById('dashboard').style.display = 'block';
+                    
+                    // Request initial config
+                    ws.send(JSON.stringify({ cmd: 'get_config' }));
+                };
+                
+                ws.onclose = () => {
+                    console.log('Disconnected');
+                    document.getElementById('ws-status').classList.remove('connected');
+                    document.getElementById('connection-text').textContent = 'Disconnected';
+                    document.getElementById('connection-dialog').classList.remove('hidden');
+                };
+                
+                ws.onerror = (err) => {
+                    console.error('WebSocket error:', err);
+                };
+                
+                ws.onmessage = (event) => {
+                    handleMessage(JSON.parse(event.data));
+                };
+                
+            } catch (err) {
+                console.error('Connection failed:', err);
+                alert('Failed to connect: ' + err.message);
+            }
+        }
+        
+        function handleMessage(data) {
+            if (data.type === 'telemetry') {
+                updateTelemetry(data.data);
+            } else if (data.type === 'config') {
+                config = data.data;
+                renderConfig();
+            }
+        }
+        
+        // =================================================================
+        // Telemetry updates
+        // =================================================================
+        
+        function updateTelemetry(t) {
+            lastUpdateTime = Date.now();
+            
+            // Power
+            document.getElementById('battery-v').textContent = t.battery_v.toFixed(2);
+            document.getElementById('current-a').textContent = t.current_a.toFixed(2);
+            
+            // Battery bar (assuming 10V min, 12.6V max for 3S LiPo)
+            const batteryPct = Math.max(0, Math.min(100, (t.battery_v - 10.0) / 2.6 * 100));
+            document.getElementById('battery-bar').style.width = batteryPct + '%';
+            
+            // Color code battery
+            const batteryEl = document.getElementById('battery-v');
+            batteryEl.parentElement.classList.remove('warning', 'danger');
+            if (t.battery_v < 10.5) {
+                batteryEl.parentElement.classList.add('danger');
+            } else if (t.battery_v < 11.0) {
+                batteryEl.parentElement.classList.add('warning');
+            }
+            
+            // Low battery status
+            const lowBattEl = document.getElementById('low-battery-status');
+            lowBattEl.textContent = t.low_battery_active ? 'ACTIVE' : 'OK';
+            lowBattEl.classList.toggle('danger', t.low_battery_active);
+            lowBattEl.classList.toggle('success', !t.low_battery_active);
+            
+            // IMU
+            updateIMUGauge('pitch', t.imu_pitch);
+            updateIMUGauge('roll', t.imu_roll);
+            updateIMUGauge('yaw', t.imu_yaw);
+            
+            // Servos
+            document.getElementById('servo-temp').textContent = t.servo_temp_max.toFixed(1) + '°C';
+            document.getElementById('servo-volt').textContent = t.servo_volt_min.toFixed(2) + 'V';
+            document.getElementById('servo-errors').textContent = t.servo_errors;
+            
+            // Temp bar (0-80°C range)
+            const tempPct = Math.max(0, Math.min(100, t.servo_temp_max / 80 * 100));
+            document.getElementById('temp-bar').style.width = tempPct + '%';
+            
+            // Status indicators
+            updateStatusIndicator('xbox-status', t.xbox_connected, 'Connected', 'Disconnected');
+            updateStatusIndicator('teensy-status', t.teensy_connected, 'Connected', 'Disconnected');
+            updateStatusIndicator('gait-status', t.gait_running, 'Running', 'Stopped');
+            
+            // Safety
+            const safetyEl = document.getElementById('safety-status');
+            safetyEl.textContent = t.safety_state;
+            safetyEl.classList.remove('on', 'off', 'warn');
+            if (t.safety_state === 'OK' || t.safety_state === '---') {
+                safetyEl.classList.add('on');
+            } else {
+                safetyEl.classList.add('off');
+            }
+            document.getElementById('safety-cause').textContent = t.safety_cause || '---';
+            
+            // Robot enabled banner
+            const banner = document.getElementById('robot-banner');
+            if (t.robot_enabled) {
+                banner.className = 'robot-state-banner enabled';
+                banner.innerHTML = '🟢 ROBOT ENABLED';
+            } else {
+                banner.className = 'robot-state-banner disabled';
+                banner.innerHTML = '🔴 ROBOT DISABLED';
+            }
+            
+            // Gait
+            document.getElementById('gait-type').textContent = t.gait_type;
+            document.getElementById('gait-speed').textContent = (t.gait_speed * 100).toFixed(0) + '%';
+            document.getElementById('gait-running').textContent = t.gait_running ? 'Yes' : 'No';
+            
+            // System
+            document.getElementById('loop-time').textContent = (t.loop_time_us / 1000).toFixed(2) + ' ms';
+            document.getElementById('fw-version').textContent = t.fw_version || '---';
+            document.getElementById('ctrl-version').textContent = t.ctrl_version || '---';
+            
+            // Last update
+            const now = new Date();
+            document.getElementById('last-update').textContent = 
+                'Last update: ' + now.toLocaleTimeString();
+        }
+        
+        function updateIMUGauge(axis, degrees) {
+            // Clamp to reasonable range for display
+            const clamped = Math.max(-45, Math.min(45, degrees));
+            
+            // Update value text
+            document.getElementById(axis + '-value').textContent = degrees.toFixed(1) + '°';
+            
+            // Rotate needle (scale: 45° real = 90° visual)
+            const rotation = clamped * 2;
+            document.getElementById(axis + '-needle').style.transform = 
+                `rotate(${rotation}deg)`;
+        }
+        
+        function updateStatusIndicator(id, isOn, onText, offText) {
+            const el = document.getElementById(id);
+            el.textContent = isOn ? onText : offText;
+            el.classList.remove('on', 'off');
+            el.classList.add(isOn ? 'on' : 'off');
+        }
+        
+        // =================================================================
+        // Configuration rendering
+        // =================================================================
+        
+        function renderConfig() {
+            const container = document.getElementById('config-container');
+            
+            if (!config || Object.keys(config).length === 0) {
+                container.innerHTML = '<p style="color: var(--text-secondary);">No configuration data available.</p>';
+                return;
+            }
+            
+            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">';
+            
+            for (const [section, values] of Object.entries(config)) {
+                html += `<div class="config-category">`;
+                html += `<div class="config-category-header">${section}</div>`;
+                
+                for (const [key, value] of Object.entries(values)) {
+                    const displayValue = formatConfigValue(value);
+                    html += `<div class="stat-row">
+                        <span class="stat-label">${key}</span>
+                        <span class="stat-value">${displayValue}</span>
+                    </div>`;
+                }
+                
+                html += `</div>`;
+            }
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function formatConfigValue(value) {
+            if (typeof value === 'boolean') {
+                return value ? '✓ On' : '✗ Off';
+            }
+            if (typeof value === 'number') {
+                if (Number.isInteger(value)) {
+                    return value.toString();
+                }
+                return value.toFixed(2);
+            }
+            return String(value);
+        }
+        
+        // =================================================================
+        // Start
+        // =================================================================
+        
+        init();
+    </script>
+</body>
+</html>
