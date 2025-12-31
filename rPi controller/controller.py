@@ -246,7 +246,7 @@
 # Controller semantic version (bump on behavior-affecting changes)
 CONTROLLER_VERSION = "0.8.4"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 237
+CONTROLLER_BUILD = 238
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
