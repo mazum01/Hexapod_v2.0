@@ -241,11 +241,12 @@
 # 2025-12-31  v0.8.1 b230: Display: Battery voltage now uses average of all servo voltages with low-pass filter (alpha=0.1) for stable display during walking.
 # 2025-12-31  v0.8.2 b231: Safety: Low battery protection - graceful shutdown (stop gait → TUCK → DISABLE) when voltage drops below critical threshold (default 10.0V); configurable via [low_battery] section; SAFETY menu items for enable/thresholds/status; recovery voltage hysteresis prevents servo current spikes from re-enabling.
 # 2025-12-31  v0.8.3 b232: Input: Screen mirror toggle now works in socket mode (joy_controller); Back+Start combo toggles cv2 mirror window.
+# 2025-12-31  v0.8.4 b233: Dashboard: Web-based telemetry dashboard (dashboard.html on port 8766); real-time telemetry streaming via WebSocket; read-only config view; Phase 1 of web configuration system.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.8.3"
+CONTROLLER_VERSION = "0.8.4"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 232
+CONTROLLER_BUILD = 233
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -379,6 +380,14 @@ try:
 except ImportError as e:
     POINTCLOUD_AVAILABLE = False
     print(f"PointCloud not available: {e}")
+
+# import telemetry server (web dashboard)
+try:
+    from telemetry_server import TelemetryServer, TelemetryServerConfig
+    TELEMETRY_SERVER_AVAILABLE = True
+except ImportError as e:
+    TELEMETRY_SERVER_AVAILABLE = False
+    print(f"TelemetryServer not available: {e}")
 
 # Gait type cycling order (RB button) - Standing first for leveling tests
 GAIT_TYPES = [StandingGait, TripodGait, WaveGait, RippleGait, StationaryPattern]
@@ -2480,6 +2489,12 @@ _pointcloudMaxPoints = 50000  # Max points to keep in accumulator
 _pointcloudVoxelMm = 20.0  # Voxel size for deduplication
 _pointcloudServer = None  # PointCloudServer instance
 
+# Web dashboard / telemetry server settings
+_dashboardEnabled = True  # Master switch for web dashboard
+_dashboardPort = 8766  # WebSocket port for telemetry
+_dashboardHz = 10.0  # Target telemetry streaming rate
+_dashboardServer = None  # TelemetryServer instance
+
 try:
     _cfg = configparser.ConfigParser()
     _cfg_path = os.path.join(os.path.dirname(__file__), 'controller.ini') if '__file__' in globals() else 'controller.ini'
@@ -2637,6 +2652,12 @@ try:
         _pointcloudAccumulate = _cfg.getboolean('pointcloud', 'accumulate', fallback=_pointcloudAccumulate)
         _pointcloudMaxPoints = _cfg.getint('pointcloud', 'max_points', fallback=_pointcloudMaxPoints)
         _pointcloudVoxelMm = _cfg.getfloat('pointcloud', 'voxel_mm', fallback=_pointcloudVoxelMm)
+
+    # Load web dashboard settings
+    if 'dashboard' in _cfg:
+        _dashboardEnabled = _cfg.getboolean('dashboard', 'enabled', fallback=_dashboardEnabled)
+        _dashboardPort = _cfg.getint('dashboard', 'port', fallback=_dashboardPort)
+        _dashboardHz = _cfg.getfloat('dashboard', 'stream_hz', fallback=_dashboardHz)
 
     # Merge controller.ini defaults into live PID/IMP/EST menu state (until firmware LIST overwrites)
     try:
@@ -4363,6 +4384,43 @@ else:
     pass  # Point cloud disabled in config
 
 # --------------------------------------------------------------------------------------------------
+# Web Dashboard Server: WebSocket server for telemetry streaming to browser dashboard
+# --------------------------------------------------------------------------------------------------
+if _dashboardEnabled and TELEMETRY_SERVER_AVAILABLE:
+    try:
+        _dashboard_config = TelemetryServerConfig(
+            ws_port=_dashboardPort,
+            http_port=_pointcloudHttpPort,  # Share HTTP port with point cloud
+            telemetry_rate_hz=_dashboardHz,
+        )
+        _dashboardServer = TelemetryServer(_dashboard_config)
+        _dashboardServer.start()
+        _startupSplash.log(f"Dashboard ws://:{_dashboardPort}", "GREEN")
+        if _verbose:
+            print(f"Dashboard WebSocket: ws://0.0.0.0:{_dashboardPort}", end="\r\n")
+            print(f"Dashboard viewer: http://0.0.0.0:{_pointcloudHttpPort}/dashboard", end="\r\n")
+        # Set initial config (read-only view for dashboard)
+        _dashboardServer.set_config("gait", {
+            "type": GAIT_NAMES[0] if GAIT_NAMES else "TRIPOD",
+            "cycle_ms": _gaitCycleMs,
+            "step_length_mm": _gaitStepLenMm,
+        })
+        _dashboardServer.set_config("safety", {
+            "soft_limits": True,
+            "collision_detect": True,
+            "low_battery_enabled": _lowBatteryEnabled,
+            "volt_critical": _lowBatteryVoltCritical,
+            "volt_recovery": _lowBatteryRecoveryVolt,
+        })
+    except Exception as e:
+        _startupSplash.log(f"Dashboard failed: {e}", "RED")
+        if _verbose:
+            print(f"Dashboard server failed: {e}", end="\r\n")
+        _dashboardServer = None
+elif _dashboardEnabled:
+    _startupSplash.log("Dashboard: module not found", "YELLOW")
+
+# --------------------------------------------------------------------------------------------------
 # Command helper: centralizes Teensy command emission (newline termination + throttling/dedup)
 # --------------------------------------------------------------------------------------------------
 _cmd_last = {}            # bytes(command) -> last send time (seconds)
@@ -5567,6 +5625,114 @@ def phase_pointcloud(ctrl):
             pass
 
 
+def phase_dashboard(ctrl):
+    """Phase 7d: Push telemetry data to web dashboard server.
+    
+    Streams real-time telemetry to connected web browser clients via WebSocket.
+    Called from Layer 2 (~30 Hz) since display updates don't need 166 Hz.
+    
+    Args:
+        ctrl: Controller instance
+    """
+    global _dashboardServer, _gaitEngine, _gaitActive
+    global _lowBatteryTriggered, _joyClient
+    
+    if _dashboardServer is None:
+        return
+    
+    # Skip if no clients connected (avoid unnecessary work)
+    if _dashboardServer.client_count == 0:
+        return
+    
+    # Gather telemetry data from various sources
+    loop_time_us = 0.0
+    battery_v = 0.0
+    current_a = 0.0
+    imu_pitch = 0.0
+    imu_roll = 0.0
+    imu_yaw = 0.0
+    robot_enabled = False
+    safety_state = "---"
+    safety_cause = "---"
+    servo_temp_max = 0.0
+    servo_volt_min = 12.6
+    servo_errors = 0
+    
+    # From state array
+    if ctrl.state and len(ctrl.state) > IDX_ROBOT_ENABLED:
+        loop_time_us = ctrl.state[IDX_LOOP_US] if len(ctrl.state) > IDX_LOOP_US else 0.0
+        battery_v = ctrl.state[IDX_BATTERY_V] if len(ctrl.state) > IDX_BATTERY_V else 0.0
+        current_a = ctrl.state[IDX_CURRENT_A] if len(ctrl.state) > IDX_CURRENT_A else 0.0
+        imu_pitch = ctrl.state[IDX_PITCH_DEG] if len(ctrl.state) > IDX_PITCH_DEG else 0.0
+        imu_roll = ctrl.state[IDX_ROLL_DEG] if len(ctrl.state) > IDX_ROLL_DEG else 0.0
+        imu_yaw = ctrl.state[IDX_YAW_DEG] if len(ctrl.state) > IDX_YAW_DEG else 0.0
+        robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if len(ctrl.state) > IDX_ROBOT_ENABLED else False
+    
+    # Safety state from system_telem
+    if ctrl.system_telem is not None and ctrl.system_telem.valid:
+        safety_state = ctrl.system_telem.safety_state or "---"
+        safety_cause = ctrl.system_telem.safety_cause or "---"
+        robot_enabled = ctrl.system_telem.robot_enabled
+    
+    # Servo aggregates from ctrl.servo
+    if ctrl.servo:
+        temps = [s[1] for s in ctrl.servo if s[1] > 0]  # Index 1 = temperature
+        volts = [s[0] for s in ctrl.servo if s[0] > 0]  # Index 0 = voltage
+        if temps:
+            servo_temp_max = max(temps)
+        if volts:
+            servo_volt_min = min(volts)
+    
+    # Gait info
+    gait_running = _gaitActive
+    gait_type = "TRIPOD"  # Default
+    gait_speed = 0.0
+    if _gaitEngine is not None:
+        if hasattr(_gaitEngine, 'gait_name') and _gaitEngine.gait_name:
+            gait_type = _gaitEngine.gait_name
+        elif hasattr(_gaitEngine, 'gait_type'):
+            # Map class to name
+            gait_cls = _gaitEngine.gait_type
+            for i, cls in enumerate(GAIT_TYPES):
+                if gait_cls == cls:
+                    gait_type = GAIT_NAMES[i]
+                    break
+    
+    # Xbox connection
+    xbox_connected = False
+    if ctrl.useJoySocket and _joyClient is not None:
+        xbox_connected = _joyClient.connected and _joyClient.state.connected
+    elif ctrl.controller is not None:
+        xbox_connected = True
+    
+    # Teensy connection
+    teensy_connected = ctrl.teensy is not None and ctrl.teensy.is_open
+    
+    # Push to dashboard server
+    _dashboardServer.push_telemetry(
+        loop_time_us=loop_time_us,
+        battery_v=battery_v,
+        current_a=current_a,
+        imu_pitch=imu_pitch,
+        imu_roll=imu_roll,
+        imu_yaw=imu_yaw,
+        robot_enabled=robot_enabled,
+        safety_state=safety_state,
+        safety_cause=safety_cause,
+        low_battery_active=_lowBatteryTriggered,
+        gait_running=gait_running,
+        gait_type=gait_type,
+        gait_speed=gait_speed,
+        servo_temp_max=servo_temp_max,
+        servo_volt_min=servo_volt_min,
+        servo_errors=servo_errors,
+        ctrl_version=f"v{CONTROLLER_VERSION} b{CONTROLLER_BUILD}",
+        fw_version=FW_VERSION_BANNER,
+        xbox_connected=xbox_connected,
+        teensy_connected=teensy_connected,
+    )
+
+
 def phase_auto_disable(ctrl):
     """Phase 8: Check and execute scheduled auto-disable and low battery protection.
     
@@ -5818,6 +5984,9 @@ def run_layer2_sequencer(ctrl):
     
     # L2.6: Display update (push state to display thread)
     phase_display_update(ctrl, _displayThread, _gaitEngine, _gaitActive)
+    
+    # L2.7: Dashboard telemetry push (web clients)
+    phase_dashboard(ctrl)
     
     return True
 
@@ -6075,6 +6244,11 @@ if _pointcloudServer is not None:
     if _verbose:
         print("Stopping Point Cloud server...", end="\r\n")
     _pointcloudServer.stop()
+# Stop Dashboard server
+if _dashboardServer is not None:
+    if _verbose:
+        print("Stopping Dashboard server...", end="\r\n")
+    _dashboardServer.stop()
 # Restore terminal from curses FIRST (endwin() clears screen)
 cleanup_keyboard()
 # NOW print debug info so it persists after script exits

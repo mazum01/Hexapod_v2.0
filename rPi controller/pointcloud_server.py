@@ -64,11 +64,14 @@ class PointCloudHTTPHandler(http.server.SimpleHTTPRequestHandler):
     
     def translate_path(self, path: str) -> str:
         """Map URL paths to filesystem paths."""
-        # Root path serves the viewer
+        # Root path serves the dashboard (main entry point)
         if path == '/' or path == '':
-            return os.path.join(self.static_dir, 'static', 'pointcloud_viewer.html')
-        # /viewer also serves the viewer
-        if path == '/viewer' or path == '/viewer.html':
+            return os.path.join(self.static_dir, 'static', 'dashboard.html')
+        # /dashboard serves the telemetry dashboard
+        if path == '/dashboard' or path == '/dashboard.html':
+            return os.path.join(self.static_dir, 'static', 'dashboard.html')
+        # /pointcloud or /viewer serves the point cloud viewer
+        if path in ('/pointcloud', '/pointcloud.html', '/viewer', '/viewer.html'):
             return os.path.join(self.static_dir, 'static', 'pointcloud_viewer.html')
         # Other paths resolve normally under static/
         return super().translate_path(path)
