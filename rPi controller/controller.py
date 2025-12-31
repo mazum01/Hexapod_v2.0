@@ -246,7 +246,7 @@
 # Controller semantic version (bump on behavior-affecting changes)
 CONTROLLER_VERSION = "0.8.4"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 235
+CONTROLLER_BUILD = 236
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -5635,7 +5635,7 @@ def phase_dashboard(ctrl):
         ctrl: Controller instance
     """
     global _dashboardServer, _gaitEngine, _gaitActive
-    global _lowBatteryTriggered, _joyClient, _imuThread
+    global _lowBatteryTriggered, _imuThread
     
     if _dashboardServer is None:
         return
@@ -5745,11 +5745,11 @@ def phase_dashboard(ctrl):
                     gait_type = GAIT_NAMES[i]
                     break
     
-    # Xbox connection
+    # Xbox connection - check ctrl.joyClient directly (not global _joyClient)
     xbox_connected = False
-    if ctrl.useJoySocket and _joyClient is not None:
+    if ctrl.useJoySocket and ctrl.joyClient is not None:
         # Use xbox_connected property which checks socket + controller state
-        xbox_connected = _joyClient.xbox_connected
+        xbox_connected = ctrl.joyClient.xbox_connected
     elif ctrl.controller is not None:
         xbox_connected = True
     

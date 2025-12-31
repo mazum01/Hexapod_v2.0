@@ -6,6 +6,7 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2025-12-31  v0.8.4 b236: Dashboard fix: Use ctrl.joyClient directly instead of stale global _joyClient reference for Xbox status.
 2025-12-31  v0.8.4 b235: Dashboard fix: Xbox controller status now uses _joyClient.xbox_connected property instead of socket-only state.
 2025-12-31  v0.8.4 b234: Dashboard fix: Rewrote phase_dashboard() to use ctrl.system_telem and get_imu_frame() instead of stale ctrl.state array; proper fallbacks for battery voltage and IMU data.
 2025-12-31  v0.8.4 b233: Dashboard: Web-based telemetry dashboard (dashboard.html on port 8766); real-time telemetry streaming via WebSocket; read-only config view; Phase 1 of web configuration system.
