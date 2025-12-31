@@ -6,6 +6,7 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2025-12-31  v0.8.4 b234: Dashboard fix: Rewrote phase_dashboard() to use ctrl.system_telem and get_imu_frame() instead of stale ctrl.state array; proper fallbacks for battery voltage and IMU data.
 2025-12-31  v0.8.4 b233: Dashboard: Web-based telemetry dashboard (dashboard.html on port 8766); real-time telemetry streaming via WebSocket; read-only config view; Phase 1 of web configuration system.
 2025-12-31  v0.8.3 b232: Input: Screen mirror toggle now works in socket mode (joy_controller); Back+Start combo toggles cv2 mirror window.
 2025-12-31  v0.8.2 b231: Safety: Low battery protection - graceful shutdown (stop gait → TUCK → DISABLE) when voltage drops below critical threshold (default 10.0V); configurable via [low_battery] section; SAFETY menu items for enable/thresholds/status; recovery voltage hysteresis prevents servo current spikes from re-enabling.

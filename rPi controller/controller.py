@@ -246,7 +246,7 @@
 # Controller semantic version (bump on behavior-affecting changes)
 CONTROLLER_VERSION = "0.8.4"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 233
+CONTROLLER_BUILD = 234
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -5635,7 +5635,7 @@ def phase_dashboard(ctrl):
         ctrl: Controller instance
     """
     global _dashboardServer, _gaitEngine, _gaitActive
-    global _lowBatteryTriggered, _joyClient
+    global _lowBatteryTriggered, _joyClient, _imuThread
     
     if _dashboardServer is None:
         return
@@ -5644,7 +5644,7 @@ def phase_dashboard(ctrl):
     if _dashboardServer.client_count == 0:
         return
     
-    # Gather telemetry data from various sources
+    # Initialize telemetry values
     loop_time_us = 0.0
     battery_v = 0.0
     current_a = 0.0
@@ -5658,26 +5658,32 @@ def phase_dashboard(ctrl):
     servo_volt_min = 12.6
     servo_errors = 0
     
-    # From state array
-    if ctrl.state and len(ctrl.state) > IDX_ROBOT_ENABLED:
-        loop_time_us = ctrl.state[IDX_LOOP_US] if len(ctrl.state) > IDX_LOOP_US else 0.0
-        battery_v = ctrl.state[IDX_BATTERY_V] if len(ctrl.state) > IDX_BATTERY_V else 0.0
-        current_a = ctrl.state[IDX_CURRENT_A] if len(ctrl.state) > IDX_CURRENT_A else 0.0
-        imu_pitch = ctrl.state[IDX_PITCH_DEG] if len(ctrl.state) > IDX_PITCH_DEG else 0.0
-        imu_roll = ctrl.state[IDX_ROLL_DEG] if len(ctrl.state) > IDX_ROLL_DEG else 0.0
-        imu_yaw = ctrl.state[IDX_YAW_DEG] if len(ctrl.state) > IDX_YAW_DEG else 0.0
-        robot_enabled = (ctrl.state[IDX_ROBOT_ENABLED] == 1.0) if len(ctrl.state) > IDX_ROBOT_ENABLED else False
-    
-    # Safety state from system_telem (safety is an int, not a string)
-    if ctrl.system_telem is not None and ctrl.system_telem.valid:
-        # Convert safety int to string (0=OK, non-zero=lockout)
-        safety_int = ctrl.system_telem.safety
+    # Get data from system_telem (S1 telemetry - preferred source)
+    system = getattr(ctrl, 'system_telem', None)
+    if system is not None and getattr(system, 'valid', False):
+        loop_time_us = float(getattr(system, 'loop_us', 0) or 0)
+        battery_v = float(getattr(system, 'battery_v', 0) or 0)
+        current_a = float(getattr(system, 'current_a', 0) or 0)
+        imu_pitch = float(getattr(system, 'pitch_deg', 0) or 0)
+        imu_roll = float(getattr(system, 'roll_deg', 0) or 0)
+        imu_yaw = float(getattr(system, 'yaw_deg', 0) or 0)
+        robot_enabled = getattr(system, 'robot_enabled', False)
+        # Safety state from S1
+        safety_int = getattr(system, 'safety', 0)
         safety_state = "OK" if safety_int == 0 else "LOCKOUT"
-        robot_enabled = ctrl.system_telem.robot_enabled
     
-    # Safety cause from safety_telem if available
-    if hasattr(ctrl, 'safety_telem') and ctrl.safety_telem is not None and ctrl.safety_telem.valid:
-        cause_mask = ctrl.safety_telem.cause_mask
+    # If no S1 telemetry, try IMU thread directly for orientation
+    if (imu_pitch == 0 and imu_roll == 0) and _imuThread is not None and _imuThread.connected:
+        imu_frame = get_imu_frame()
+        if imu_frame.valid:
+            imu_pitch = imu_frame.pitch_deg
+            imu_roll = imu_frame.roll_deg
+            imu_yaw = imu_frame.yaw_deg
+    
+    # Safety cause from safety_telem (S5) if available
+    safety_telem = getattr(ctrl, 'safety_telem', None)
+    if safety_telem is not None and getattr(safety_telem, 'valid', False):
+        cause_mask = getattr(safety_telem, 'cause_mask', 0)
         if cause_mask == 0:
             safety_cause = "---"
         else:
@@ -5690,14 +5696,39 @@ def phase_dashboard(ctrl):
                 causes.append("TEMP")
             safety_cause = ",".join(causes) if causes else f"0x{cause_mask:02X}"
     
-    # Servo aggregates from ctrl.servo
-    if ctrl.servo:
-        temps = [s[1] for s in ctrl.servo if s[1] > 0]  # Index 1 = temperature
-        volts = [s[0] for s in ctrl.servo if s[0] > 0]  # Index 0 = voltage
+    # Servo aggregates - prefer structured servo_telem, fallback to ctrl.servo array
+    servo_telem = getattr(ctrl, 'servo_telem', None)
+    if servo_telem is not None:
+        temps = []
+        volts = []
+        for s in servo_telem:
+            if s is None:
+                continue
+            if getattr(s, 'valid_s3', False):
+                t = float(getattr(s, 'temp_c', 0) or 0)
+                if t > 0:
+                    temps.append(t)
+            if getattr(s, 'valid_s2', False):
+                v = float(getattr(s, 'voltage_v', 0) or 0)
+                if v > 0:
+                    volts.append(v)
         if temps:
             servo_temp_max = max(temps)
         if volts:
             servo_volt_min = min(volts)
+            # If battery_v is missing, use average servo voltage
+            if battery_v <= 0:
+                battery_v = sum(volts) / len(volts)
+    elif ctrl.servo:
+        # Fallback to legacy array format [voltage, temp, ?]
+        temps = [s[1] for s in ctrl.servo if len(s) > 1 and s[1] > 0]
+        volts = [s[0] for s in ctrl.servo if len(s) > 0 and s[0] > 0]
+        if temps:
+            servo_temp_max = max(temps)
+        if volts:
+            servo_volt_min = min(volts)
+            if battery_v <= 0:
+                battery_v = sum(volts) / len(volts)
     
     # Gait info
     gait_running = _gaitActive
@@ -5717,7 +5748,7 @@ def phase_dashboard(ctrl):
     # Xbox connection
     xbox_connected = False
     if ctrl.useJoySocket and _joyClient is not None:
-        xbox_connected = _joyClient.connected and _joyClient.state.connected
+        xbox_connected = _joyClient.connected and getattr(_joyClient.state, 'connected', False)
     elif ctrl.controller is not None:
         xbox_connected = True
     
