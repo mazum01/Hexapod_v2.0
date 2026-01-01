@@ -657,8 +657,9 @@
         }
         
         function handleMessage(data) {
-            if (data.type === 'pointcloud') {
-                updatePointCloud(data.data);
+            // Server sends type='frame' with points as [[x,y,z], ...] arrays
+            if (data.type === 'frame') {
+                updatePointCloud(data);
             }
         }
         
@@ -667,6 +668,7 @@
         // =================================================================
         
         function updatePointCloud(data) {
+            // Points come as array of [x, y, z] arrays from server
             if (!data.points || data.points.length === 0) return;
             
             const points = data.points;
@@ -676,16 +678,17 @@
             let minRange = Infinity, maxRange = 0;
             
             for (let i = 0; i < points.length; i++) {
-                const p = points[i];
+                const p = points[i];  // [x, y, z] array
                 const idx = i * 3;
                 
                 // Convert to scene coords (swap Y/Z for Three.js)
-                positions[idx] = p.x;
-                positions[idx + 1] = p.z;
-                positions[idx + 2] = -p.y;
+                // Server sends [x, y, z] where y is forward, z is up
+                positions[idx] = p[0];      // x stays x
+                positions[idx + 1] = p[2];  // scene Y = data Z (up)
+                positions[idx + 2] = -p[1]; // scene Z = -data Y (forward)
                 
                 // Track range
-                const range = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+                const range = Math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
                 minRange = Math.min(minRange, range);
                 maxRange = Math.max(maxRange, range);
                 
