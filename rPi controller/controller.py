@@ -244,9 +244,9 @@
 # 2025-12-31  v0.8.4 b233: Dashboard: Web-based telemetry dashboard (dashboard.html on port 8766); real-time telemetry streaming via WebSocket; read-only config view; Phase 1 of web configuration system.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.8.4"
+CONTROLLER_VERSION = "0.8.5"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 238
+CONTROLLER_BUILD = 239
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -5635,7 +5635,8 @@ def phase_dashboard(ctrl):
         ctrl: Controller instance
     """
     global _dashboardServer, _gaitEngine, _gaitActive
-    global _lowBatteryTriggered, _imuThread
+    global _lowBatteryTriggered, _imuThread, _marsMenu
+    global _dashboardConfigLastPush
     
     if _dashboardServer is None:
         return
@@ -5643,6 +5644,23 @@ def phase_dashboard(ctrl):
     # Skip if no clients connected (avoid unnecessary work)
     if _dashboardServer.client_count == 0:
         return
+    
+    # Push menu config periodically (every ~2 seconds) or when clients first connect
+    # Config data changes rarely, no need to send every tick
+    try:
+        _dashboardConfigLastPush
+    except NameError:
+        _dashboardConfigLastPush = 0.0
+    
+    now = time.monotonic()
+    if _marsMenu is not None and (now - _dashboardConfigLastPush) > 2.0:
+        _dashboardConfigLastPush = now
+        try:
+            config_data = _marsMenu.get_all_config()
+            _dashboardServer.set_full_config(config_data)
+        except Exception as e:
+            if ctrl.verbose:
+                print(f"[DASHBOARD] Error getting menu config: {e}")
     
     # Initialize telemetry values
     loop_time_us = 0.0

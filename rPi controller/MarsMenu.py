@@ -1599,6 +1599,69 @@ class MarsMenu:
         """Mark the menu as needing re-render."""
         self._needs_render = True
 
+    def get_all_config(self) -> dict:
+        """Export all menu items as a dictionary for web dashboard.
+        
+        Returns a dict of {category_name: {item_label: value_or_display, ...}, ...}
+        Only includes value, option, and info items (not actions).
+        
+        Returns:
+            dict: Configuration organized by category
+        """
+        # Category ID to display name mapping
+        category_names = {
+            MenuCategory.EYES: "Eyes",
+            MenuCategory.GAIT: "Gait",
+            MenuCategory.POSTURE: "Posture",
+            MenuCategory.INFO: "Info",
+            MenuCategory.SAFETY: "Safety",
+            MenuCategory.SYSTEM: "System",
+            MenuCategory.PID: "PID",
+            MenuCategory.IMP: "Impedance",
+            MenuCategory.EST: "Estimator",
+            MenuCategory.IMU: "IMU",
+            MenuCategory.TOF: "ToF",
+            MenuCategory.AUTO: "Autonomy",
+        }
+        
+        config = {}
+        
+        for category_id, items in self._items.items():
+            category_name = category_names.get(category_id, f"Category_{category_id}")
+            category_config = {}
+            
+            for item in items:
+                # Skip action items (buttons) - they have no value to export
+                if item.item_type == "action":
+                    continue
+                
+                # Get the display value for dashboard
+                if item.item_type == "option":
+                    # For options, show the selected option text
+                    if item.options and 0 <= item.value < len(item.options):
+                        display_val = item.options[item.value]
+                    else:
+                        display_val = str(item.value)
+                elif item.item_type == "value":
+                    # For numeric values, include unit
+                    if item.format_func:
+                        display_val = item.format_func(item.value)
+                    else:
+                        display_val = f"{item.value}{item.unit}" if item.unit else item.value
+                elif item.item_type == "info":
+                    # Info items show their display value
+                    display_val = item.get_display_value()
+                else:
+                    display_val = str(item.value) if item.value is not None else "---"
+                
+                category_config[item.label] = display_val
+            
+            # Only include category if it has items
+            if category_config:
+                config[category_name] = category_config
+        
+        return config
+
 
 # Test standalone
 if __name__ == "__main__":

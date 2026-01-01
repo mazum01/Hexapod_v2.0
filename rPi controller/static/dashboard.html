@@ -287,16 +287,123 @@
             margin-top: 10px;
         }
         
-        .config-category {
+        .config-search {
+            width: 100%;
+            padding: 8px 12px;
             margin-bottom: 15px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        
+        .config-search:focus {
+            outline: none;
+            border-color: var(--accent-teal);
+        }
+        
+        .config-search::placeholder {
+            color: var(--text-secondary);
+        }
+        
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+        }
+        
+        .config-category {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+        
+        .config-category.collapsed .config-category-content {
+            display: none;
         }
         
         .config-category-header {
-            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(255, 107, 53, 0.15);
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        
+        .config-category-header:hover {
+            background: rgba(255, 107, 53, 0.25);
+        }
+        
+        .config-category-title {
+            font-size: 13px;
+            font-weight: 600;
             color: var(--accent-orange);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .config-category-toggle {
+            font-size: 14px;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+        }
+        
+        .config-category.collapsed .config-category-toggle {
+            transform: rotate(-90deg);
+        }
+        
+        .config-category-content {
+            padding: 8px 12px;
+        }
+        
+        .config-category-count {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-left: 8px;
+        }
+        
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             padding: 5px 0;
-            border-bottom: 1px dashed var(--border);
-            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(68, 68, 68, 0.3);
+            font-size: 12px;
+        }
+        
+        .config-item:last-child {
+            border-bottom: none;
+        }
+        
+        .config-item-label {
+            color: var(--text-secondary);
+            flex: 1;
+        }
+        
+        .config-item-value {
+            color: var(--accent-teal);
+            font-family: 'Consolas', 'Monaco', monospace;
+            text-align: right;
+            max-width: 50%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .config-item.hidden {
+            display: none;
+        }
+        
+        .config-no-results {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 20px;
+            font-size: 13px;
         }
         
         /* Links */
@@ -627,6 +734,11 @@
                     <span class="panel-title">⚙️ Configuration</span>
                     <span class="panel-badge">READ-ONLY</span>
                 </div>
+                <input type="text" 
+                       class="config-search" 
+                       id="config-search" 
+                       placeholder="🔍 Search configuration..."
+                       oninput="filterConfig(this.value)">
                 <div class="config-section" id="config-container">
                     <p style="color: var(--text-secondary); font-size: 13px;">
                         Configuration will appear here when connected...
@@ -826,33 +938,100 @@
         // Configuration rendering
         // =================================================================
         
+        // Track collapsed state per category
+        let collapsedCategories = new Set();
+        
         function renderConfig() {
             const container = document.getElementById('config-container');
+            const searchInput = document.getElementById('config-search');
+            const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
             
             if (!config || Object.keys(config).length === 0) {
-                container.innerHTML = '<p style="color: var(--text-secondary);">No configuration data available.</p>';
+                container.innerHTML = '<p class="config-no-results">No configuration data available.</p>';
                 return;
             }
             
-            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">';
+            // Sort categories for consistent order
+            const categoryOrder = [
+                'Info', 'Gait', 'Posture', 'Safety', 'Eyes', 
+                'PID', 'Impedance', 'Estimator', 'IMU', 'ToF', 'Autonomy', 'System'
+            ];
             
-            for (const [section, values] of Object.entries(config)) {
-                html += `<div class="config-category">`;
-                html += `<div class="config-category-header">${section}</div>`;
+            const sortedCategories = Object.keys(config).sort((a, b) => {
+                const aIdx = categoryOrder.indexOf(a);
+                const bIdx = categoryOrder.indexOf(b);
+                if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
+                if (aIdx === -1) return 1;
+                if (bIdx === -1) return -1;
+                return aIdx - bIdx;
+            });
+            
+            let html = '<div class="config-grid">';
+            let totalVisible = 0;
+            
+            for (const section of sortedCategories) {
+                const values = config[section];
+                const isCollapsed = collapsedCategories.has(section);
+                const itemCount = Object.keys(values).length;
                 
-                for (const [key, value] of Object.entries(values)) {
+                // Filter items based on search
+                const filteredItems = Object.entries(values).filter(([key, value]) => {
+                    if (!searchTerm) return true;
+                    return key.toLowerCase().includes(searchTerm) || 
+                           String(value).toLowerCase().includes(searchTerm) ||
+                           section.toLowerCase().includes(searchTerm);
+                });
+                
+                // Skip category if no items match search
+                if (searchTerm && filteredItems.length === 0) continue;
+                
+                totalVisible += filteredItems.length;
+                
+                html += `<div class="config-category ${isCollapsed ? 'collapsed' : ''}" data-category="${section}">`;
+                html += `<div class="config-category-header" onclick="toggleCategory('${section}')">
+                    <span>
+                        <span class="config-category-title">${section}</span>
+                        <span class="config-category-count">(${itemCount})</span>
+                    </span>
+                    <span class="config-category-toggle">▼</span>
+                </div>`;
+                html += '<div class="config-category-content">';
+                
+                for (const [key, value] of filteredItems) {
                     const displayValue = formatConfigValue(value);
-                    html += `<div class="stat-row">
-                        <span class="stat-label">${key}</span>
-                        <span class="stat-value">${displayValue}</span>
+                    const matchesSearch = !searchTerm || 
+                        key.toLowerCase().includes(searchTerm) || 
+                        String(value).toLowerCase().includes(searchTerm);
+                    
+                    html += `<div class="config-item ${matchesSearch ? '' : 'hidden'}">
+                        <span class="config-item-label">${key}</span>
+                        <span class="config-item-value" title="${displayValue}">${displayValue}</span>
                     </div>`;
                 }
                 
-                html += `</div>`;
+                html += '</div></div>';
             }
             
             html += '</div>';
+            
+            if (searchTerm && totalVisible === 0) {
+                html = `<p class="config-no-results">No results found for "${searchTerm}"</p>`;
+            }
+            
             container.innerHTML = html;
+        }
+        
+        function toggleCategory(category) {
+            if (collapsedCategories.has(category)) {
+                collapsedCategories.delete(category);
+            } else {
+                collapsedCategories.add(category);
+            }
+            renderConfig();
+        }
+        
+        function filterConfig(searchTerm) {
+            renderConfig();
         }
         
         function formatConfigValue(value) {

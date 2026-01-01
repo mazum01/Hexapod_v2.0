@@ -363,12 +363,12 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
 - [x] Configurable via [dashboard] in controller.ini
   - enabled=true, port=8766, stream_hz=10
 
-### W2. Phase 2: Enhanced Config View
-- [ ] Expand configuration sections displayed
-  - All menu categories: EYES, GAIT, POSTURE, SAFETY, PID, IMP, EST, IMU, TOF, AUTO
-  - Show current values from menu state
-- [ ] Add configuration search/filter
-- [ ] Collapsible sections for better organization
+### W2. Phase 2: Enhanced Config View ✅ COMPLETE (v0.8.5)
+- [x] Expand configuration sections displayed
+  - All menu categories: EYES, GAIT, POSTURE, SAFETY, PID, IMP, EST, IMU, TOF, AUTO, INFO, SYSTEM
+  - MarsMenu.get_all_config() exports all menu item values
+- [x] Add configuration search/filter
+- [x] Collapsible sections for better organization
 
 ### W3. Phase 3: Configuration Editing
 - [ ] Add set_config WebSocket command support
