@@ -5636,8 +5636,7 @@ def phase_dashboard(ctrl):
         ctrl: Controller instance
     """
     global _dashboardServer, _gaitEngine, _gaitActive
-    global _lowBatteryTriggered, _imuThread, _marsMenu
-    global _dashboardConfigLastPush
+    global _lowBatteryTriggered, _joyClient
     
     if _dashboardServer is None:
         return
@@ -5646,24 +5645,7 @@ def phase_dashboard(ctrl):
     if _dashboardServer.client_count == 0:
         return
     
-    # Push menu config periodically (every ~2 seconds) or when clients first connect
-    # Config data changes rarely, no need to send every tick
-    try:
-        _dashboardConfigLastPush
-    except NameError:
-        _dashboardConfigLastPush = 0.0
-    
-    now = time.monotonic()
-    if _marsMenu is not None and (now - _dashboardConfigLastPush) > 2.0:
-        _dashboardConfigLastPush = now
-        try:
-            config_data = _marsMenu.get_all_config()
-            _dashboardServer.set_full_config(config_data)
-        except Exception as e:
-            if ctrl.verbose:
-                print(f"[DASHBOARD] Error getting menu config: {e}")
-    
-    # Initialize telemetry values
+    # Gather telemetry data from various sources
     loop_time_us = 0.0
     battery_v = 0.0
     current_a = 0.0
