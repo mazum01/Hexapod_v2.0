@@ -6,6 +6,7 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2026-01-01  v0.8.5 b241: Dashboard: Rebuilt LCARS per Manifesto - proper swept elbows (thick→thin frames), cap buttons, 3 font sizes, minimalist layout; simpler, more authentic TNG styling.
 2026-01-01  v0.8.5 b240: Dashboard: LCARS theme for dashboard and point cloud viewer - authentic Star Trek TNG styling with distinctive color palette (orange/peach/tan/blue/purple), curved panels, sidebar navigation, stardate timestamps.
 2026-01-01  v0.8.5 b239: Dashboard W2: Enhanced config view with all menu categories (12 tabs), collapsible sections, search/filter; MarsMenu.get_all_config() exports menu items to dashboard; config pushed every 2s.
 2025-12-31  v0.8.4 b238: joy_controller fix: Send state to client even when Xbox disconnected so dashboard can update status.
