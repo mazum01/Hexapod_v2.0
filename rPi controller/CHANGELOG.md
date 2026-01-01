@@ -6,6 +6,14 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2026-01-01  v0.8.5 b241: Dashboard: Rebuilt LCARS per Manifesto - proper swept elbows (thick→thin frames), cap buttons, 3 font sizes, minimalist layout; simpler, more authentic TNG styling.
+2026-01-01  v0.8.5 b240: Dashboard: LCARS theme for dashboard and point cloud viewer - authentic Star Trek TNG styling with distinctive color palette (orange/peach/tan/blue/purple), curved panels, sidebar navigation, stardate timestamps.
+2026-01-01  v0.8.5 b239: Dashboard W2: Enhanced config view with all menu categories (12 tabs), collapsible sections, search/filter; MarsMenu.get_all_config() exports menu items to dashboard; config pushed every 2s.
+2025-12-31  v0.8.4 b238: joy_controller fix: Send state to client even when Xbox disconnected so dashboard can update status.
+2025-12-31  v0.8.4 b237: Dashboard fix: Safety state now uses safety_telem.lockout (S5) instead of system_telem.safety (S1), which was actually rr_index due to firmware format mismatch.
+2025-12-31  v0.8.4 b236: Dashboard fix: Use ctrl.joyClient directly instead of stale global _joyClient reference for Xbox status.
+2025-12-31  v0.8.4 b235: Dashboard fix: Xbox controller status now uses _joyClient.xbox_connected property instead of socket-only state.
+2025-12-31  v0.8.4 b234: Dashboard fix: Rewrote phase_dashboard() to use ctrl.system_telem and get_imu_frame() instead of stale ctrl.state array; proper fallbacks for battery voltage and IMU data.
 2025-12-31  v0.8.4 b233: Dashboard: Web-based telemetry dashboard (dashboard.html on port 8766); real-time telemetry streaming via WebSocket; read-only config view; Phase 1 of web configuration system.
 2025-12-31  v0.8.3 b232: Input: Screen mirror toggle now works in socket mode (joy_controller); Back+Start combo toggles cv2 mirror window.
 2025-12-31  v0.8.2 b231: Safety: Low battery protection - graceful shutdown (stop gait → TUCK → DISABLE) when voltage drops below critical threshold (default 10.0V); configurable via [low_battery] section; SAFETY menu items for enable/thresholds/status; recovery voltage hysteresis prevents servo current spikes from re-enabling.

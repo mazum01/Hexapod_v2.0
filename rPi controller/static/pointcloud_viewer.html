@@ -3,389 +3,598 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MARS Point Cloud Viewer</title>
+    <title>MARS — Point Cloud</title>
     <style>
+        /* ================================================================
+           LCARS Point Cloud Viewer - Following the Manifesto
+           - Thick→thin frame transitions (LCARS Swept)
+           - Minimalism: let the visualization breathe
+           - 3 font sizes only
+           - Max 5 colors with purpose
+           ================================================================ */
+        
+        @import url('https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&display=swap');
+        
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
         
+        :root {
+            /* LCARS color palette */
+            --lcars-black: #000000;
+            --lcars-orange: #ff9900;
+            --lcars-peach: #ffcc99;
+            --lcars-tan: #cc9966;
+            --lcars-blue: #9999ff;
+            --lcars-purple: #cc99cc;
+            --lcars-alert: #cc4444;
+            --lcars-ok: #99cc66;
+            
+            /* Spacing */
+            --frame-gap: 6px;
+            --cap-radius: 20px;
+            --swept-radius: 40px;
+            
+            /* Font sizes (only 3) */
+            --font-title: 28px;
+            --font-subhead: 16px;
+            --font-data: 14px;
+        }
+        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #1a1a2e;
-            color: #eee;
+            font-family: 'Antonio', 'Helvetica Neue', Arial, sans-serif;
+            background: var(--lcars-black);
+            color: var(--lcars-peach);
+            height: 100vh;
             overflow: hidden;
         }
         
-        #container {
-            width: 100vw;
+        /* ================================================================
+           Main Layout - LCARS Frame Structure
+           ================================================================ */
+        
+        .lcars-container {
             height: 100vh;
-        }
-        
-        #info-panel {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border-radius: 8px;
-            min-width: 200px;
-            z-index: 100;
-        }
-        
-        #info-panel h2 {
-            color: #ff6b35;
-            font-size: 16px;
-            margin-bottom: 10px;
-            border-bottom: 1px solid #444;
-            padding-bottom: 5px;
-        }
-        
-        .stat-row {
             display: flex;
-            justify-content: space-between;
-            margin: 5px 0;
-            font-size: 13px;
+            flex-direction: column;
         }
         
-        .stat-label {
-            color: #888;
+        /* Top header bar with swept */
+        .lcars-header {
+            display: flex;
+            height: 60px;
+            gap: var(--frame-gap);
+            flex-shrink: 0;
         }
         
-        .stat-value {
-            color: #4ecdc4;
-            font-family: monospace;
+        .lcars-header-swept {
+            width: 120px;
+            height: 60px;
+            background: var(--lcars-orange);
+            border-bottom-right-radius: var(--swept-radius);
+            flex-shrink: 0;
         }
         
-        #status {
-            display: inline-block;
+        .lcars-header-bar {
+            flex: 1;
+            height: 40px;
+            background: var(--lcars-orange);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 30px;
+        }
+        
+        .lcars-header-title {
+            font-size: var(--font-title);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 4px;
+        }
+        
+        /* Header status caps */
+        .lcars-header-caps {
+            display: flex;
+            gap: var(--frame-gap);
+            height: 40px;
+            margin-left: auto;
+        }
+        
+        .lcars-cap {
+            height: 40px;
+            padding: 0 20px;
+            background: var(--lcars-tan);
+            border-radius: var(--cap-radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: var(--font-subhead);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .lcars-cap.status {
+            background: var(--lcars-purple);
+            gap: 8px;
+        }
+        
+        .status-dot {
             width: 10px;
             height: 10px;
             border-radius: 50%;
-            background: #ff4444;
-            margin-right: 8px;
+            background: var(--lcars-alert);
         }
         
-        #status.connected {
-            background: #44ff44;
+        .status-dot.connected {
+            background: var(--lcars-ok);
         }
         
-        #controls {
-            position: absolute;
-            bottom: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border-radius: 8px;
-            z-index: 100;
-        }
+        /* ================================================================
+           Body - Sidebar + Viewer
+           ================================================================ */
         
-        button {
-            background: #4ecdc4;
-            border: none;
-            color: #1a1a2e;
-            padding: 8px 16px;
-            margin: 3px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: background 0.2s;
-        }
-        
-        button:hover {
-            background: #45b7aa;
-        }
-        
-        button.active {
-            background: #ff6b35;
-        }
-        
-        button:disabled {
-            background: #555;
-            cursor: not-allowed;
-        }
-        
-        #pose-panel {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border-radius: 8px;
-            min-width: 180px;
-            z-index: 100;
-        }
-        
-        #pose-panel h3 {
-            color: #ff6b35;
-            font-size: 14px;
-            margin-bottom: 8px;
-        }
-        
-        .pose-axis {
+        .lcars-body {
             display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            margin: 3px 0;
+            flex: 1;
+            gap: var(--frame-gap);
+            padding-top: var(--frame-gap);
+            overflow: hidden;
         }
         
-        .axis-x { color: #ff6b6b; }
-        .axis-y { color: #69db7c; }
-        .axis-z { color: #74c0fc; }
+        /* Sidebar with controls */
+        .lcars-sidebar {
+            width: 120px;
+            display: flex;
+            flex-direction: column;
+            gap: var(--frame-gap);
+            flex-shrink: 0;
+        }
         
-        #help {
+        .lcars-sidebar-btn {
+            height: 32px;
+            background: var(--lcars-tan);
+            border-radius: 0 var(--cap-radius) var(--cap-radius) 0;
+            display: flex;
+            align-items: center;
+            padding-left: 15px;
+            font-size: var(--font-data);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        
+        .lcars-sidebar-btn:hover {
+            background: var(--lcars-peach);
+        }
+        
+        .lcars-sidebar-btn.active {
+            background: var(--lcars-orange);
+        }
+        
+        .lcars-sidebar-spacer {
+            flex: 1;
+            background: var(--lcars-tan);
+            min-height: 20px;
+        }
+        
+        .lcars-sidebar-swept {
+            height: 40px;
+            background: var(--lcars-tan);
+            border-top-right-radius: var(--swept-radius);
+        }
+        
+        /* ================================================================
+           3D Viewer Area
+           ================================================================ */
+        
+        .lcars-viewer {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            margin-right: 20px;
+        }
+        
+        /* Viewer frame - thick header, thin sides */
+        .lcars-viewer-header {
+            height: 28px;
+            background: var(--lcars-blue);
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            gap: 20px;
+        }
+        
+        .lcars-viewer-title {
+            font-size: var(--font-subhead);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .lcars-viewer-stat {
+            font-size: var(--font-data);
+            color: var(--lcars-black);
+        }
+        
+        .lcars-viewer-stat span {
+            font-weight: 700;
+        }
+        
+        .lcars-viewer-body {
+            flex: 1;
+            border-left: 4px solid var(--lcars-blue);
+            border-right: 4px solid var(--lcars-blue);
+            border-bottom: 4px solid var(--lcars-blue);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* ================================================================
+           Stats Overlay (minimal)
+           ================================================================ */
+        
+        .lcars-overlay {
             position: absolute;
-            bottom: 10px;
-            right: 10px;
+            bottom: 15px;
+            right: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            pointer-events: none;
+        }
+        
+        .lcars-stat-chip {
+            padding: 6px 14px;
             background: rgba(0, 0, 0, 0.7);
-            padding: 10px 15px;
-            border-radius: 8px;
+            border-left: 3px solid var(--lcars-orange);
+            font-size: var(--font-data);
+        }
+        
+        .lcars-stat-chip .label {
+            color: var(--lcars-tan);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 10px;
+        }
+        
+        .lcars-stat-chip .value {
+            color: var(--lcars-orange);
+            font-weight: 700;
+        }
+        
+        /* ================================================================
+           Footer
+           ================================================================ */
+        
+        .lcars-footer {
+            display: flex;
+            height: 24px;
+            gap: var(--frame-gap);
+            margin-top: var(--frame-gap);
+            flex-shrink: 0;
+        }
+        
+        .lcars-footer-swept {
+            width: 120px;
+            background: var(--lcars-tan);
+            border-top-right-radius: var(--swept-radius);
+        }
+        
+        .lcars-footer-bar {
+            flex: 1;
+            height: 18px;
+            background: var(--lcars-tan);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+        
+        .lcars-footer-text {
             font-size: 11px;
-            color: #888;
-            z-index: 100;
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 2px;
         }
         
-        #connection-input {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9);
-            padding: 30px;
-            border-radius: 12px;
-            text-align: center;
-            z-index: 200;
+        .lcars-footer-cap {
+            width: 60px;
+            height: 18px;
+            background: var(--lcars-orange);
+            border-radius: var(--cap-radius);
         }
         
-        #connection-input.hidden {
+        /* ================================================================
+           Connection Dialog
+           ================================================================ */
+        
+        .lcars-dialog {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--lcars-black);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .lcars-dialog.hidden {
             display: none;
         }
         
-        #connection-input h2 {
-            color: #ff6b35;
+        .lcars-dialog-box {
+            display: flex;
+            flex-direction: column;
+            gap: var(--frame-gap);
+            min-width: 380px;
+        }
+        
+        .lcars-dialog-header {
+            height: 50px;
+            background: var(--lcars-orange);
+            border-radius: 0 var(--cap-radius) var(--cap-radius) 0;
+            display: flex;
+            align-items: center;
+            padding-left: 25px;
+        }
+        
+        .lcars-dialog-title {
+            font-size: var(--font-title);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 3px;
+        }
+        
+        .lcars-dialog-body {
+            background: rgba(20, 20, 30, 0.8);
+            border-left: 8px solid var(--lcars-orange);
+            border-right: 4px solid var(--lcars-tan);
+            border-bottom: 4px solid var(--lcars-tan);
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .lcars-dialog-subtitle {
+            font-size: var(--font-subhead);
+            color: var(--lcars-tan);
             margin-bottom: 20px;
         }
         
-        #connection-input input {
-            background: #333;
-            border: 1px solid #555;
-            color: #eee;
-            padding: 10px;
-            border-radius: 4px;
-            width: 250px;
-            margin-bottom: 15px;
-            font-size: 14px;
+        .lcars-dialog-input {
+            width: 100%;
+            padding: 12px 20px;
+            background: var(--lcars-black);
+            border: 2px solid var(--lcars-blue);
+            border-radius: var(--cap-radius);
+            color: var(--lcars-peach);
+            font-size: var(--font-subhead);
+            font-family: inherit;
+            margin-bottom: 20px;
         }
         
-        #connection-input input:focus {
+        .lcars-dialog-input:focus {
             outline: none;
-            border-color: #4ecdc4;
+            border-color: var(--lcars-orange);
+        }
+        
+        .lcars-dialog-btn {
+            padding: 12px 40px;
+            background: var(--lcars-peach);
+            border: none;
+            border-radius: var(--cap-radius);
+            color: var(--lcars-black);
+            font-size: var(--font-subhead);
+            font-weight: 700;
+            font-family: inherit;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        
+        .lcars-dialog-btn:hover {
+            background: var(--lcars-orange);
         }
     </style>
-</head>
-<body>
-    <div id="container"></div>
-    
-    <!-- Connection dialog -->
-    <div id="connection-input">
-        <h2>🤖 MARS Point Cloud</h2>
-        <p style="margin-bottom: 15px; color: #888;">Enter WebSocket server address:</p>
-        <input type="text" id="ws-address" placeholder="ws://192.168.1.100:8765" value="">
-        <br>
-        <button onclick="connect()">Connect</button>
-    </div>
-    
-    <!-- Info panel -->
-    <div id="info-panel">
-        <h2><span id="status"></span>Point Cloud</h2>
-        <div class="stat-row">
-            <span class="stat-label">Points:</span>
-            <span class="stat-value" id="point-count">0</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">FPS:</span>
-            <span class="stat-value" id="fps">0</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Mode:</span>
-            <span class="stat-value" id="mode">Live</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Latency:</span>
-            <span class="stat-value" id="latency">--</span>
-        </div>
-    </div>
-    
-    <!-- Pose panel -->
-    <div id="pose-panel">
-        <h3>Robot Pose</h3>
-        <div class="pose-axis">
-            <span class="axis-x">X:</span>
-            <span class="stat-value" id="pos-x">0.0</span>
-        </div>
-        <div class="pose-axis">
-            <span class="axis-y">Y:</span>
-            <span class="stat-value" id="pos-y">0.0</span>
-        </div>
-        <div class="pose-axis">
-            <span class="axis-z">Z:</span>
-            <span class="stat-value" id="pos-z">0.0</span>
-        </div>
-        <hr style="margin: 8px 0; border-color: #444;">
-        <div class="pose-axis">
-            <span class="stat-label">Roll:</span>
-            <span class="stat-value" id="rot-roll">0.0°</span>
-        </div>
-        <div class="pose-axis">
-            <span class="stat-label">Pitch:</span>
-            <span class="stat-value" id="rot-pitch">0.0°</span>
-        </div>
-        <div class="pose-axis">
-            <span class="stat-label">Yaw:</span>
-            <span class="stat-value" id="rot-yaw">0.0°</span>
-        </div>
-    </div>
-    
-    <!-- Controls -->
-    <div id="controls">
-        <button id="btn-live" class="active" onclick="setMode('live')">Live</button>
-        <button id="btn-accumulate" onclick="setMode('accumulate')">Accumulate</button>
-        <button onclick="clearPoints()">Clear</button>
-        <button onclick="resetView()">Reset View</button>
-        <button onclick="togglePause()" id="btn-pause">Pause</button>
-        <button onclick="resetPose()">Reset Pose</button>
-    </div>
-    
-    <!-- Help -->
-    <div id="help">
-        🖱️ Drag to rotate | Scroll to zoom | Right-drag to pan
-    </div>
-    
-    <!-- Three.js from CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <!-- Connection Dialog -->
+    <div class="lcars-dialog" id="connection-dialog">
+        <div class="lcars-dialog-box">
+            <div class="lcars-dialog-header">
+                <span class="lcars-dialog-title">Point Cloud</span>
+            </div>
+            <div class="lcars-dialog-body">
+                <div class="lcars-dialog-subtitle">3D ToF Sensor Visualization</div>
+                <input type="text" class="lcars-dialog-input" id="ws-address" placeholder="ws://192.168.1.100:8766">
+                <br>
+                <button class="lcars-dialog-btn" onclick="connect()">Engage</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Main Interface -->
+    <div id="viewer" style="display: none;">
+        <div class="lcars-container">
+            
+            <!-- Header -->
+            <div class="lcars-header">
+                <div class="lcars-header-swept"></div>
+                <div class="lcars-header-bar">
+                    <span class="lcars-header-title">Point Cloud</span>
+                    <div class="lcars-header-caps">
+                        <div class="lcars-cap">
+                            <span id="point-count">0</span>&nbsp;Points
+                        </div>
+                        <div class="lcars-cap status">
+                            <span class="status-dot" id="ws-status"></span>
+                            <span id="connection-text">Offline</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Body -->
+            <div class="lcars-body">
+                
+                <!-- Sidebar -->
+                <div class="lcars-sidebar">
+                    <div class="lcars-sidebar-btn active" onclick="setView('top')">Top</div>
+                    <div class="lcars-sidebar-btn" onclick="setView('front')">Front</div>
+                    <div class="lcars-sidebar-btn" onclick="setView('side')">Side</div>
+                    <div class="lcars-sidebar-btn" onclick="setView('iso')">Iso</div>
+                    <div class="lcars-sidebar-spacer"></div>
+                    <div class="lcars-sidebar-btn" onclick="toggleGrid()">Grid</div>
+                    <div class="lcars-sidebar-btn" onclick="resetCamera()">Reset</div>
+                    <div class="lcars-sidebar-swept"></div>
+                </div>
+                
+                <!-- 3D Viewer -->
+                <div class="lcars-viewer">
+                    <div class="lcars-viewer-header">
+                        <span class="lcars-viewer-title">3D View</span>
+                        <span class="lcars-viewer-stat">Range: <span id="min-range">0</span> - <span id="max-range">0</span> mm</span>
+                    </div>
+                    <div class="lcars-viewer-body">
+                        <div id="canvas-container"></div>
+                        <div class="lcars-overlay">
+                            <div class="lcars-stat-chip">
+                                <div class="label">FPS</div>
+                                <div class="value" id="fps">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+            
+            <!-- Footer -->
+            <div class="lcars-footer">
+                <div class="lcars-footer-swept"></div>
+                <div class="lcars-footer-bar">
+                    <span class="lcars-footer-text">MARS — Point Cloud Viewer</span>
+                    <span class="lcars-footer-text" id="last-update">---</span>
+                </div>
+                <div class="lcars-footer-cap"></div>
+            </div>
+            
+        </div>
+    </div>
     
     <script>
         // =================================================================
         // Global state
         // =================================================================
-        let scene, camera, renderer, controls;
-        let pointCloud, robotMarker, gridHelper, axesHelper;
         let ws = null;
-        let isPaused = false;
-        let currentMode = 'live';
-        
-        // Performance tracking
+        let scene, camera, renderer, controls;
+        let pointCloud, gridHelper;
+        let robotMarker;
+        let gridVisible = true;
         let frameCount = 0;
-        let lastFpsTime = performance.now();
-        let lastFrameTime = 0;
+        let lastFpsUpdate = Date.now();
         
-        // Point cloud data
-        const MAX_POINTS = 100000;
-        let positions, colors;
-        let pointCount = 0;
+        // LCARS colors for visualization
+        const LCARS = {
+            orange: 0xff9900,
+            peach: 0xffcc99,
+            tan: 0xcc9966,
+            blue: 0x9999ff,
+            purple: 0xcc99cc,
+            ok: 0x99cc66,
+            alert: 0xcc4444
+        };
         
         // =================================================================
         // Initialization
         // =================================================================
         
         function init() {
-            const container = document.getElementById('container');
+            const hostname = window.location.hostname || 'localhost';
+            document.getElementById('ws-address').value = `ws://${hostname}:8766`;
+        }
+        
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
             
             // Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a2e);
+            scene.background = new THREE.Color(0x000000);
             
             // Camera
-            camera = new THREE.PerspectiveCamera(
-                60,
-                window.innerWidth / window.innerHeight,
-                1,
-                50000
-            );
-            camera.position.set(1000, 1000, 1000);
+            camera = new THREE.PerspectiveCamera(60, width / height, 1, 10000);
+            camera.position.set(0, 600, 400);
             camera.lookAt(0, 0, 0);
             
             // Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(width, height);
             renderer.setPixelRatio(window.devicePixelRatio);
             container.appendChild(renderer.domElement);
             
             // Controls
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
-            controls.dampingFactor = 0.05;
-            controls.screenSpacePanning = true;
-            controls.minDistance = 100;
-            controls.maxDistance = 20000;
+            controls.dampingFactor = 0.1;
+            controls.rotateSpeed = 0.5;
             
-            // Grid (XY plane, Z up)
-            gridHelper = new THREE.GridHelper(5000, 50, 0x444444, 0x333333);
-            gridHelper.rotation.x = Math.PI / 2;  // Rotate to XY plane
+            // Grid - LCARS tan color
+            gridHelper = new THREE.GridHelper(1000, 20, LCARS.tan, 0x333333);
             scene.add(gridHelper);
             
-            // Axes helper (X=red, Y=green, Z=blue)
-            axesHelper = new THREE.AxesHelper(500);
-            scene.add(axesHelper);
+            // Robot marker - LCARS orange
+            const robotGeo = new THREE.ConeGeometry(30, 60, 6);
+            robotGeo.rotateX(Math.PI / 2);
+            const robotMat = new THREE.MeshBasicMaterial({ 
+                color: LCARS.orange,
+                transparent: true,
+                opacity: 0.8
+            });
+            robotMarker = new THREE.Mesh(robotGeo, robotMat);
+            robotMarker.position.set(0, 30, 0);
+            scene.add(robotMarker);
             
             // Point cloud geometry
             const geometry = new THREE.BufferGeometry();
-            positions = new Float32Array(MAX_POINTS * 3);
-            colors = new Float32Array(MAX_POINTS * 3);
-            
-            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-            geometry.setDrawRange(0, 0);
-            
             const material = new THREE.PointsMaterial({
-                size: 15,
+                size: 8,
                 vertexColors: true,
                 sizeAttenuation: true
             });
-            
             pointCloud = new THREE.Points(geometry, material);
             scene.add(pointCloud);
             
-            // Robot marker (simple arrow showing direction)
-            const robotGeom = new THREE.ConeGeometry(30, 80, 8);
-            robotGeom.rotateX(Math.PI / 2);
-            const robotMat = new THREE.MeshBasicMaterial({ color: 0xff6b35 });
-            robotMarker = new THREE.Mesh(robotGeom, robotMat);
-            scene.add(robotMarker);
-            
-            // Add robot body outline
-            const bodyGeom = new THREE.CircleGeometry(60, 6);
-            const bodyMat = new THREE.MeshBasicMaterial({ 
-                color: 0xff6b35, 
-                transparent: true, 
-                opacity: 0.3,
-                side: THREE.DoubleSide
-            });
-            const bodyMesh = new THREE.Mesh(bodyGeom, bodyMat);
-            bodyMesh.rotation.x = -Math.PI / 2;
-            robotMarker.add(bodyMesh);
-            
-            // Ambient lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-            scene.add(ambientLight);
+            // Axis helper (small, LCARS colors)
+            const axesHelper = new THREE.AxesHelper(50);
+            scene.add(axesHelper);
             
             // Handle resize
-            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('resize', onResize);
             
-            // Start render loop
+            // Animation loop
             animate();
-            
-            // Try to auto-connect
-            const hostname = window.location.hostname || 'localhost';
-            document.getElementById('ws-address').value = `ws://${hostname}:8765`;
-        }
-        
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
         }
         
         function animate() {
@@ -393,177 +602,173 @@
             controls.update();
             renderer.render(scene, camera);
             
-            // Update FPS
+            // FPS counter
             frameCount++;
-            const now = performance.now();
-            if (now - lastFpsTime >= 1000) {
+            const now = Date.now();
+            if (now - lastFpsUpdate >= 1000) {
                 document.getElementById('fps').textContent = frameCount;
                 frameCount = 0;
-                lastFpsTime = now;
+                lastFpsUpdate = now;
             }
         }
         
+        function onResize() {
+            const container = document.getElementById('canvas-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+        
         // =================================================================
-        // WebSocket connection
+        // WebSocket
         // =================================================================
         
         function connect() {
             const address = document.getElementById('ws-address').value;
             
-            if (ws) {
-                ws.close();
-            }
+            if (ws) ws.close();
             
             try {
                 ws = new WebSocket(address);
                 
                 ws.onopen = () => {
-                    console.log('Connected to', address);
-                    document.getElementById('status').classList.add('connected');
-                    document.getElementById('connection-input').classList.add('hidden');
+                    document.getElementById('ws-status').classList.add('connected');
+                    document.getElementById('connection-text').textContent = 'Online';
+                    document.getElementById('connection-dialog').classList.add('hidden');
+                    document.getElementById('viewer').style.display = 'block';
+                    initScene();
+                    onResize();
                 };
                 
                 ws.onclose = () => {
-                    console.log('Disconnected');
-                    document.getElementById('status').classList.remove('connected');
-                    document.getElementById('connection-input').classList.remove('hidden');
+                    document.getElementById('ws-status').classList.remove('connected');
+                    document.getElementById('connection-text').textContent = 'Offline';
                 };
                 
-                ws.onerror = (err) => {
-                    console.error('WebSocket error:', err);
-                };
-                
-                ws.onmessage = (event) => {
-                    handleMessage(JSON.parse(event.data));
-                };
+                ws.onerror = (err) => console.error('WebSocket error:', err);
+                ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
                 
             } catch (err) {
                 console.error('Connection failed:', err);
-                alert('Failed to connect: ' + err.message);
             }
         }
         
         function handleMessage(data) {
-            if (data.type === 'frame') {
-                updatePointCloud(data.points);
-                updatePose(data.pose);
-                
-                document.getElementById('point-count').textContent = data.point_count;
-                
-                // Calculate latency
-                if (data.timestamp) {
-                    const latency = performance.now() - (data.timestamp % 1000000);
-                    document.getElementById('latency').textContent = 
-                        latency > 0 && latency < 1000 ? `${latency.toFixed(0)}ms` : '--';
-                }
-            }
-            else if (data.type === 'config') {
-                console.log('Server config:', data);
+            if (data.type === 'pointcloud') {
+                updatePointCloud(data.data);
             }
         }
         
-        function updatePointCloud(points) {
-            if (!points || points.length === 0) return;
+        // =================================================================
+        // Point Cloud Updates
+        // =================================================================
+        
+        function updatePointCloud(data) {
+            if (!data.points || data.points.length === 0) return;
             
-            const count = Math.min(points.length, MAX_POINTS);
-            pointCount = count;
+            const points = data.points;
+            const positions = new Float32Array(points.length * 3);
+            const colors = new Float32Array(points.length * 3);
             
-            for (let i = 0; i < count; i++) {
+            let minRange = Infinity, maxRange = 0;
+            
+            for (let i = 0; i < points.length; i++) {
                 const p = points[i];
                 const idx = i * 3;
                 
-                // Position (x, y, z) - swap Y and Z for Three.js (Y-up)
-                positions[idx] = p[0];      // X
-                positions[idx + 1] = p[2];  // Z -> Y (up)
-                positions[idx + 2] = -p[1]; // -Y -> Z (forward becomes -Z in Three.js)
+                // Convert to scene coords (swap Y/Z for Three.js)
+                positions[idx] = p.x;
+                positions[idx + 1] = p.z;
+                positions[idx + 2] = -p.y;
                 
-                // Color (r, g, b normalized to 0-1)
-                colors[idx] = p[3] / 255;
-                colors[idx + 1] = p[4] / 255;
-                colors[idx + 2] = p[5] / 255;
+                // Track range
+                const range = Math.sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+                minRange = Math.min(minRange, range);
+                maxRange = Math.max(maxRange, range);
+                
+                // Color by distance - LCARS gradient (blue→orange→alert)
+                const t = Math.min(range / 2000, 1);
+                if (t < 0.5) {
+                    // Blue to orange
+                    const f = t * 2;
+                    colors[idx] = lerp(0.6, 1.0, f);
+                    colors[idx + 1] = lerp(0.6, 0.6, f);
+                    colors[idx + 2] = lerp(1.0, 0.0, f);
+                } else {
+                    // Orange to alert red
+                    const f = (t - 0.5) * 2;
+                    colors[idx] = lerp(1.0, 0.8, f);
+                    colors[idx + 1] = lerp(0.6, 0.27, f);
+                    colors[idx + 2] = lerp(0.0, 0.27, f);
+                }
             }
             
             // Update geometry
-            pointCloud.geometry.attributes.position.needsUpdate = true;
-            pointCloud.geometry.attributes.color.needsUpdate = true;
-            pointCloud.geometry.setDrawRange(0, count);
+            pointCloud.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            pointCloud.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            pointCloud.geometry.computeBoundingSphere();
+            
+            // Update stats
+            document.getElementById('point-count').textContent = points.length;
+            document.getElementById('min-range').textContent = Math.round(minRange);
+            document.getElementById('max-range').textContent = Math.round(maxRange);
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
         }
         
-        function updatePose(pose) {
-            if (!pose) return;
-            
-            const pos = pose.position;
-            const rot = pose.rotation;
-            
-            // Update robot marker (swap axes for Three.js)
-            robotMarker.position.set(pos[0], pos[2], -pos[1]);
-            robotMarker.rotation.set(rot[0], rot[2], -rot[1], 'YXZ');
-            
-            // Update UI
-            document.getElementById('pos-x').textContent = pos[0].toFixed(0) + ' mm';
-            document.getElementById('pos-y').textContent = pos[1].toFixed(0) + ' mm';
-            document.getElementById('pos-z').textContent = pos[2].toFixed(0) + ' mm';
-            
-            document.getElementById('rot-roll').textContent = (rot[0] * 180 / Math.PI).toFixed(1) + '°';
-            document.getElementById('rot-pitch').textContent = (rot[1] * 180 / Math.PI).toFixed(1) + '°';
-            document.getElementById('rot-yaw').textContent = (rot[2] * 180 / Math.PI).toFixed(1) + '°';
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
         }
         
         // =================================================================
-        // Controls
+        // View Controls
         // =================================================================
         
-        function setMode(mode) {
-            currentMode = mode;
-            document.getElementById('mode').textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+        function setView(view) {
+            // Update active button
+            document.querySelectorAll('.lcars-sidebar-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
             
-            document.getElementById('btn-live').classList.toggle('active', mode === 'live');
-            document.getElementById('btn-accumulate').classList.toggle('active', mode === 'accumulate');
-            
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ cmd: 'set_mode', mode: mode }));
+            // Set camera position
+            switch(view) {
+                case 'top':
+                    camera.position.set(0, 800, 0);
+                    camera.lookAt(0, 0, 0);
+                    break;
+                case 'front':
+                    camera.position.set(0, 200, 600);
+                    camera.lookAt(0, 100, 0);
+                    break;
+                case 'side':
+                    camera.position.set(600, 200, 0);
+                    camera.lookAt(0, 100, 0);
+                    break;
+                case 'iso':
+                    camera.position.set(400, 400, 400);
+                    camera.lookAt(0, 0, 0);
+                    break;
             }
+            controls.update();
         }
         
-        function clearPoints() {
-            // Clear local
-            pointCloud.geometry.setDrawRange(0, 0);
-            document.getElementById('point-count').textContent = '0';
-            
-            // Tell server to clear
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ cmd: 'clear' }));
-            }
+        function toggleGrid() {
+            gridVisible = !gridVisible;
+            gridHelper.visible = gridVisible;
         }
         
-        function resetView() {
-            camera.position.set(1000, 1000, 1000);
+        function resetCamera() {
+            camera.position.set(0, 600, 400);
             camera.lookAt(0, 0, 0);
             controls.reset();
-        }
-        
-        function togglePause() {
-            isPaused = !isPaused;
-            document.getElementById('btn-pause').textContent = isPaused ? 'Resume' : 'Pause';
-            document.getElementById('btn-pause').classList.toggle('active', isPaused);
-            
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ cmd: isPaused ? 'pause' : 'resume' }));
-            }
-        }
-        
-        function resetPose() {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ cmd: 'reset_pose' }));
-            }
-            robotMarker.position.set(0, 0, 0);
-            robotMarker.rotation.set(0, 0, 0);
         }
         
         // =================================================================
         // Start
         // =================================================================
-        
         init();
     </script>
 </body>

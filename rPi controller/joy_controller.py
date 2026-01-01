@@ -790,11 +790,12 @@ class JoyDaemon:
                         elif was_running and not now_running:
                             # Stopped: single strong rumble
                             self.xbox.rumble_strong()
-                    
-                    # Send state to client at rate-limited interval
-                    if self.server.has_client and now - self._last_state_send >= self._state_send_interval:
-                        self._last_state_send = now
-                        self.server.send_state(self.xbox.state)
+                
+                # Send state to client at rate-limited interval
+                # IMPORTANT: Send even when disconnected so client knows controller is gone
+                if self.server.has_client and now - self._last_state_send >= self._state_send_interval:
+                    self._last_state_send = now
+                    self.server.send_state(self.xbox.state)
                 
                 # Small sleep to prevent busy-waiting
                 time.sleep(0.005)  # 5ms = 200 Hz max poll rate

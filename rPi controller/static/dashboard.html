@@ -3,8 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MARS Dashboard</title>
+    <title>MARS — LCARS Interface</title>
     <style>
+        /* ================================================================
+           LCARS Interface - Following the Manifesto
+           Key principles:
+           - The Swept is LCARS (thick→thin corner transitions)
+           - Frames NEVER same thickness on next turn
+           - Rounded caps mark termination/buttons
+           - Minimalism: empty space with useful frames is beautiful
+           - 3 font sizes only (title, sub-header, data)
+           - Max 4-5 colors with semantic meaning
+           ================================================================ */
+        
+        @import url('https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&display=swap');
+        
         * {
             margin: 0;
             padding: 0;
@@ -12,635 +25,1020 @@
         }
         
         :root {
-            --bg-dark: #1a1a2e;
-            --bg-panel: rgba(0, 0, 0, 0.7);
-            --accent-orange: #ff6b35;
-            --accent-teal: #4ecdc4;
-            --text-primary: #eee;
-            --text-secondary: #888;
-            --success: #44ff44;
-            --warning: #ffaa00;
-            --danger: #ff4444;
-            --border: #444;
+            /* LCARS color palette - limited to 5 purposeful colors */
+            --lcars-black: #000000;
+            --lcars-orange: #ff9900;      /* Primary: active/important */
+            --lcars-peach: #ffcc99;       /* Secondary: data display */
+            --lcars-tan: #cc9966;         /* Tertiary: frames/structure */
+            --lcars-blue: #9999ff;        /* Quaternary: interactive */
+            --lcars-purple: #cc99cc;      /* Quinary: status/info */
+            
+            /* Semantic (derived from palette) */
+            --lcars-alert: #cc4444;       /* Alert state */
+            --lcars-ok: #99cc66;          /* OK state */
+            
+            /* Spacing constants (invisible grid) */
+            --frame-gap: 6px;
+            --cap-radius: 20px;
+            --swept-radius: 40px;
+            
+            /* Font sizes (only 3 as per manifesto) */
+            --font-title: 28px;
+            --font-subhead: 16px;
+            --font-data: 14px;
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--bg-dark);
-            color: var(--text-primary);
+            font-family: 'Antonio', 'Helvetica Neue', Arial, sans-serif;
+            background: var(--lcars-black);
+            color: var(--lcars-peach);
             min-height: 100vh;
-            padding: 20px;
+            overflow-x: hidden;
         }
         
-        /* Header */
-        .header {
+        /* ================================================================
+           LCARS Core Structure - The Frame
+           ================================================================ */
+        
+        .lcars-container {
+            min-height: 100vh;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid var(--accent-orange);
+            flex-direction: column;
         }
         
-        .header h1 {
-            color: var(--accent-orange);
-            font-size: 24px;
+        /* Top Frame Bar with Swept corners */
+        .lcars-header {
+            display: flex;
+            height: 60px;
+            gap: var(--frame-gap);
+        }
+        
+        /* Left swept elbow - thick to thin */
+        .lcars-header-swept {
+            width: 180px;
+            height: 60px;
+            background: var(--lcars-orange);
+            border-bottom-right-radius: var(--swept-radius);
+            flex-shrink: 0;
+        }
+        
+        /* Top bar - extends across */
+        .lcars-header-bar {
+            flex: 1;
+            height: 40px;
+            background: var(--lcars-orange);
             display: flex;
             align-items: center;
-            gap: 10px;
+            justify-content: center;
+            gap: 20px;
         }
         
-        .header h1 .robot-icon {
-            font-size: 28px;
+        .lcars-header-title {
+            font-size: var(--font-title);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 4px;
         }
         
-        .connection-status {
+        /* Header cap buttons - rounded termination */
+        .lcars-header-caps {
+            display: flex;
+            gap: var(--frame-gap);
+            height: 40px;
+        }
+        
+        .lcars-cap {
+            height: 40px;
+            padding: 0 25px;
+            background: var(--lcars-tan);
+            border-radius: var(--cap-radius);
             display: flex;
             align-items: center;
+            justify-content: center;
+            font-size: var(--font-subhead);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        
+        .lcars-cap:hover {
+            background: var(--lcars-peach);
+        }
+        
+        .lcars-cap.status {
+            background: var(--lcars-purple);
+            cursor: default;
             gap: 8px;
-            font-size: 14px;
         }
         
         .status-dot {
             width: 12px;
             height: 12px;
             border-radius: 50%;
-            background: var(--danger);
+            background: var(--lcars-alert);
         }
         
         .status-dot.connected {
-            background: var(--success);
+            background: var(--lcars-ok);
         }
         
-        /* Grid layout */
-        .dashboard-grid {
+        /* ================================================================
+           Main Content Area
+           ================================================================ */
+        
+        .lcars-body {
+            display: flex;
+            flex: 1;
+            gap: var(--frame-gap);
+            padding-top: var(--frame-gap);
+        }
+        
+        /* Left sidebar - vertical bar with buttons */
+        .lcars-sidebar {
+            width: 180px;
+            display: flex;
+            flex-direction: column;
+            gap: var(--frame-gap);
+            flex-shrink: 0;
+        }
+        
+        /* Sidebar buttons - caps that extend from swept */
+        .lcars-sidebar-btn {
+            height: 36px;
+            background: var(--lcars-tan);
+            border-radius: 0 var(--cap-radius) var(--cap-radius) 0;
+            display: flex;
+            align-items: center;
+            padding-left: 20px;
+            font-size: var(--font-subhead);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        
+        .lcars-sidebar-btn:hover {
+            background: var(--lcars-peach);
+        }
+        
+        .lcars-sidebar-btn.active {
+            background: var(--lcars-orange);
+        }
+        
+        /* Spacer bar in sidebar */
+        .lcars-sidebar-spacer {
+            flex: 1;
+            background: var(--lcars-tan);
+            min-height: 20px;
+        }
+        
+        /* Bottom swept elbow */
+        .lcars-sidebar-swept {
+            height: 60px;
+            background: var(--lcars-tan);
+            border-top-right-radius: var(--swept-radius);
+        }
+        
+        /* ================================================================
+           Content Panels
+           ================================================================ */
+        
+        .lcars-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: var(--frame-gap);
+            padding-right: 20px;
+            padding-bottom: 20px;
+        }
+        
+        /* Robot state banner - prominent status */
+        .lcars-banner {
+            height: 50px;
+            background: var(--lcars-purple);
+            border-radius: var(--cap-radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: var(--font-title);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 3px;
+        }
+        
+        .lcars-banner.enabled {
+            background: var(--lcars-ok);
+        }
+        
+        .lcars-banner.disabled {
+            background: var(--lcars-alert);
+        }
+        
+        /* Panel grid */
+        .lcars-panels {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(3, 1fr);
+            gap: var(--frame-gap);
+            flex: 1;
         }
         
-        /* Panel styling */
-        .panel {
-            background: var(--bg-panel);
-            border-radius: 12px;
-            padding: 15px;
-            border: 1px solid var(--border);
-        }
-        
-        .panel-header {
+        /* Individual panel - frame with thick top, thin sides */
+        .lcars-panel {
+            background: rgba(20, 20, 30, 0.6);
             display: flex;
-            justify-content: space-between;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        /* Panel header bar - thick (frame principle) */
+        .lcars-panel-header {
+            height: 32px;
+            background: var(--lcars-tan);
+            display: flex;
             align-items: center;
-            margin-bottom: 12px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid var(--border);
+            padding: 0 15px;
+            gap: 10px;
         }
         
-        .panel-title {
-            color: var(--accent-orange);
-            font-size: 14px;
-            font-weight: 600;
+        .lcars-panel-header.primary {
+            background: var(--lcars-orange);
+        }
+        
+        .lcars-panel-header.secondary {
+            background: var(--lcars-blue);
+        }
+        
+        .lcars-panel-title {
+            font-size: var(--font-subhead);
+            font-weight: 700;
+            color: var(--lcars-black);
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 2px;
         }
         
-        .panel-badge {
+        .lcars-panel-badge {
+            margin-left: auto;
             font-size: 11px;
-            padding: 2px 8px;
+            padding: 2px 10px;
+            background: var(--lcars-black);
+            color: var(--lcars-peach);
             border-radius: 10px;
-            background: var(--accent-teal);
-            color: var(--bg-dark);
-            font-weight: bold;
         }
         
-        /* Stat rows */
-        .stat-row {
+        /* Panel content - thin border continuation */
+        .lcars-panel-body {
+            flex: 1;
+            padding: 15px;
+            border-left: 4px solid var(--lcars-tan);
+            border-right: 4px solid var(--lcars-tan);
+            border-bottom: 4px solid var(--lcars-tan);
+        }
+        
+        .lcars-panel-body.primary-border {
+            border-color: var(--lcars-orange);
+        }
+        
+        .lcars-panel-body.secondary-border {
+            border-color: var(--lcars-blue);
+        }
+        
+        /* Data rows */
+        .lcars-data-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 6px 0;
-            font-size: 13px;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(204, 153, 102, 0.2);
         }
         
-        .stat-label {
-            color: var(--text-secondary);
+        .lcars-data-row:last-child {
+            border-bottom: none;
         }
         
-        .stat-value {
-            color: var(--accent-teal);
-            font-family: 'Consolas', 'Monaco', monospace;
-            font-weight: 500;
-        }
-        
-        .stat-value.warning {
-            color: var(--warning);
-        }
-        
-        .stat-value.danger {
-            color: var(--danger);
-        }
-        
-        .stat-value.success {
-            color: var(--success);
-        }
-        
-        /* Big metrics */
-        .big-metric {
-            text-align: center;
-            padding: 15px;
-        }
-        
-        .big-metric .value {
-            font-size: 36px;
-            font-weight: bold;
-            color: var(--accent-teal);
-            font-family: 'Consolas', 'Monaco', monospace;
-        }
-        
-        .big-metric .label {
-            font-size: 12px;
-            color: var(--text-secondary);
+        .lcars-data-label {
+            font-size: var(--font-data);
+            color: var(--lcars-tan);
             text-transform: uppercase;
             letter-spacing: 1px;
+        }
+        
+        .lcars-data-value {
+            font-size: var(--font-subhead);
+            font-weight: 700;
+            color: var(--lcars-peach);
+        }
+        
+        .lcars-data-value.ok { color: var(--lcars-ok); }
+        .lcars-data-value.alert { color: var(--lcars-alert); }
+        .lcars-data-value.warn { color: var(--lcars-orange); }
+        
+        /* Big metrics display */
+        .lcars-metric {
+            text-align: center;
+            padding: 10px;
+        }
+        
+        .lcars-metric-value {
+            font-size: 42px;
+            font-weight: 700;
+            color: var(--lcars-orange);
+            line-height: 1;
+        }
+        
+        .lcars-metric-unit {
+            font-size: var(--font-subhead);
+            color: var(--lcars-tan);
+        }
+        
+        .lcars-metric-label {
+            font-size: 11px;
+            color: var(--lcars-tan);
+            text-transform: uppercase;
+            letter-spacing: 2px;
             margin-top: 5px;
         }
         
-        .big-metric .unit {
-            font-size: 18px;
-            color: var(--text-secondary);
-        }
-        
-        .metric-row {
+        .lcars-metric-row {
             display: flex;
             justify-content: space-around;
         }
         
-        /* Status indicators */
-        .status-grid {
+        /* Status grid */
+        .lcars-status-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
         }
         
-        .status-item {
+        .lcars-status-item {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 8px;
+            gap: 10px;
+            padding: 8px 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border-left: 3px solid var(--lcars-blue);
         }
         
-        .status-icon {
+        .lcars-status-icon {
             font-size: 18px;
         }
         
-        .status-text {
-            font-size: 12px;
+        .lcars-status-label {
+            font-size: 10px;
+            color: var(--lcars-tan);
+            text-transform: uppercase;
         }
         
-        .status-text .name {
-            color: var(--text-secondary);
+        .lcars-status-state {
+            font-size: var(--font-data);
+            font-weight: 700;
         }
         
-        .status-text .state {
-            font-weight: bold;
-        }
-        
-        .status-text .state.on { color: var(--success); }
-        .status-text .state.off { color: var(--danger); }
-        .status-text .state.warn { color: var(--warning); }
+        .lcars-status-state.on { color: var(--lcars-ok); }
+        .lcars-status-state.off { color: var(--lcars-alert); }
         
         /* Progress bars */
-        .progress-bar {
-            height: 8px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 4px;
+        .lcars-progress {
+            height: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
             overflow: hidden;
-            margin-top: 4px;
+            margin-top: 5px;
         }
         
-        .progress-fill {
+        .lcars-progress-fill {
             height: 100%;
-            border-radius: 4px;
-            transition: width 0.3s ease;
+            transition: width 0.3s;
         }
         
-        .progress-fill.battery {
-            background: linear-gradient(90deg, var(--danger), var(--warning), var(--success));
+        .lcars-progress-fill.battery {
+            background: linear-gradient(90deg, var(--lcars-alert), var(--lcars-orange), var(--lcars-ok));
         }
         
-        .progress-fill.temp {
-            background: linear-gradient(90deg, var(--accent-teal), var(--warning), var(--danger));
+        .lcars-progress-fill.temp {
+            background: linear-gradient(90deg, var(--lcars-blue), var(--lcars-orange), var(--lcars-alert));
         }
         
-        /* IMU visualization */
-        .imu-visual {
+        /* IMU gauges */
+        .lcars-imu-row {
             display: flex;
             justify-content: center;
-            gap: 30px;
-            padding: 15px 0;
+            gap: 20px;
+            padding: 10px 0;
         }
         
-        .imu-gauge {
+        .lcars-imu-gauge {
             text-align: center;
         }
         
-        .imu-gauge .gauge-ring {
-            width: 80px;
-            height: 80px;
+        .lcars-imu-ring {
+            width: 70px;
+            height: 70px;
             border-radius: 50%;
-            border: 3px solid var(--border);
-            position: relative;
+            border: 3px solid var(--lcars-blue);
             display: flex;
             align-items: center;
             justify-content: center;
+            position: relative;
+            background: rgba(0, 0, 0, 0.3);
         }
         
-        .imu-gauge .gauge-value {
-            font-size: 16px;
-            font-weight: bold;
-            color: var(--accent-teal);
-        }
-        
-        .imu-gauge .gauge-needle {
+        .lcars-imu-needle {
             position: absolute;
             width: 3px;
-            height: 35px;
-            background: var(--accent-orange);
+            height: 28px;
+            background: var(--lcars-orange);
             transform-origin: bottom center;
             bottom: 50%;
             left: calc(50% - 1.5px);
             border-radius: 2px;
-            transition: transform 0.2s ease;
+            transition: transform 0.2s;
         }
         
-        .imu-gauge .gauge-label {
-            font-size: 11px;
-            color: var(--text-secondary);
-            margin-top: 8px;
-            text-transform: uppercase;
-        }
-        
-        /* Config section */
-        .config-section {
-            margin-top: 10px;
-        }
-        
-        .config-category {
-            margin-bottom: 15px;
-        }
-        
-        .config-category-header {
-            font-size: 12px;
-            color: var(--accent-orange);
-            padding: 5px 0;
-            border-bottom: 1px dashed var(--border);
-            margin-bottom: 8px;
-        }
-        
-        /* Links */
-        .nav-links {
-            display: flex;
-            gap: 15px;
-            margin-top: 15px;
-        }
-        
-        .nav-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
-            background: rgba(78, 205, 196, 0.2);
-            border: 1px solid var(--accent-teal);
-            border-radius: 6px;
-            color: var(--accent-teal);
-            text-decoration: none;
-            font-size: 13px;
-            transition: all 0.2s;
-        }
-        
-        .nav-link:hover {
-            background: var(--accent-teal);
-            color: var(--bg-dark);
-        }
-        
-        /* Robot enabled banner */
-        .robot-state-banner {
-            padding: 12px;
-            border-radius: 8px;
-            text-align: center;
-            font-weight: bold;
+        .lcars-imu-value {
             font-size: 14px;
+            font-weight: 700;
+            color: var(--lcars-peach);
+        }
+        
+        .lcars-imu-label {
+            font-size: 10px;
+            color: var(--lcars-tan);
+            text-transform: uppercase;
+            margin-top: 6px;
+            letter-spacing: 1px;
+        }
+        
+        /* Link buttons */
+        .lcars-link-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: var(--lcars-blue);
+            border-radius: var(--cap-radius);
+            color: var(--lcars-black);
+            text-decoration: none;
+            font-size: var(--font-data);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 10px;
+            transition: background 0.15s;
+        }
+        
+        .lcars-link-btn:hover {
+            background: var(--lcars-peach);
+        }
+        
+        /* ================================================================
+           Config Panel - spans full width
+           ================================================================ */
+        
+        .lcars-panel.wide {
+            grid-column: span 3;
+        }
+        
+        .lcars-config-search {
+            width: 100%;
+            padding: 10px 15px;
             margin-bottom: 15px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid var(--lcars-blue);
+            border-radius: var(--cap-radius);
+            color: var(--lcars-peach);
+            font-size: var(--font-data);
+            font-family: inherit;
         }
         
-        .robot-state-banner.enabled {
-            background: rgba(68, 255, 68, 0.2);
-            border: 1px solid var(--success);
-            color: var(--success);
+        .lcars-config-search:focus {
+            outline: none;
+            border-color: var(--lcars-orange);
         }
         
-        .robot-state-banner.disabled {
-            background: rgba(255, 68, 68, 0.2);
-            border: 1px solid var(--danger);
-            color: var(--danger);
+        .lcars-config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 10px;
         }
         
-        /* Connection dialog */
-        .connection-dialog {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.95);
-            padding: 30px;
-            border-radius: 12px;
-            text-align: center;
-            z-index: 1000;
-            border: 2px solid var(--accent-orange);
+        .lcars-config-category {
+            background: rgba(0, 0, 0, 0.3);
+            border-left: 4px solid var(--lcars-purple);
+            overflow: hidden;
         }
         
-        .connection-dialog.hidden {
+        .lcars-config-category.collapsed .lcars-config-items {
             display: none;
         }
         
-        .connection-dialog h2 {
-            color: var(--accent-orange);
+        .lcars-config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: rgba(204, 153, 204, 0.2);
+            cursor: pointer;
+        }
+        
+        .lcars-config-header:hover {
+            background: rgba(204, 153, 204, 0.3);
+        }
+        
+        .lcars-config-title {
+            font-size: var(--font-data);
+            font-weight: 700;
+            color: var(--lcars-peach);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .lcars-config-toggle {
+            color: var(--lcars-tan);
+            transition: transform 0.2s;
+        }
+        
+        .lcars-config-category.collapsed .lcars-config-toggle {
+            transform: rotate(-90deg);
+        }
+        
+        .lcars-config-count {
+            font-size: 11px;
+            color: var(--lcars-tan);
+            margin-left: 8px;
+        }
+        
+        .lcars-config-items {
+            padding: 8px 12px;
+        }
+        
+        .lcars-config-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 12px;
+            border-bottom: 1px solid rgba(204, 153, 204, 0.1);
+        }
+        
+        .lcars-config-item:last-child {
+            border-bottom: none;
+        }
+        
+        .lcars-config-label {
+            color: var(--lcars-tan);
+        }
+        
+        .lcars-config-value {
+            color: var(--lcars-orange);
+            font-weight: 700;
+        }
+        
+        .lcars-config-item.hidden {
+            display: none;
+        }
+        
+        .lcars-config-empty {
+            text-align: center;
+            color: var(--lcars-tan);
+            padding: 20px;
+        }
+        
+        /* ================================================================
+           Footer Bar
+           ================================================================ */
+        
+        .lcars-footer {
+            display: flex;
+            height: 30px;
+            gap: var(--frame-gap);
+            margin-top: var(--frame-gap);
+        }
+        
+        .lcars-footer-swept {
+            width: 180px;
+            background: var(--lcars-tan);
+            border-top-right-radius: var(--swept-radius);
+        }
+        
+        .lcars-footer-bar {
+            flex: 1;
+            height: 20px;
+            background: var(--lcars-tan);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+        
+        .lcars-footer-text {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .lcars-footer-cap {
+            width: 80px;
+            height: 20px;
+            background: var(--lcars-orange);
+            border-radius: var(--cap-radius);
+        }
+        
+        /* ================================================================
+           Connection Dialog
+           ================================================================ */
+        
+        .lcars-dialog {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--lcars-black);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        .lcars-dialog.hidden {
+            display: none;
+        }
+        
+        .lcars-dialog-box {
+            display: flex;
+            flex-direction: column;
+            gap: var(--frame-gap);
+            min-width: 400px;
+        }
+        
+        .lcars-dialog-header {
+            height: 50px;
+            background: var(--lcars-orange);
+            border-radius: 0 var(--cap-radius) var(--cap-radius) 0;
+            display: flex;
+            align-items: center;
+            padding-left: 25px;
+        }
+        
+        .lcars-dialog-title {
+            font-size: var(--font-title);
+            font-weight: 700;
+            color: var(--lcars-black);
+            text-transform: uppercase;
+            letter-spacing: 3px;
+        }
+        
+        .lcars-dialog-body {
+            background: rgba(20, 20, 30, 0.8);
+            border-left: 8px solid var(--lcars-orange);
+            border-right: 4px solid var(--lcars-tan);
+            border-bottom: 4px solid var(--lcars-tan);
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .lcars-dialog-subtitle {
+            font-size: var(--font-subhead);
+            color: var(--lcars-tan);
             margin-bottom: 20px;
         }
         
-        .connection-dialog input {
-            background: #333;
-            border: 1px solid #555;
-            color: var(--text-primary);
-            padding: 12px;
-            border-radius: 6px;
-            width: 280px;
-            margin-bottom: 15px;
-            font-size: 14px;
+        .lcars-dialog-input {
+            width: 100%;
+            padding: 12px 20px;
+            background: var(--lcars-black);
+            border: 2px solid var(--lcars-blue);
+            border-radius: var(--cap-radius);
+            color: var(--lcars-peach);
+            font-size: var(--font-subhead);
+            font-family: inherit;
+            margin-bottom: 20px;
         }
         
-        .connection-dialog input:focus {
+        .lcars-dialog-input:focus {
             outline: none;
-            border-color: var(--accent-teal);
+            border-color: var(--lcars-orange);
         }
         
-        .connection-dialog button {
-            background: var(--accent-teal);
+        .lcars-dialog-btn {
+            padding: 12px 40px;
+            background: var(--lcars-peach);
             border: none;
-            color: var(--bg-dark);
-            padding: 12px 24px;
-            border-radius: 6px;
+            border-radius: var(--cap-radius);
+            color: var(--lcars-black);
+            font-size: var(--font-subhead);
+            font-weight: 700;
+            font-family: inherit;
+            text-transform: uppercase;
+            letter-spacing: 2px;
             cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-            transition: background 0.2s;
+            transition: background 0.15s;
         }
         
-        .connection-dialog button:hover {
-            background: #45b7aa;
+        .lcars-dialog-btn:hover {
+            background: var(--lcars-orange);
         }
         
-        /* Footer */
-        .footer {
-            margin-top: 30px;
-            padding-top: 15px;
-            border-top: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            color: var(--text-secondary);
+        /* ================================================================
+           Responsive
+           ================================================================ */
+        
+        @media (max-width: 1200px) {
+            .lcars-panels {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .lcars-panel.wide {
+                grid-column: span 2;
+            }
         }
         
-        /* Responsive */
-        @media (max-width: 768px) {
-            .dashboard-grid {
+        @media (max-width: 800px) {
+            .lcars-sidebar {
+                display: none;
+            }
+            .lcars-header-swept {
+                width: 60px;
+            }
+            .lcars-footer-swept {
+                width: 60px;
+            }
+            .lcars-panels {
                 grid-template-columns: 1fr;
             }
-            
-            .header h1 {
-                font-size: 18px;
-            }
-            
-            .imu-visual {
-                flex-wrap: wrap;
+            .lcars-panel.wide {
+                grid-column: span 1;
             }
         }
     </style>
 </head>
 <body>
-    <!-- Connection dialog -->
-    <div class="connection-dialog" id="connection-dialog">
-        <h2>🤖 MARS Dashboard</h2>
-        <p style="margin-bottom: 15px; color: var(--text-secondary);">Enter WebSocket server address:</p>
-        <input type="text" id="ws-address" placeholder="ws://192.168.1.100:8766">
-        <br>
-        <button onclick="connect()">Connect</button>
+    <!-- Connection Dialog -->
+    <div class="lcars-dialog" id="connection-dialog">
+        <div class="lcars-dialog-box">
+            <div class="lcars-dialog-header">
+                <span class="lcars-dialog-title">MARS</span>
+            </div>
+            <div class="lcars-dialog-body">
+                <div class="lcars-dialog-subtitle">Modular Autonomous Robotic System</div>
+                <input type="text" class="lcars-dialog-input" id="ws-address" placeholder="ws://192.168.1.100:8766">
+                <br>
+                <button class="lcars-dialog-btn" onclick="connect()">Engage</button>
+            </div>
+        </div>
     </div>
     
-    <!-- Main dashboard (hidden until connected) -->
+    <!-- Main Interface -->
     <div id="dashboard" style="display: none;">
-        <!-- Header -->
-        <header class="header">
-            <h1>
-                <span class="robot-icon">🤖</span>
-                MARS Dashboard
-            </h1>
-            <div class="connection-status">
-                <span class="status-dot" id="ws-status"></span>
-                <span id="connection-text">Disconnected</span>
+        <div class="lcars-container">
+            
+            <!-- Header Bar -->
+            <div class="lcars-header">
+                <div class="lcars-header-swept"></div>
+                <div class="lcars-header-bar">
+                    <span class="lcars-header-title">MARS Dashboard</span>
+                </div>
+                <div class="lcars-header-caps">
+                    <div class="lcars-cap status">
+                        <span class="status-dot" id="ws-status"></span>
+                        <span id="connection-text">Offline</span>
+                    </div>
+                </div>
             </div>
-        </header>
-        
-        <!-- Robot state banner -->
-        <div class="robot-state-banner disabled" id="robot-banner">
-            🔴 ROBOT DISABLED
+            
+            <!-- Body -->
+            <div class="lcars-body">
+                
+                <!-- Sidebar -->
+                <div class="lcars-sidebar">
+                    <div class="lcars-sidebar-btn active">Status</div>
+                    <div class="lcars-sidebar-btn">Power</div>
+                    <div class="lcars-sidebar-btn">Servos</div>
+                    <div class="lcars-sidebar-btn">IMU</div>
+                    <div class="lcars-sidebar-btn">Gait</div>
+                    <div class="lcars-sidebar-btn">Config</div>
+                    <div class="lcars-sidebar-spacer"></div>
+                    <div class="lcars-sidebar-swept"></div>
+                </div>
+                
+                <!-- Content -->
+                <div class="lcars-content">
+                    
+                    <!-- Robot State Banner -->
+                    <div class="lcars-banner disabled" id="robot-banner">
+                        Robot Disabled
+                    </div>
+                    
+                    <!-- Panels Grid -->
+                    <div class="lcars-panels">
+                        
+                        <!-- Power Panel -->
+                        <div class="lcars-panel">
+                            <div class="lcars-panel-header primary">
+                                <span class="lcars-panel-title">Power</span>
+                            </div>
+                            <div class="lcars-panel-body primary-border">
+                                <div class="lcars-metric-row">
+                                    <div class="lcars-metric">
+                                        <div class="lcars-metric-value"><span id="battery-v">--</span><span class="lcars-metric-unit">V</span></div>
+                                        <div class="lcars-metric-label">Battery</div>
+                                        <div class="lcars-progress" style="width: 80px; margin: 8px auto 0;">
+                                            <div class="lcars-progress-fill battery" id="battery-bar" style="width: 0%"></div>
+                                        </div>
+                                    </div>
+                                    <div class="lcars-metric">
+                                        <div class="lcars-metric-value"><span id="current-a">--</span><span class="lcars-metric-unit">A</span></div>
+                                        <div class="lcars-metric-label">Current</div>
+                                    </div>
+                                </div>
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Low Batt Protection</span>
+                                    <span class="lcars-data-value" id="low-battery-status">---</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Status Panel -->
+                        <div class="lcars-panel">
+                            <div class="lcars-panel-header">
+                                <span class="lcars-panel-title">Systems</span>
+                            </div>
+                            <div class="lcars-panel-body">
+                                <div class="lcars-status-grid">
+                                    <div class="lcars-status-item">
+                                        <span class="lcars-status-icon">🎮</span>
+                                        <div>
+                                            <div class="lcars-status-label">Xbox</div>
+                                            <div class="lcars-status-state off" id="xbox-status">---</div>
+                                        </div>
+                                    </div>
+                                    <div class="lcars-status-item">
+                                        <span class="lcars-status-icon">🔌</span>
+                                        <div>
+                                            <div class="lcars-status-label">Teensy</div>
+                                            <div class="lcars-status-state off" id="teensy-status">---</div>
+                                        </div>
+                                    </div>
+                                    <div class="lcars-status-item">
+                                        <span class="lcars-status-icon">🦿</span>
+                                        <div>
+                                            <div class="lcars-status-label">Gait</div>
+                                            <div class="lcars-status-state off" id="gait-status">---</div>
+                                        </div>
+                                    </div>
+                                    <div class="lcars-status-item">
+                                        <span class="lcars-status-icon">🛡️</span>
+                                        <div>
+                                            <div class="lcars-status-label">Safety</div>
+                                            <div class="lcars-status-state" id="safety-status">---</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="lcars-data-row" style="margin-top: 10px;">
+                                    <span class="lcars-data-label">Safety Cause</span>
+                                    <span class="lcars-data-value" id="safety-cause">---</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- IMU Panel -->
+                        <div class="lcars-panel">
+                            <div class="lcars-panel-header secondary">
+                                <span class="lcars-panel-title">IMU</span>
+                            </div>
+                            <div class="lcars-panel-body secondary-border">
+                                <div class="lcars-imu-row">
+                                    <div class="lcars-imu-gauge">
+                                        <div class="lcars-imu-ring">
+                                            <div class="lcars-imu-needle" id="pitch-needle"></div>
+                                            <span class="lcars-imu-value" id="pitch-value">0°</span>
+                                        </div>
+                                        <div class="lcars-imu-label">Pitch</div>
+                                    </div>
+                                    <div class="lcars-imu-gauge">
+                                        <div class="lcars-imu-ring">
+                                            <div class="lcars-imu-needle" id="roll-needle"></div>
+                                            <span class="lcars-imu-value" id="roll-value">0°</span>
+                                        </div>
+                                        <div class="lcars-imu-label">Roll</div>
+                                    </div>
+                                    <div class="lcars-imu-gauge">
+                                        <div class="lcars-imu-ring">
+                                            <div class="lcars-imu-needle" id="yaw-needle"></div>
+                                            <span class="lcars-imu-value" id="yaw-value">0°</span>
+                                        </div>
+                                        <div class="lcars-imu-label">Yaw</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Servos Panel -->
+                        <div class="lcars-panel">
+                            <div class="lcars-panel-header">
+                                <span class="lcars-panel-title">Servos</span>
+                            </div>
+                            <div class="lcars-panel-body">
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Max Temp</span>
+                                    <span class="lcars-data-value" id="servo-temp">--°C</span>
+                                </div>
+                                <div class="lcars-progress">
+                                    <div class="lcars-progress-fill temp" id="temp-bar" style="width: 0%"></div>
+                                </div>
+                                <div class="lcars-data-row" style="margin-top: 12px;">
+                                    <span class="lcars-data-label">Min Voltage</span>
+                                    <span class="lcars-data-value" id="servo-volt">--V</span>
+                                </div>
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Errors</span>
+                                    <span class="lcars-data-value" id="servo-errors">0</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Gait Panel -->
+                        <div class="lcars-panel">
+                            <div class="lcars-panel-header">
+                                <span class="lcars-panel-title">Gait</span>
+                            </div>
+                            <div class="lcars-panel-body">
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Type</span>
+                                    <span class="lcars-data-value" id="gait-type">---</span>
+                                </div>
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Speed</span>
+                                    <span class="lcars-data-value" id="gait-speed">---</span>
+                                </div>
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Running</span>
+                                    <span class="lcars-data-value" id="gait-running">No</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- System Panel -->
+                        <div class="lcars-panel">
+                            <div class="lcars-panel-header primary">
+                                <span class="lcars-panel-title">Computer</span>
+                            </div>
+                            <div class="lcars-panel-body primary-border">
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Loop Time</span>
+                                    <span class="lcars-data-value" id="loop-time">---</span>
+                                </div>
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Firmware</span>
+                                    <span class="lcars-data-value" id="fw-version">---</span>
+                                </div>
+                                <div class="lcars-data-row">
+                                    <span class="lcars-data-label">Controller</span>
+                                    <span class="lcars-data-value" id="ctrl-version">---</span>
+                                </div>
+                                <a href="/pointcloud" class="lcars-link-btn" target="_blank">Point Cloud</a>
+                            </div>
+                        </div>
+                        
+                        <!-- Config Panel (wide) -->
+                        <div class="lcars-panel wide">
+                            <div class="lcars-panel-header secondary">
+                                <span class="lcars-panel-title">Configuration</span>
+                                <span class="lcars-panel-badge">Read Only</span>
+                            </div>
+                            <div class="lcars-panel-body secondary-border">
+                                <input type="text" 
+                                       class="lcars-config-search" 
+                                       id="config-search" 
+                                       placeholder="Search configuration..."
+                                       oninput="filterConfig(this.value)">
+                                <div class="lcars-config-grid" id="config-container">
+                                    <div class="lcars-config-empty">Configuration loading...</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Footer -->
+            <div class="lcars-footer">
+                <div class="lcars-footer-swept"></div>
+                <div class="lcars-footer-bar">
+                    <span class="lcars-footer-text">MARS — Modular Autonomous Robotic System</span>
+                    <span class="lcars-footer-text" id="last-update">---</span>
+                </div>
+                <div class="lcars-footer-cap"></div>
+            </div>
+            
         </div>
-        
-        <!-- Dashboard grid -->
-        <div class="dashboard-grid">
-            
-            <!-- Power panel -->
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">⚡ Power</span>
-                </div>
-                <div class="metric-row">
-                    <div class="big-metric">
-                        <div class="value"><span id="battery-v">--</span><span class="unit">V</span></div>
-                        <div class="label">Battery</div>
-                        <div class="progress-bar" style="width: 100px; margin: 8px auto 0;">
-                            <div class="progress-fill battery" id="battery-bar" style="width: 0%"></div>
-                        </div>
-                    </div>
-                    <div class="big-metric">
-                        <div class="value"><span id="current-a">--</span><span class="unit">A</span></div>
-                        <div class="label">Current</div>
-                    </div>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Low Battery Protection</span>
-                    <span class="stat-value" id="low-battery-status">---</span>
-                </div>
-            </div>
-            
-            <!-- Status panel -->
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">📊 Status</span>
-                </div>
-                <div class="status-grid">
-                    <div class="status-item">
-                        <span class="status-icon">🎮</span>
-                        <div class="status-text">
-                            <div class="name">Xbox</div>
-                            <div class="state off" id="xbox-status">---</div>
-                        </div>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-icon">🔌</span>
-                        <div class="status-text">
-                            <div class="name">Teensy</div>
-                            <div class="state off" id="teensy-status">---</div>
-                        </div>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-icon">🦿</span>
-                        <div class="status-text">
-                            <div class="name">Gait</div>
-                            <div class="state off" id="gait-status">---</div>
-                        </div>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-icon">🛡️</span>
-                        <div class="status-text">
-                            <div class="name">Safety</div>
-                            <div class="state" id="safety-status">---</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="stat-row" style="margin-top: 10px;">
-                    <span class="stat-label">Safety Cause</span>
-                    <span class="stat-value" id="safety-cause">---</span>
-                </div>
-            </div>
-            
-            <!-- IMU panel -->
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">🧭 IMU</span>
-                </div>
-                <div class="imu-visual">
-                    <div class="imu-gauge">
-                        <div class="gauge-ring">
-                            <div class="gauge-needle" id="pitch-needle"></div>
-                            <span class="gauge-value" id="pitch-value">0°</span>
-                        </div>
-                        <div class="gauge-label">Pitch</div>
-                    </div>
-                    <div class="imu-gauge">
-                        <div class="gauge-ring">
-                            <div class="gauge-needle" id="roll-needle"></div>
-                            <span class="gauge-value" id="roll-value">0°</span>
-                        </div>
-                        <div class="gauge-label">Roll</div>
-                    </div>
-                    <div class="imu-gauge">
-                        <div class="gauge-ring">
-                            <div class="gauge-needle" id="yaw-needle"></div>
-                            <span class="gauge-value" id="yaw-value">0°</span>
-                        </div>
-                        <div class="gauge-label">Yaw</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Servos panel -->
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">⚙️ Servos</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Max Temperature</span>
-                    <span class="stat-value" id="servo-temp">--°C</span>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill temp" id="temp-bar" style="width: 0%"></div>
-                </div>
-                <div class="stat-row" style="margin-top: 12px;">
-                    <span class="stat-label">Min Voltage</span>
-                    <span class="stat-value" id="servo-volt">--V</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Error Count</span>
-                    <span class="stat-value" id="servo-errors">0</span>
-                </div>
-            </div>
-            
-            <!-- Gait panel -->
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">🦶 Gait</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Type</span>
-                    <span class="stat-value" id="gait-type">---</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Speed</span>
-                    <span class="stat-value" id="gait-speed">---</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Running</span>
-                    <span class="stat-value" id="gait-running">No</span>
-                </div>
-            </div>
-            
-            <!-- System panel -->
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">💻 System</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Loop Time</span>
-                    <span class="stat-value" id="loop-time">---</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Firmware</span>
-                    <span class="stat-value" id="fw-version">---</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">Controller</span>
-                    <span class="stat-value" id="ctrl-version">---</span>
-                </div>
-                <div class="nav-links">
-                    <a href="/pointcloud" class="nav-link" target="_blank">
-                        📍 Point Cloud
-                    </a>
-                </div>
-            </div>
-            
-            <!-- Config panel -->
-            <div class="panel" style="grid-column: span 2;">
-                <div class="panel-header">
-                    <span class="panel-title">⚙️ Configuration</span>
-                    <span class="panel-badge">READ-ONLY</span>
-                </div>
-                <div class="config-section" id="config-container">
-                    <p style="color: var(--text-secondary); font-size: 13px;">
-                        Configuration will appear here when connected...
-                    </p>
-                </div>
-            </div>
-            
-        </div>
-        
-        <!-- Footer -->
-        <footer class="footer">
-            <span>MARS — Modular Autonomous Robotic System</span>
-            <span id="last-update">Last update: ---</span>
-        </footer>
     </div>
     
     <script>
@@ -649,14 +1047,13 @@
         // =================================================================
         let ws = null;
         let config = {};
-        let lastUpdateTime = 0;
+        let collapsedCategories = new Set();
         
         // =================================================================
         // Initialization
         // =================================================================
         
         function init() {
-            // Try to auto-detect address
             const hostname = window.location.hostname || 'localhost';
             document.getElementById('ws-address').value = `ws://${hostname}:8766`;
         }
@@ -668,38 +1065,27 @@
         function connect() {
             const address = document.getElementById('ws-address').value;
             
-            if (ws) {
-                ws.close();
-            }
+            if (ws) ws.close();
             
             try {
                 ws = new WebSocket(address);
                 
                 ws.onopen = () => {
-                    console.log('Connected to', address);
                     document.getElementById('ws-status').classList.add('connected');
-                    document.getElementById('connection-text').textContent = 'Connected';
+                    document.getElementById('connection-text').textContent = 'Online';
                     document.getElementById('connection-dialog').classList.add('hidden');
                     document.getElementById('dashboard').style.display = 'block';
-                    
-                    // Request initial config
                     ws.send(JSON.stringify({ cmd: 'get_config' }));
                 };
                 
                 ws.onclose = () => {
-                    console.log('Disconnected');
                     document.getElementById('ws-status').classList.remove('connected');
-                    document.getElementById('connection-text').textContent = 'Disconnected';
+                    document.getElementById('connection-text').textContent = 'Offline';
                     document.getElementById('connection-dialog').classList.remove('hidden');
                 };
                 
-                ws.onerror = (err) => {
-                    console.error('WebSocket error:', err);
-                };
-                
-                ws.onmessage = (event) => {
-                    handleMessage(JSON.parse(event.data));
-                };
+                ws.onerror = (err) => console.error('WebSocket error:', err);
+                ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
                 
             } catch (err) {
                 console.error('Connection failed:', err);
@@ -721,30 +1107,16 @@
         // =================================================================
         
         function updateTelemetry(t) {
-            lastUpdateTime = Date.now();
-            
             // Power
             document.getElementById('battery-v').textContent = t.battery_v.toFixed(2);
             document.getElementById('current-a').textContent = t.current_a.toFixed(2);
             
-            // Battery bar (assuming 10V min, 12.6V max for 3S LiPo)
             const batteryPct = Math.max(0, Math.min(100, (t.battery_v - 10.0) / 2.6 * 100));
             document.getElementById('battery-bar').style.width = batteryPct + '%';
             
-            // Color code battery
-            const batteryEl = document.getElementById('battery-v');
-            batteryEl.parentElement.classList.remove('warning', 'danger');
-            if (t.battery_v < 10.5) {
-                batteryEl.parentElement.classList.add('danger');
-            } else if (t.battery_v < 11.0) {
-                batteryEl.parentElement.classList.add('warning');
-            }
-            
-            // Low battery status
             const lowBattEl = document.getElementById('low-battery-status');
             lowBattEl.textContent = t.low_battery_active ? 'ACTIVE' : 'OK';
-            lowBattEl.classList.toggle('danger', t.low_battery_active);
-            lowBattEl.classList.toggle('success', !t.low_battery_active);
+            lowBattEl.className = 'lcars-data-value ' + (t.low_battery_active ? 'alert' : 'ok');
             
             // IMU
             updateIMUGauge('pitch', t.imu_pitch);
@@ -756,35 +1128,24 @@
             document.getElementById('servo-volt').textContent = t.servo_volt_min.toFixed(2) + 'V';
             document.getElementById('servo-errors').textContent = t.servo_errors;
             
-            // Temp bar (0-80°C range)
             const tempPct = Math.max(0, Math.min(100, t.servo_temp_max / 80 * 100));
             document.getElementById('temp-bar').style.width = tempPct + '%';
             
-            // Status indicators
-            updateStatusIndicator('xbox-status', t.xbox_connected, 'Connected', 'Disconnected');
-            updateStatusIndicator('teensy-status', t.teensy_connected, 'Connected', 'Disconnected');
-            updateStatusIndicator('gait-status', t.gait_running, 'Running', 'Stopped');
+            // Status
+            updateStatus('xbox-status', t.xbox_connected, 'Online', 'Offline');
+            updateStatus('teensy-status', t.teensy_connected, 'Online', 'Offline');
+            updateStatus('gait-status', t.gait_running, 'Active', 'Idle');
             
-            // Safety
             const safetyEl = document.getElementById('safety-status');
             safetyEl.textContent = t.safety_state;
-            safetyEl.classList.remove('on', 'off', 'warn');
-            if (t.safety_state === 'OK' || t.safety_state === '---') {
-                safetyEl.classList.add('on');
-            } else {
-                safetyEl.classList.add('off');
-            }
+            safetyEl.className = 'lcars-status-state ' + 
+                (t.safety_state === 'OK' || t.safety_state === '---' ? 'on' : 'off');
             document.getElementById('safety-cause').textContent = t.safety_cause || '---';
             
-            // Robot enabled banner
+            // Robot banner
             const banner = document.getElementById('robot-banner');
-            if (t.robot_enabled) {
-                banner.className = 'robot-state-banner enabled';
-                banner.innerHTML = '🟢 ROBOT ENABLED';
-            } else {
-                banner.className = 'robot-state-banner disabled';
-                banner.innerHTML = '🔴 ROBOT DISABLED';
-            }
+            banner.className = 'lcars-banner ' + (t.robot_enabled ? 'enabled' : 'disabled');
+            banner.textContent = t.robot_enabled ? 'Robot Enabled' : 'Robot Disabled';
             
             // Gait
             document.getElementById('gait-type').textContent = t.gait_type;
@@ -796,82 +1157,111 @@
             document.getElementById('fw-version').textContent = t.fw_version || '---';
             document.getElementById('ctrl-version').textContent = t.ctrl_version || '---';
             
-            // Last update
+            // Timestamp
             const now = new Date();
-            document.getElementById('last-update').textContent = 
-                'Last update: ' + now.toLocaleTimeString();
+            document.getElementById('last-update').textContent = now.toLocaleTimeString();
         }
         
         function updateIMUGauge(axis, degrees) {
-            // Clamp to reasonable range for display
             const clamped = Math.max(-45, Math.min(45, degrees));
-            
-            // Update value text
             document.getElementById(axis + '-value').textContent = degrees.toFixed(1) + '°';
-            
-            // Rotate needle (scale: 45° real = 90° visual)
-            const rotation = clamped * 2;
-            document.getElementById(axis + '-needle').style.transform = 
-                `rotate(${rotation}deg)`;
+            document.getElementById(axis + '-needle').style.transform = `rotate(${clamped * 2}deg)`;
         }
         
-        function updateStatusIndicator(id, isOn, onText, offText) {
+        function updateStatus(id, isOn, onText, offText) {
             const el = document.getElementById(id);
             el.textContent = isOn ? onText : offText;
-            el.classList.remove('on', 'off');
-            el.classList.add(isOn ? 'on' : 'off');
+            el.className = 'lcars-status-state ' + (isOn ? 'on' : 'off');
         }
         
         // =================================================================
-        // Configuration rendering
+        // Configuration
         // =================================================================
         
         function renderConfig() {
             const container = document.getElementById('config-container');
+            const searchTerm = (document.getElementById('config-search')?.value || '').toLowerCase();
             
             if (!config || Object.keys(config).length === 0) {
-                container.innerHTML = '<p style="color: var(--text-secondary);">No configuration data available.</p>';
+                container.innerHTML = '<div class="lcars-config-empty">No configuration data</div>';
                 return;
             }
             
-            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">';
+            const categoryOrder = ['Info', 'Gait', 'Posture', 'Safety', 'Eyes', 
+                'PID', 'Impedance', 'Estimator', 'IMU', 'ToF', 'Autonomy', 'System'];
             
-            for (const [section, values] of Object.entries(config)) {
-                html += `<div class="config-category">`;
-                html += `<div class="config-category-header">${section}</div>`;
+            const sortedCategories = Object.keys(config).sort((a, b) => {
+                const aIdx = categoryOrder.indexOf(a);
+                const bIdx = categoryOrder.indexOf(b);
+                if (aIdx === -1 && bIdx === -1) return a.localeCompare(b);
+                if (aIdx === -1) return 1;
+                if (bIdx === -1) return -1;
+                return aIdx - bIdx;
+            });
+            
+            let html = '';
+            let totalVisible = 0;
+            
+            for (const section of sortedCategories) {
+                const values = config[section];
+                const isCollapsed = collapsedCategories.has(section);
                 
-                for (const [key, value] of Object.entries(values)) {
-                    const displayValue = formatConfigValue(value);
-                    html += `<div class="stat-row">
-                        <span class="stat-label">${key}</span>
-                        <span class="stat-value">${displayValue}</span>
+                const filteredItems = Object.entries(values).filter(([key, value]) => {
+                    if (!searchTerm) return true;
+                    return key.toLowerCase().includes(searchTerm) || 
+                           String(value).toLowerCase().includes(searchTerm) ||
+                           section.toLowerCase().includes(searchTerm);
+                });
+                
+                if (searchTerm && filteredItems.length === 0) continue;
+                totalVisible += filteredItems.length;
+                
+                html += `<div class="lcars-config-category ${isCollapsed ? 'collapsed' : ''}" data-category="${section}">`;
+                html += `<div class="lcars-config-header" onclick="toggleCategory('${section}')">
+                    <span><span class="lcars-config-title">${section}</span><span class="lcars-config-count">(${Object.keys(values).length})</span></span>
+                    <span class="lcars-config-toggle">▼</span>
+                </div>`;
+                html += '<div class="lcars-config-items">';
+                
+                for (const [key, value] of filteredItems) {
+                    html += `<div class="lcars-config-item">
+                        <span class="lcars-config-label">${key}</span>
+                        <span class="lcars-config-value">${formatValue(value)}</span>
                     </div>`;
                 }
                 
-                html += `</div>`;
+                html += '</div></div>';
             }
             
-            html += '</div>';
+            if (searchTerm && totalVisible === 0) {
+                html = `<div class="lcars-config-empty">No results for "${searchTerm}"</div>`;
+            }
+            
             container.innerHTML = html;
         }
         
-        function formatConfigValue(value) {
-            if (typeof value === 'boolean') {
-                return value ? '✓ On' : '✗ Off';
+        function toggleCategory(category) {
+            if (collapsedCategories.has(category)) {
+                collapsedCategories.delete(category);
+            } else {
+                collapsedCategories.add(category);
             }
-            if (typeof value === 'number') {
-                if (Number.isInteger(value)) {
-                    return value.toString();
-                }
-                return value.toFixed(2);
-            }
+            renderConfig();
+        }
+        
+        function filterConfig(term) {
+            renderConfig();
+        }
+        
+        function formatValue(value) {
+            if (typeof value === 'boolean') return value ? '✓ On' : '✗ Off';
+            if (typeof value === 'number') return Number.isInteger(value) ? value.toString() : value.toFixed(2);
             return String(value);
         }
         
         // =================================================================
         // Start
         // =================================================================
-        
         init();
     </script>
 </body>
