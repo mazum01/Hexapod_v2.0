@@ -3,18 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MARS Point Cloud Viewer</title>
+    <title>MARS Point Cloud — LCARS</title>
     <style>
+        /* ================================================================
+           LCARS Theme for MARS Point Cloud Viewer
+           ================================================================ */
+        
+        @import url('https://fonts.googleapis.com/css2?family=Antonio:wght@400;700&display=swap');
+        
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
         
+        :root {
+            /* LCARS color palette */
+            --lcars-black: #000000;
+            --lcars-orange: #ff9900;
+            --lcars-peach: #ffcc99;
+            --lcars-tan: #cc9966;
+            --lcars-gold: #cc6600;
+            --lcars-blue: #9999ff;
+            --lcars-purple: #cc99cc;
+            --lcars-magenta: #cc6699;
+            --lcars-red: #cc4444;
+            --lcars-green: #99cc66;
+            --lcars-cyan: #66cccc;
+            --lcars-lavender: #9977aa;
+        }
+        
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #1a1a2e;
-            color: #eee;
+            font-family: 'Antonio', 'Helvetica Neue', Arial, sans-serif;
+            background: var(--lcars-black);
+            color: var(--lcars-peach);
             overflow: hidden;
         }
         
@@ -23,164 +45,231 @@
             height: 100vh;
         }
         
-        #info-panel {
+        /* LCARS Panel styling */
+        .lcars-panel {
             position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border-radius: 8px;
-            min-width: 200px;
+            background: rgba(0, 0, 0, 0.85);
+            border: 2px solid var(--lcars-tan);
+            border-radius: 0 20px 20px 0;
+            overflow: hidden;
             z-index: 100;
         }
         
-        #info-panel h2 {
-            color: #ff6b35;
-            font-size: 16px;
-            margin-bottom: 10px;
-            border-bottom: 1px solid #444;
-            padding-bottom: 5px;
+        .lcars-panel::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 8px;
+            height: 100%;
+            background: var(--lcars-tan);
+        }
+        
+        .lcars-panel-header {
+            padding: 10px 15px 10px 20px;
+            background: linear-gradient(90deg, var(--lcars-tan) 0%, rgba(204, 153, 102, 0.3) 30%, transparent 100%);
+            border-bottom: 1px solid var(--lcars-tan);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .lcars-panel-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--lcars-peach);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .lcars-panel-content {
+            padding: 12px 15px 12px 20px;
+        }
+        
+        #info-panel {
+            top: 10px;
+            left: 10px;
+            min-width: 220px;
         }
         
         .stat-row {
             display: flex;
             justify-content: space-between;
-            margin: 5px 0;
+            margin: 8px 0;
             font-size: 13px;
         }
         
         .stat-label {
-            color: #888;
+            color: var(--lcars-tan);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 11px;
         }
         
         .stat-value {
-            color: #4ecdc4;
-            font-family: monospace;
+            color: var(--lcars-orange);
+            font-family: 'Antonio', monospace;
+            font-weight: 700;
+            font-size: 16px;
         }
         
         #status {
             display: inline-block;
-            width: 10px;
-            height: 10px;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
-            background: #ff4444;
-            margin-right: 8px;
+            background: var(--lcars-red);
+            border: 2px solid var(--lcars-black);
         }
         
         #status.connected {
-            background: #44ff44;
+            background: var(--lcars-green);
+            box-shadow: 0 0 8px var(--lcars-green);
         }
         
         #controls {
-            position: absolute;
             bottom: 10px;
             left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border-radius: 8px;
-            z-index: 100;
+        }
+        
+        .lcars-button-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 12px 15px 12px 20px;
         }
         
         button {
-            background: #4ecdc4;
+            background: var(--lcars-blue);
             border: none;
-            color: #1a1a2e;
-            padding: 8px 16px;
-            margin: 3px;
-            border-radius: 4px;
+            color: #000;
+            padding: 10px 18px;
+            border-radius: 20px;
             cursor: pointer;
-            font-weight: bold;
-            transition: background 0.2s;
+            font-weight: 700;
+            font-family: 'Antonio', sans-serif;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.2s;
         }
         
         button:hover {
-            background: #45b7aa;
+            background: var(--lcars-peach);
+            transform: scale(1.05);
         }
         
         button.active {
-            background: #ff6b35;
+            background: var(--lcars-orange);
         }
         
         button:disabled {
-            background: #555;
+            background: #444;
             cursor: not-allowed;
+            opacity: 0.5;
         }
         
         #pose-panel {
-            position: absolute;
             top: 10px;
             right: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border-radius: 8px;
-            min-width: 180px;
-            z-index: 100;
-        }
-        
-        #pose-panel h3 {
-            color: #ff6b35;
-            font-size: 14px;
-            margin-bottom: 8px;
+            min-width: 200px;
         }
         
         .pose-axis {
             display: flex;
             justify-content: space-between;
-            font-size: 12px;
-            margin: 3px 0;
+            font-size: 13px;
+            margin: 6px 0;
         }
         
         .axis-x { color: #ff6b6b; }
         .axis-y { color: #69db7c; }
         .axis-z { color: #74c0fc; }
         
-        #help {
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 10px 15px;
-            border-radius: 8px;
-            font-size: 11px;
-            color: #888;
-            z-index: 100;
+        .pose-divider {
+            border: none;
+            border-top: 1px solid var(--lcars-tan);
+            margin: 10px 0;
         }
         
+        #help {
+            bottom: 10px;
+            right: 10px;
+            padding: 10px 15px 10px 20px;
+            font-size: 11px;
+            color: var(--lcars-tan);
+            letter-spacing: 1px;
+        }
+        
+        /* Connection dialog - LCARS style */
         #connection-input {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9);
-            padding: 30px;
-            border-radius: 12px;
+            background: var(--lcars-black);
+            border: 3px solid var(--lcars-orange);
+            border-radius: 0 40px 40px 0;
             text-align: center;
             z-index: 200;
+            overflow: hidden;
+            min-width: 400px;
+        }
+        
+        #connection-input::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 20px;
+            height: 100%;
+            background: var(--lcars-orange);
         }
         
         #connection-input.hidden {
             display: none;
         }
         
+        .connection-inner {
+            padding: 30px 30px 30px 40px;
+        }
+        
         #connection-input h2 {
-            color: #ff6b35;
-            margin-bottom: 20px;
+            color: var(--lcars-orange);
+            margin-bottom: 10px;
+            font-size: 28px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+        
+        #connection-input p {
+            color: var(--lcars-tan);
+            margin-bottom: 15px;
+            font-size: 14px;
+            letter-spacing: 1px;
         }
         
         #connection-input input {
-            background: #333;
-            border: 1px solid #555;
-            color: #eee;
-            padding: 10px;
-            border-radius: 4px;
-            width: 250px;
-            margin-bottom: 15px;
-            font-size: 14px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid var(--lcars-blue);
+            color: var(--lcars-peach);
+            padding: 15px 20px;
+            border-radius: 25px;
+            width: 280px;
+            margin-bottom: 20px;
+            font-size: 16px;
+            font-family: 'Antonio', sans-serif;
         }
         
         #connection-input input:focus {
             outline: none;
-            border-color: #4ecdc4;
+            border-color: var(--lcars-orange);
+            box-shadow: 0 0 15px rgba(255, 153, 0, 0.3);
+        }
+        
+        #connection-input button {
+            padding: 15px 40px;
+            font-size: 16px;
         }
     </style>
 </head>
@@ -189,77 +278,91 @@
     
     <!-- Connection dialog -->
     <div id="connection-input">
-        <h2>🤖 MARS Point Cloud</h2>
-        <p style="margin-bottom: 15px; color: #888;">Enter WebSocket server address:</p>
-        <input type="text" id="ws-address" placeholder="ws://192.168.1.100:8765" value="">
-        <br>
-        <button onclick="connect()">Connect</button>
+        <div class="connection-inner">
+            <h2>Point Cloud</h2>
+            <p>Spatial Telemetry System</p>
+            <p>Enter WebSocket server address:</p>
+            <input type="text" id="ws-address" placeholder="ws://192.168.1.100:8765" value="">
+            <br>
+            <button onclick="connect()">ENGAGE</button>
+        </div>
     </div>
     
     <!-- Info panel -->
-    <div id="info-panel">
-        <h2><span id="status"></span>Point Cloud</h2>
-        <div class="stat-row">
-            <span class="stat-label">Points:</span>
-            <span class="stat-value" id="point-count">0</span>
+    <div id="info-panel" class="lcars-panel">
+        <div class="lcars-panel-header">
+            <span id="status"></span>
+            <span class="lcars-panel-title">Point Cloud</span>
         </div>
-        <div class="stat-row">
-            <span class="stat-label">FPS:</span>
-            <span class="stat-value" id="fps">0</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Mode:</span>
-            <span class="stat-value" id="mode">Live</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Latency:</span>
-            <span class="stat-value" id="latency">--</span>
+        <div class="lcars-panel-content">
+            <div class="stat-row">
+                <span class="stat-label">Points</span>
+                <span class="stat-value" id="point-count">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">FPS</span>
+                <span class="stat-value" id="fps">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Mode</span>
+                <span class="stat-value" id="mode">Live</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Latency</span>
+                <span class="stat-value" id="latency">--</span>
+            </div>
         </div>
     </div>
     
     <!-- Pose panel -->
-    <div id="pose-panel">
-        <h3>Robot Pose</h3>
-        <div class="pose-axis">
-            <span class="axis-x">X:</span>
-            <span class="stat-value" id="pos-x">0.0</span>
+    <div id="pose-panel" class="lcars-panel">
+        <div class="lcars-panel-header">
+            <span class="lcars-panel-title">Robot Pose</span>
         </div>
-        <div class="pose-axis">
-            <span class="axis-y">Y:</span>
-            <span class="stat-value" id="pos-y">0.0</span>
-        </div>
-        <div class="pose-axis">
-            <span class="axis-z">Z:</span>
-            <span class="stat-value" id="pos-z">0.0</span>
-        </div>
-        <hr style="margin: 8px 0; border-color: #444;">
-        <div class="pose-axis">
-            <span class="stat-label">Roll:</span>
-            <span class="stat-value" id="rot-roll">0.0°</span>
-        </div>
-        <div class="pose-axis">
-            <span class="stat-label">Pitch:</span>
-            <span class="stat-value" id="rot-pitch">0.0°</span>
-        </div>
-        <div class="pose-axis">
-            <span class="stat-label">Yaw:</span>
-            <span class="stat-value" id="rot-yaw">0.0°</span>
+        <div class="lcars-panel-content">
+            <div class="pose-axis">
+                <span class="axis-x">X</span>
+                <span class="stat-value" id="pos-x">0.0</span>
+            </div>
+            <div class="pose-axis">
+                <span class="axis-y">Y</span>
+                <span class="stat-value" id="pos-y">0.0</span>
+            </div>
+            <div class="pose-axis">
+                <span class="axis-z">Z</span>
+                <span class="stat-value" id="pos-z">0.0</span>
+            </div>
+            <hr class="pose-divider">
+            <div class="pose-axis">
+                <span class="stat-label">Roll</span>
+                <span class="stat-value" id="rot-roll">0.0°</span>
+            </div>
+            <div class="pose-axis">
+                <span class="stat-label">Pitch</span>
+                <span class="stat-value" id="rot-pitch">0.0°</span>
+            </div>
+            <div class="pose-axis">
+                <span class="stat-label">Yaw</span>
+                <span class="stat-value" id="rot-yaw">0.0°</span>
+            </div>
         </div>
     </div>
     
     <!-- Controls -->
-    <div id="controls">
-        <button id="btn-live" class="active" onclick="setMode('live')">Live</button>
-        <button id="btn-accumulate" onclick="setMode('accumulate')">Accumulate</button>
-        <button onclick="clearPoints()">Clear</button>
-        <button onclick="resetView()">Reset View</button>
-        <button onclick="togglePause()" id="btn-pause">Pause</button>
-        <button onclick="resetPose()">Reset Pose</button>
+    <div id="controls" class="lcars-panel">
+        <div class="lcars-button-row">
+            <button id="btn-live" class="active" onclick="setMode('live')">Live</button>
+            <button id="btn-accumulate" onclick="setMode('accumulate')">Accumulate</button>
+            <button onclick="clearPoints()">Clear</button>
+            <button onclick="resetView()">Reset View</button>
+            <button onclick="togglePause()" id="btn-pause">Pause</button>
+            <button onclick="resetPose()">Reset Pose</button>
+        </div>
     </div>
     
     <!-- Help -->
-    <div id="help">
-        🖱️ Drag to rotate | Scroll to zoom | Right-drag to pan
+    <div id="help" class="lcars-panel">
+        DRAG: Rotate | SCROLL: Zoom | RIGHT-DRAG: Pan
     </div>
     
     <!-- Three.js from CDN -->
@@ -295,7 +398,7 @@
             
             // Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a2e);
+            scene.background = new THREE.Color(0x000000);
             
             // Camera
             camera = new THREE.PerspectiveCamera(
@@ -321,8 +424,8 @@
             controls.minDistance = 100;
             controls.maxDistance = 20000;
             
-            // Grid (XY plane, Z up)
-            gridHelper = new THREE.GridHelper(5000, 50, 0x444444, 0x333333);
+            // Grid (XY plane, Z up) - LCARS tan colors
+            gridHelper = new THREE.GridHelper(5000, 50, 0xcc9966, 0x664422);
             gridHelper.rotation.x = Math.PI / 2;  // Rotate to XY plane
             scene.add(gridHelper);
             
@@ -340,7 +443,7 @@
             geometry.setDrawRange(0, 0);
             
             const material = new THREE.PointsMaterial({
-                size: 15,
+                size: 18,
                 vertexColors: true,
                 sizeAttenuation: true
             });
@@ -348,17 +451,17 @@
             pointCloud = new THREE.Points(geometry, material);
             scene.add(pointCloud);
             
-            // Robot marker (simple arrow showing direction)
+            // Robot marker (simple arrow showing direction) - LCARS orange
             const robotGeom = new THREE.ConeGeometry(30, 80, 8);
             robotGeom.rotateX(Math.PI / 2);
-            const robotMat = new THREE.MeshBasicMaterial({ color: 0xff6b35 });
+            const robotMat = new THREE.MeshBasicMaterial({ color: 0xff9900 });
             robotMarker = new THREE.Mesh(robotGeom, robotMat);
             scene.add(robotMarker);
             
-            // Add robot body outline
+            // Add robot body outline - LCARS orange with transparency
             const bodyGeom = new THREE.CircleGeometry(60, 6);
             const bodyMat = new THREE.MeshBasicMaterial({ 
-                color: 0xff6b35, 
+                color: 0xff9900, 
                 transparent: true, 
                 opacity: 0.3,
                 side: THREE.DoubleSide
