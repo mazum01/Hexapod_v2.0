@@ -240,7 +240,69 @@ Prerequisites: Phase 1 behaviors working reliably
   - Option B: Track min/max seen over session, suggest calibration values
   - Option C: Add "Calibrate Battery" menu item that records current voltage as "full"
 - [ ] Show percentage instead of/alongside voltage on icon
-- [ ] Add low battery audio warning (beep or TTS)
+- [ ] Add low battery audio warning (beep or TTS) → see Audio section
+
+---
+
+## Audio Feedback System
+
+### Hardware
+- **USB DAC**: Sabrent USB External Stereo Sound Adapter
+- **Amplifier**: PAM8403 mini class-D module (5V from Pi GPIO)
+- **Speakers**: 2x 28mm 1W mini speakers
+
+### Wiring
+```
+Pi 5 USB → Sabrent DAC → 3.5mm → PAM8403 L/R inputs → Speakers
+                                       ↑
+                                 5V + GND from GPIO
+```
+
+### Tasks
+
+#### AU1. Audio Module
+- [ ] Create `audio_manager.py` module
+  - pygame.mixer based for low-latency, non-blocking playback
+  - Sound pool for preloaded common sounds
+  - Volume control (0-100%)
+  - Mute toggle
+- [ ] Configurable via [audio] section in controller.ini
+  - enabled=true, volume=80, mute=false
+  - sounds_dir=assets/sounds
+
+#### AU2. System Event Sounds
+- [ ] Startup chime (on controller boot)
+- [ ] Shutdown sound (on graceful exit)
+- [ ] Low battery warning (beep pattern when < threshold)
+- [ ] Safety lockout alert
+- [ ] Teensy connect/disconnect tones
+
+#### AU3. Gait & Mode Sounds
+- [ ] Gait enable/disable clicks
+- [ ] Gait type change confirmation (different tone per gait)
+- [ ] Autonomy mode toggle sound
+- [ ] Stand/Tuck confirmation
+
+#### AU4. Controller Feedback
+- [ ] Xbox controller connect/disconnect
+- [ ] Button press acknowledgment (optional, subtle)
+- [ ] Menu navigation clicks (optional)
+
+#### AU5. Voice Announcements (TTS)
+- [ ] Integrate pyttsx3 or espeak for text-to-speech
+  - "Battery low, twenty percent remaining"
+  - "Obstacle detected"
+  - "Entering patrol mode"
+- [ ] Configurable: tts_enabled, tts_voice, tts_rate
+- [ ] Limit announcement frequency (no spam)
+
+#### AU6. Sound Assets
+- [ ] Create/source royalty-free sound effects
+  - Robotic beeps/chirps for events
+  - Warning tones (escalating urgency)
+  - Confirmation clicks
+- [ ] Store in `assets/sounds/` directory
+- [ ] Keep files small (8-bit, 22kHz mono OK for robot sounds)
 
 ---
 
