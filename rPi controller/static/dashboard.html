@@ -25,16 +25,18 @@
         }
         
         :root {
-            /* LCARS color palette - limited to 5 purposeful colors */
+            /* LCARS color palette - default Classic TNG colors */
+            /* These are dynamically updated based on user's palette selection */
             --lcars-black: #000000;
-            --lcars-orange: #ff9900;      /* Primary: active/important */
-            --lcars-peach: #ffcc99;       /* Secondary: data display */
-            --lcars-tan: #cc9966;         /* Tertiary: frames/structure */
-            --lcars-blue: #9999ff;        /* Quaternary: interactive */
-            --lcars-purple: #cc99cc;      /* Quinary: status/info */
+            --lcars-orange: #ff8800;      /* Primary: active/important */
+            --lcars-peach: #ff8866;       /* Secondary: data display */
+            --lcars-tan: #ffaa00;         /* Tertiary: frames/structure */
+            --lcars-blue: #cc99ff;        /* Quaternary: interactive (violet) */
+            --lcars-purple: #99ccff;      /* Quinary: status/info (ice) */
+            --lcars-sunflower: #ffcc99;   /* Light accent */
             
             /* Semantic (derived from palette) */
-            --lcars-alert: #cc4444;       /* Alert state */
+            --lcars-alert: #ff5555;       /* Alert state (tomato) */
             --lcars-ok: #99cc66;          /* OK state */
             
             /* Spacing constants (invisible grid) */
@@ -51,7 +53,7 @@
         body {
             font-family: 'Antonio', 'Helvetica Neue', Arial, sans-serif;
             background: var(--lcars-black);
-            color: var(--lcars-peach);
+            color: var(--lcars-sunflower);
             min-height: 100vh;
             overflow-x: hidden;
         }
@@ -73,16 +75,30 @@
             gap: var(--frame-gap);
         }
         
-        /* Left swept elbow - thick to thin */
+        /* Left swept elbow - thick to thin (LCARS cornerstone)
+           The swept creates an L-shaped elbow with inner curve cutout */
         .lcars-header-swept {
             width: 180px;
             height: 60px;
             background: var(--lcars-orange);
             border-bottom-right-radius: var(--swept-radius);
             flex-shrink: 0;
+            position: relative;
         }
         
-        /* Top bar - extends across */
+        /* Inner curve cutout - creates the swept effect */
+        .lcars-header-swept::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 40px;
+            height: 20px;
+            background: var(--lcars-black);
+            border-top-left-radius: var(--swept-radius);
+        }
+        
+        /* Top bar - extends across (thinner than elbow = thick→thin transition) */
         .lcars-header-bar {
             flex: 1;
             height: 40px;
@@ -198,11 +214,23 @@
             min-height: 20px;
         }
         
-        /* Bottom swept elbow */
+        /* Bottom swept elbow with inner curve cutout */
         .lcars-sidebar-swept {
             height: 60px;
             background: var(--lcars-tan);
             border-top-right-radius: var(--swept-radius);
+            position: relative;
+        }
+        
+        .lcars-sidebar-swept::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 40px;
+            height: 20px;
+            background: var(--lcars-black);
+            border-bottom-left-radius: var(--swept-radius);
         }
         
         /* ================================================================
@@ -619,10 +647,23 @@
             margin-top: var(--frame-gap);
         }
         
+        /* Footer swept elbow - bottom left corner with inner cutout */
         .lcars-footer-swept {
             width: 180px;
             background: var(--lcars-tan);
             border-top-right-radius: var(--swept-radius);
+            position: relative;
+        }
+        
+        .lcars-footer-swept::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 40px;
+            height: 10px;
+            background: var(--lcars-black);
+            border-bottom-left-radius: var(--swept-radius);
         }
         
         .lcars-footer-bar {
@@ -1098,8 +1139,86 @@
                 updateTelemetry(data.data);
             } else if (data.type === 'config') {
                 config = data.data;
+                applyPalette();  // Apply LCARS palette from config
                 renderConfig();
             }
+        }
+        
+        // =================================================================
+        // LCARS Palettes (from display_thread.py)
+        // =================================================================
+        
+        const LCARS_PALETTES = {
+            'Classic': {
+                orange: '#ff8800',
+                gold: '#ffaa00',
+                peach: '#ff8866',
+                sunflower: '#ffcc99',
+                violet: '#cc99ff',
+                lilac: '#cc55ff',
+                almond: '#ffaa90',
+                ice: '#99ccff',
+                sky: '#aaaaff',
+                tomato: '#ff5555',
+            },
+            'Nemesis': {
+                orange: '#6699ff',
+                gold: '#88bbff',
+                peach: '#2266ff',
+                sunflower: '#ebf0ff',
+                violet: '#9966cc',
+                lilac: '#9966cc',
+                almond: '#ccaa88',
+                ice: '#88bbff',
+                sky: '#6699ff',
+                tomato: '#cc2233',
+            },
+            'LwrDecks': {
+                orange: '#ff7700',
+                gold: '#ff9911',
+                peach: '#ffaa44',
+                sunflower: '#ffeecc',
+                violet: '#ff4400',
+                lilac: '#cc5500',
+                almond: '#ffcc99',
+                ice: '#ffeecc',
+                sky: '#ffcc99',
+                tomato: '#ff4400',
+            },
+            'PADD': {
+                orange: '#5588ee',
+                gold: '#7799dd',
+                peach: '#455580',
+                sunflower: '#99ccff',
+                violet: '#88ffff',
+                lilac: '#66ccff',
+                almond: '#99ccff',
+                ice: '#88ffff',
+                sky: '#66ccff',
+                tomato: '#ff3500',
+            }
+        };
+        
+        function applyPalette() {
+            // Get palette name from System config
+            let paletteName = 'Classic';
+            if (config && config.System && config.System.Palette) {
+                paletteName = config.System.Palette;
+            }
+            
+            const palette = LCARS_PALETTES[paletteName] || LCARS_PALETTES['Classic'];
+            const root = document.documentElement;
+            
+            // Apply palette colors to CSS variables
+            root.style.setProperty('--lcars-orange', palette.orange);
+            root.style.setProperty('--lcars-tan', palette.gold);
+            root.style.setProperty('--lcars-peach', palette.peach);
+            root.style.setProperty('--lcars-sunflower', palette.sunflower);
+            root.style.setProperty('--lcars-blue', palette.violet);
+            root.style.setProperty('--lcars-purple', palette.ice);
+            root.style.setProperty('--lcars-alert', palette.tomato);
+            
+            console.log('Applied LCARS palette:', paletteName);
         }
         
         // =================================================================
