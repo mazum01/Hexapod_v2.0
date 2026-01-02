@@ -4,6 +4,7 @@
 # CHANGE LOG (Python Controller)
 # Format: YYYY-MM-DD  Summary
 # REMINDER: Update CONTROLLER_VERSION below with every behavioral change, feature addition, or bug fix!
+# 2026-01-01  v0.8.6 b243: Dashboard W3: Live config editing from web dashboard - editable Gait, Safety, PID/IMP/EST params; persists to controller.ini; bidirectional sync with on-device menu.
 # 2026-01-01  v0.8.5 b241: Dashboard: Rebuilt LCARS per Manifesto - proper swept elbows (thick→thin frames), cap buttons, 3 font sizes, minimalist layout; simpler, more authentic TNG styling.
 # 2025-12-27  v0.7.38 b222: Display: LCARS palette syncs live when changed in menu; ToF distance moved to top of heatmap.
 # 2025-12-27  v0.7.37 b221: Display: LCARS engineering view uses config palette (Classic/Nemesis/LowerDecks/PADD), bigger fonts, black text.
@@ -245,9 +246,9 @@
 # 2025-12-31  v0.8.4 b233: Dashboard: Web-based telemetry dashboard (dashboard.html on port 8766); real-time telemetry streaming via WebSocket; read-only config view; Phase 1 of web configuration system.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.8.5"
+CONTROLLER_VERSION = "0.8.6"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 241
+CONTROLLER_BUILD = 243
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -4385,6 +4386,197 @@ else:
     pass  # Point cloud disabled in config
 
 # --------------------------------------------------------------------------------------------------
+# Dashboard Config Change Handler (Phase 3: Edit configuration from web dashboard)
+# --------------------------------------------------------------------------------------------------
+def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
+    """Handle configuration change requests from web dashboard.
+    
+    Args:
+        section: Config section name (e.g., 'Gait', 'Safety', 'PID')
+        key: Config key/item label (e.g., 'cycle_ms', 'volt_critical')
+        value: New value to set
+        
+    Returns:
+        True if change was applied successfully, False otherwise
+    """
+    global _gaitCycleMs, _gaitStepLenMm, _savedGaitWidthMm, _savedGaitLiftMm
+    global _gaitTurnMaxDegS, _gaitEngine
+    global _lowBatteryEnabled, _lowBatteryVoltCritical, _lowBatteryRecoveryVolt
+    global _marsMenu
+    
+    try:
+        section_lower = section.lower()
+        
+        # Gait settings
+        if section_lower == 'gait':
+            if key == 'cycle_ms':
+                _gaitCycleMs = int(value)
+                if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
+                    _gaitEngine.params.cycle_ms = _gaitCycleMs
+                save_gait_settings(_savedGaitWidthMm, _savedGaitLiftMm, cycle_ms=_gaitCycleMs)
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.GAIT, "Cycle Time", _gaitCycleMs)
+                if _verbose:
+                    print(f"[Dashboard] Gait cycle_ms -> {_gaitCycleMs}", end="\r\n")
+                return True
+                
+            elif key == 'step_length_mm':
+                _gaitStepLenMm = float(value)
+                if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
+                    _gaitEngine.params.step_length_mm = _gaitStepLenMm
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.GAIT, "Step Length", _gaitStepLenMm)
+                if _verbose:
+                    print(f"[Dashboard] Gait step_length_mm -> {_gaitStepLenMm}", end="\r\n")
+                return True
+                
+            elif key == 'step_height_mm' or key == 'lift_mm':
+                _savedGaitLiftMm = float(value)
+                if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
+                    _gaitEngine.params.lift_mm = _savedGaitLiftMm
+                save_gait_settings(_savedGaitWidthMm, _savedGaitLiftMm, cycle_ms=_gaitCycleMs)
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.GAIT, "Step Height", _savedGaitLiftMm)
+                if _verbose:
+                    print(f"[Dashboard] Gait lift_mm -> {_savedGaitLiftMm}", end="\r\n")
+                return True
+                
+            elif key == 'turn_max_deg_s' or key == 'turn_rate':
+                _gaitTurnMaxDegS = float(value)
+                save_gait_settings(_savedGaitWidthMm, _savedGaitLiftMm, cycle_ms=_gaitCycleMs, turn_max_deg_s=_gaitTurnMaxDegS)
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.GAIT, "Turn Rate", _gaitTurnMaxDegS)
+                if _verbose:
+                    print(f"[Dashboard] Gait turn_max_deg_s -> {_gaitTurnMaxDegS}", end="\r\n")
+                return True
+        
+        # Safety settings
+        elif section_lower == 'safety':
+            if key == 'low_battery_enabled':
+                _lowBatteryEnabled = bool(value)
+                save_low_battery_settings({'enabled': _lowBatteryEnabled})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Low Batt Enabled", 1 if _lowBatteryEnabled else 0)
+                if _verbose:
+                    print(f"[Dashboard] Safety low_battery_enabled -> {_lowBatteryEnabled}", end="\r\n")
+                return True
+                
+            elif key == 'volt_critical':
+                _lowBatteryVoltCritical = float(value)
+                save_low_battery_settings({'volt_critical': _lowBatteryVoltCritical})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Critical Voltage", _lowBatteryVoltCritical)
+                if _verbose:
+                    print(f"[Dashboard] Safety volt_critical -> {_lowBatteryVoltCritical}", end="\r\n")
+                return True
+                
+            elif key == 'volt_recovery':
+                _lowBatteryRecoveryVolt = float(value)
+                save_low_battery_settings({'volt_recovery': _lowBatteryRecoveryVolt})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Recovery Voltage", _lowBatteryRecoveryVolt)
+                if _verbose:
+                    print(f"[Dashboard] Safety volt_recovery -> {_lowBatteryRecoveryVolt}", end="\r\n")
+                return True
+        
+        # PID settings
+        elif section_lower == 'pid':
+            # Delegate to PID handler
+            return _handle_pid_config_change(key, value)
+        
+        # IMP (Impedance) settings  
+        elif section_lower in ('imp', 'impedance'):
+            return _handle_imp_config_change(key, value)
+        
+        # EST (Estimator) settings
+        elif section_lower in ('est', 'estimator'):
+            return _handle_est_config_change(key, value)
+        
+        if _verbose:
+            print(f"[Dashboard] Unknown config: {section}.{key} = {value}", end="\r\n")
+        return False
+        
+    except Exception as e:
+        if _verbose:
+            print(f"[Dashboard] Config change error: {e}", end="\r\n")
+        return False
+
+
+def _handle_pid_config_change(key: str, value) -> bool:
+    """Handle PID config changes from dashboard."""
+    global _pidEnabled, _pidKp, _pidKi, _pidKd, _pidMaxCorrection
+    
+    try:
+        if key == 'enabled':
+            _pidEnabled = bool(value)
+            save_pid_settings({'enabled': _pidEnabled})
+            return True
+        elif key == 'kp':
+            _pidKp = float(value)
+            save_pid_settings({'kp': _pidKp})
+            return True
+        elif key == 'ki':
+            _pidKi = float(value)
+            save_pid_settings({'ki': _pidKi})
+            return True
+        elif key == 'kd':
+            _pidKd = float(value)
+            save_pid_settings({'kd': _pidKd})
+            return True
+        elif key == 'max_correction':
+            _pidMaxCorrection = float(value)
+            save_pid_settings({'max_correction': _pidMaxCorrection})
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _handle_imp_config_change(key: str, value) -> bool:
+    """Handle Impedance config changes from dashboard."""
+    global _impEnabled, _impKp, _impKd, _impMaxN
+    
+    try:
+        if key == 'enabled':
+            _impEnabled = bool(value)
+            save_imp_settings({'enabled': _impEnabled})
+            return True
+        elif key == 'kp':
+            _impKp = float(value)
+            save_imp_settings({'kp': _impKp})
+            return True
+        elif key == 'kd':
+            _impKd = float(value)
+            save_imp_settings({'kd': _impKd})
+            return True
+        elif key == 'max_force_n':
+            _impMaxN = float(value)
+            save_imp_settings({'max_force_n': _impMaxN})
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _handle_est_config_change(key: str, value) -> bool:
+    """Handle Estimator config changes from dashboard."""
+    global _estAlpha, _estVelDecay
+    
+    try:
+        if key == 'alpha':
+            _estAlpha = float(value)
+            save_est_settings({'alpha': _estAlpha})
+            return True
+        elif key == 'vel_decay':
+            _estVelDecay = float(value)
+            save_est_settings({'vel_decay': _estVelDecay})
+            return True
+        return False
+    except Exception:
+        return False
+
+
+# --------------------------------------------------------------------------------------------------
 # Web Dashboard Server: WebSocket server for telemetry streaming to browser dashboard
 # --------------------------------------------------------------------------------------------------
 if _dashboardEnabled and TELEMETRY_SERVER_AVAILABLE:
@@ -4413,6 +4605,8 @@ if _dashboardEnabled and TELEMETRY_SERVER_AVAILABLE:
             "volt_critical": _lowBatteryVoltCritical,
             "volt_recovery": _lowBatteryRecoveryVolt,
         })
+        # Register config change callback for Phase 3 editing
+        _dashboardServer.set_config_change_callback(_handle_dashboard_config_change)
     except Exception as e:
         _startupSplash.log(f"Dashboard failed: {e}", "RED")
         if _verbose:

@@ -370,13 +370,19 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
 - [x] Add configuration search/filter
 - [x] Collapsible sections for better organization
 
-### W3. Phase 3: Configuration Editing
-- [ ] Add set_config WebSocket command support
-- [ ] Implement config change callback in controller
-- [ ] Edit gait parameters (cycle_ms, step_height, step_length)
-- [ ] Edit safety thresholds (volt limits, temp limits)
-- [ ] Edit PID/IMP/EST tuning parameters
-- [ ] Save to controller.ini from dashboard
+### W2b. LCARS Styling Polish
+- [ ] Fix dashboard swept elbow curves (header/sidebar/footer)
+  - Inner curve sizing and radius proportions per LCARS Manifesto
+  - Reference: http://www.lcars-terminal.de/tutorial/guideline.htm
+- [ ] Apply same fixes to pointcloud_viewer.html swept elbows
+
+### W3. Phase 3: Configuration Editing ✅ COMPLETE (v0.8.6)
+- [x] Add set_config WebSocket command support
+- [x] Implement config change callback in controller (_handle_dashboard_config_change)
+- [x] Edit gait parameters (cycle_ms, step_height, step_length, turn_rate)
+- [x] Edit safety thresholds (low_battery_enabled, volt_critical, volt_recovery)
+- [x] Edit PID/IMP/EST tuning parameters
+- [x] Save to controller.ini from dashboard (via existing save_*_settings functions)
 
 ### W4. Phase 4: Graphs & Historical Data
 - [ ] Rolling graph for battery voltage over time

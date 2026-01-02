@@ -6,6 +6,7 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2026-01-01  v0.8.6 b243: Dashboard W3: Live config editing from web dashboard - editable Gait (cycle_ms, step_length, step_height, turn_rate), Safety (low_battery_enabled, volt_critical, volt_recovery), PID/IMP/EST parameters; changes persist to controller.ini; bidirectional sync with on-device menu.
 2026-01-01  v0.8.5 b242: Dashboard: Fixed LCARS swept elbows with proper inner curve cutouts (::after pseudo-elements); added dynamic palette system syncing to user's System.Palette selection; fixed pointcloud_viewer to handle 'frame' message type and array-based points.
 2026-01-01  v0.8.5 b241: Dashboard: Rebuilt LCARS per Manifesto - proper swept elbows (thick→thin frames), cap buttons, 3 font sizes, minimalist layout; simpler, more authentic TNG styling.
 2026-01-01  v0.8.5 b240: Dashboard: LCARS theme for dashboard and point cloud viewer - authentic Star Trek TNG styling with distinctive color palette (orange/peach/tan/blue/purple), curved panels, sidebar navigation, stardate timestamps.

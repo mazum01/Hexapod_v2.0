@@ -86,7 +86,7 @@
             position: relative;
         }
         
-        /* Inner curve cutout - creates the swept effect */
+        /* Inner curve cutout - sized to match thickness transition (60-40=20px height) */
         .lcars-header-swept::after {
             content: '';
             position: absolute;
@@ -95,7 +95,7 @@
             width: 40px;
             height: 20px;
             background: var(--lcars-black);
-            border-top-left-radius: var(--swept-radius);
+            border-top-left-radius: 20px;
         }
         
         /* Top bar - extends across (thinner than elbow = thick→thin transition) */
@@ -214,7 +214,7 @@
             min-height: 20px;
         }
         
-        /* Bottom swept elbow with inner curve cutout */
+        /* Bottom swept elbow - curves at top-right (upward) for bottom corner */
         .lcars-sidebar-swept {
             height: 60px;
             background: var(--lcars-tan);
@@ -228,9 +228,9 @@
             right: 0;
             top: 0;
             width: 40px;
-            height: 20px;
+            height: 30px;
             background: var(--lcars-black);
-            border-bottom-left-radius: var(--swept-radius);
+            border-bottom-left-radius: 30px;
         }
         
         /* ================================================================
@@ -626,6 +626,29 @@
             font-weight: 700;
         }
         
+        /* Editable config input */
+        .lcars-config-input {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--lcars-tan);
+            border-radius: 4px;
+            color: var(--lcars-orange);
+            font-size: 12px;
+            font-weight: 700;
+            padding: 2px 6px;
+            width: 80px;
+            text-align: right;
+        }
+        
+        .lcars-config-input:focus {
+            outline: none;
+            border-color: var(--lcars-orange);
+            background: rgba(0, 0, 0, 0.7);
+        }
+        
+        .lcars-config-input:hover {
+            border-color: var(--lcars-peach);
+        }
+        
         .lcars-config-item.hidden {
             display: none;
         }
@@ -647,7 +670,7 @@
             margin-top: var(--frame-gap);
         }
         
-        /* Footer swept elbow - bottom left corner with inner cutout */
+        /* Footer swept elbow - curves at top-right (upward) for bottom corner */
         .lcars-footer-swept {
             width: 180px;
             background: var(--lcars-tan);
@@ -663,7 +686,7 @@
             width: 40px;
             height: 10px;
             background: var(--lcars-black);
-            border-bottom-left-radius: var(--swept-radius);
+            border-bottom-left-radius: 10px;
         }
         
         .lcars-footer-bar {
@@ -1051,7 +1074,7 @@
                         <div class="lcars-panel wide">
                             <div class="lcars-panel-header secondary">
                                 <span class="lcars-panel-title">Configuration</span>
-                                <span class="lcars-panel-badge">Read Only</span>
+                                <span class="lcars-panel-badge">Live Edit</span>
                             </div>
                             <div class="lcars-panel-body secondary-border">
                                 <input type="text" 
@@ -1141,6 +1164,8 @@
                 config = data.data;
                 applyPalette();  // Apply LCARS palette from config
                 renderConfig();
+            } else if (data.type === 'config_result') {
+                handleConfigResult(data);
             }
         }
         
@@ -1297,6 +1322,30 @@
         // Configuration
         // =================================================================
         
+        // Editable config items: section -> [keys that can be edited]
+        const EDITABLE_CONFIG = {
+            'Gait': ['cycle_ms', 'step_length_mm', 'step_height_mm', 'turn_rate'],
+            'Safety': ['low_battery_enabled', 'volt_critical', 'volt_recovery'],
+            'PID': ['enabled', 'kp', 'ki', 'kd', 'max_correction'],
+            'Impedance': ['enabled', 'kp', 'kd', 'max_force_n'],
+            'Estimator': ['alpha', 'vel_decay'],
+        };
+        
+        function isEditable(section, key) {
+            const editableKeys = EDITABLE_CONFIG[section];
+            if (!editableKeys) return false;
+            // Match key case-insensitively and with underscores/spaces normalized
+            const normalizedKey = key.toLowerCase().replace(/\s+/g, '_');
+            return editableKeys.some(k => k.toLowerCase() === normalizedKey);
+        }
+        
+        function getEditableKey(section, displayKey) {
+            // Convert display key back to config key format
+            const normalizedKey = displayKey.toLowerCase().replace(/\s+/g, '_');
+            const editableKeys = EDITABLE_CONFIG[section] || [];
+            return editableKeys.find(k => k.toLowerCase() === normalizedKey) || normalizedKey;
+        }
+        
         function renderConfig() {
             const container = document.getElementById('config-container');
             const searchTerm = (document.getElementById('config-search')?.value || '').toLowerCase();
@@ -1343,10 +1392,41 @@
                 html += '<div class="lcars-config-items">';
                 
                 for (const [key, value] of filteredItems) {
-                    html += `<div class="lcars-config-item">
-                        <span class="lcars-config-label">${key}</span>
-                        <span class="lcars-config-value">${formatValue(value)}</span>
-                    </div>`;
+                    const editable = isEditable(section, key);
+                    const configKey = getEditableKey(section, key);
+                    
+                    if (editable) {
+                        // Editable item with input
+                        const inputType = typeof value === 'boolean' ? 'checkbox' : 'number';
+                        const inputValue = typeof value === 'boolean' 
+                            ? (value ? 'checked' : '')
+                            : (typeof value === 'string' && value.match(/^[\d.]+/) 
+                                ? parseFloat(value) 
+                                : value);
+                        
+                        if (inputType === 'checkbox') {
+                            html += `<div class="lcars-config-item" data-section="${section}" data-key="${configKey}">
+                                <span class="lcars-config-label">${key}</span>
+                                <input type="checkbox" class="lcars-config-checkbox" 
+                                       ${value ? 'checked' : ''} 
+                                       onchange="setConfig('${section}', '${configKey}', this.checked)">
+                            </div>`;
+                        } else {
+                            html += `<div class="lcars-config-item" data-section="${section}" data-key="${configKey}">
+                                <span class="lcars-config-label">${key}</span>
+                                <input type="number" class="lcars-config-input" 
+                                       value="${inputValue}" step="any"
+                                       onchange="setConfig('${section}', '${configKey}', parseFloat(this.value))"
+                                       onkeydown="if(event.key==='Enter'){this.blur();}">
+                            </div>`;
+                        }
+                    } else {
+                        // Read-only item
+                        html += `<div class="lcars-config-item">
+                            <span class="lcars-config-label">${key}</span>
+                            <span class="lcars-config-value">${formatValue(value)}</span>
+                        </div>`;
+                    }
                 }
                 
                 html += '</div></div>';
@@ -1376,6 +1456,37 @@
             if (typeof value === 'boolean') return value ? '✓ On' : '✗ Off';
             if (typeof value === 'number') return Number.isInteger(value) ? value.toString() : value.toFixed(2);
             return String(value);
+        }
+        
+        // =================================================================
+        // Config Editing
+        // =================================================================
+        
+        function setConfig(section, key, value) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                console.error('WebSocket not connected');
+                return;
+            }
+            
+            // Send set_config command
+            const cmd = {
+                cmd: 'set_config',
+                section: section,
+                key: key,
+                value: value
+            };
+            
+            console.log('[Dashboard] Setting config:', cmd);
+            ws.send(JSON.stringify(cmd));
+        }
+        
+        function handleConfigResult(data) {
+            if (data.success) {
+                console.log(`[Dashboard] Config set: ${data.section}.${data.key} = ${data.value}`);
+            } else {
+                console.error(`[Dashboard] Config failed: ${data.section}.${data.key}`, data.error);
+                // Could show a toast notification here
+            }
         }
         
         // =================================================================
