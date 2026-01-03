@@ -413,6 +413,8 @@ class MarsMenu:
                      format_func=lambda v: f"{v:.1f}V"),
             MenuItem("Volt Recovery", "value", value=10.5, min_val=9.5, max_val=11.5, step=0.1, unit="V",
                      format_func=lambda v: f"{v:.1f}V"),
+            MenuItem("LowBatt Filter", "value", value=0.005, min_val=0.001, max_val=0.100, step=0.001, unit="α",
+                     format_func=lambda v: f"{v:.3f}"),
             MenuItem("LowBatt Status", "info", value="OK"),
             MenuItem("---Actions---", "info", value=""),
             MenuItem("Clear Safety", "action"),
@@ -1602,11 +1604,11 @@ class MarsMenu:
     def get_all_config(self) -> dict:
         """Export all menu items as a dictionary for web dashboard.
         
-        Returns a dict of {category_name: {item_label: value_or_display, ...}, ...}
-        Only includes value, option, and info items (not actions).
+        Returns a dict of {category_name: {item_label: item_data, ...}, ...}
+        Each item_data is a dict with: value, type, and optional min/max/step/options/unit.
         
         Returns:
-            dict: Configuration organized by category
+            dict: Configuration organized by category with full metadata
         """
         # Category ID to display name mapping
         category_names = {
@@ -1635,26 +1637,41 @@ class MarsMenu:
                 if item.item_type == "action":
                     continue
                 
+                # Build item data with metadata
+                item_data = {
+                    "type": item.item_type,
+                    "raw_value": item.value,
+                }
+                
                 # Get the display value for dashboard
                 if item.item_type == "option":
                     # For options, show the selected option text
                     if item.options and 0 <= item.value < len(item.options):
-                        display_val = item.options[item.value]
+                        item_data["display"] = item.options[item.value]
                     else:
-                        display_val = str(item.value)
+                        item_data["display"] = str(item.value)
+                    item_data["options"] = item.options
                 elif item.item_type == "value":
-                    # For numeric values, include unit
+                    # For numeric values, include unit and constraints
                     if item.format_func:
-                        display_val = item.format_func(item.value)
+                        item_data["display"] = item.format_func(item.value)
                     else:
-                        display_val = f"{item.value}{item.unit}" if item.unit else item.value
+                        item_data["display"] = f"{item.value}{item.unit}" if item.unit else str(item.value)
+                    if item.min_val is not None:
+                        item_data["min"] = item.min_val
+                    if item.max_val is not None:
+                        item_data["max"] = item.max_val
+                    if item.step is not None:
+                        item_data["step"] = item.step
+                    if item.unit:
+                        item_data["unit"] = item.unit
                 elif item.item_type == "info":
                     # Info items show their display value
-                    display_val = item.get_display_value()
+                    item_data["display"] = item.get_display_value()
                 else:
-                    display_val = str(item.value) if item.value is not None else "---"
+                    item_data["display"] = str(item.value) if item.value is not None else "---"
                 
-                category_config[item.label] = display_val
+                category_config[item.label] = item_data
             
             # Only include category if it has items
             if category_config:

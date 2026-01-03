@@ -827,6 +827,7 @@ def save_low_battery_settings(low_batt_state: dict) -> bool:
             - enabled (bool): Enable low battery protection
             - volt_critical (float): Voltage threshold for TUCK+DISABLE
             - volt_recovery (float): Voltage to clear protection latch
+            - filter_alpha (float): Low-pass filter smoothing (0.01-1.0)
     
     Returns:
         True on success, False on error.
@@ -843,6 +844,8 @@ def save_low_battery_settings(low_batt_state: dict) -> bool:
             _cfg.set('low_battery', 'volt_critical', f"{float(low_batt_state['volt_critical']):.1f}")
         if 'volt_recovery' in low_batt_state:
             _cfg.set('low_battery', 'volt_recovery', f"{float(low_batt_state['volt_recovery']):.1f}")
+        if 'filter_alpha' in low_batt_state:
+            _cfg.set('low_battery', 'filter_alpha', f"{float(low_batt_state['filter_alpha']):.3f}")
         with open(_cfg_path, 'w') as f:
             _cfg.write(f)
         return True

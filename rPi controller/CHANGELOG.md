@@ -6,6 +6,17 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2026-01-03  v0.10.0 b254: Audio: Created click.wav (25ms synthetic damped impulse), boosted click volume to 1.0 in SOUND_VOLUMES; wired audio_click() to all buttons including D-pad, Start, Back.
+2026-01-03  v0.9.0 b253: Audio: Full event audio feedback - button clicks on all controller buttons (A/B/X/Y/LB/RB), enable/disable tones, low battery warning (3-beep alert), Teensy connect/disconnect sounds, gait start/stop chirps.
+2026-01-03  v0.8.9 b252: Audio: Integrated audio_manager into controller.py - startup chime (3-tone ascending A4→C#5→E5), shutdown beep (descending E5→A4), config from [audio] section; audio manager initialized during startup, cleaned up on exit.
+2026-01-03  v0.8.8 b251: Audio: Created audio_manager.py module - pygame.mixer based, sound pool, volume control, mute, beep generator; configured for Sabrent USB DAC (hw:2,0); [audio] section in controller.ini.
+2026-01-03  v0.8.7 b250: Dashboard: Fixed config source - now uses MarsMenu.get_all_config() with full metadata (min/max/step/unit) instead of simple dict; periodic refresh every 2s; inputs show correct decimal precision from step size.
+2026-01-02  v0.8.7 b249: Dashboard: Config editing now uses MarsMenu metadata (min/max/step/unit/options) for input constraints; chart x-axis fixed to show full time window; added dropdown support for option-type menu items; key aliasing supports both menu labels and internal keys.
+2026-01-02  v0.8.7 b248: Dashboard W4: Overlay mode for charts - "Overlay All" tab shows voltage, loop time, and temperature on single chart with three Y-axes (left voltage, right loop time/temp); legend visible in overlay mode; interaction tooltip shows all values.
+2026-01-02  v0.8.7 b247: Dashboard W4: Telemetry history charts - rolling graphs for voltage, loop time, and temperature using Chart.js; selectable 1/5/10 min windows; CSV export button; sample counter badge; tab-based chart switching.
+2026-01-02  v0.8.6 b246: Dashboard: Fixed config section names (Gait/Safety/PID/Impedance/Estimator) to match EDITABLE_CONFIG keys; editable input fields now appear correctly for dashboard config editing.
+2026-01-02  v0.8.6 b245: Dashboard: Fixed PID/IMP/EST config - defined missing variables (_pidEnabled, _pidKp, etc.), added initialization from config, pushed all 5 categories (Gait, Safety, PID, Impedance, Estimator) to dashboard; fixed save handlers to use correct firmware keys (triplets, milli values).
+2026-01-02  v0.8.6 b244: Safety: Low battery filter_alpha now configurable via [low_battery] section and dashboard; smaller alpha = slower/smoother voltage filtering.
 2026-01-01  v0.8.6 b243: Dashboard W3: Live config editing from web dashboard - editable Gait (cycle_ms, step_length, step_height, turn_rate), Safety (low_battery_enabled, volt_critical, volt_recovery), PID/IMP/EST parameters; changes persist to controller.ini; bidirectional sync with on-device menu.
 2026-01-01  v0.8.5 b242: Dashboard: Fixed LCARS swept elbows with proper inner curve cutouts (::after pseudo-elements); added dynamic palette system syncing to user's System.Palette selection; fixed pointcloud_viewer to handle 'frame' message type and array-based points.
 2026-01-01  v0.8.5 b241: Dashboard: Rebuilt LCARS per Manifesto - proper swept elbows (thick→thin frames), cap buttons, 3 font sizes, minimalist layout; simpler, more authentic TNG styling.

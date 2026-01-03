@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-12-31 (Web Dashboard Phase 1 COMPLETE)
+Last updated: 2026-01-03 (Audio Integration)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -260,32 +260,39 @@ Pi 5 USB → Sabrent DAC → 3.5mm → PAM8403 L/R inputs → Speakers
 
 ### Tasks
 
-#### AU1. Audio Module
-- [ ] Create `audio_manager.py` module
+#### AU1. Audio Module ✅
+- [x] Create `audio_manager.py` module
   - pygame.mixer based for low-latency, non-blocking playback
   - Sound pool for preloaded common sounds
   - Volume control (0-100%)
   - Mute toggle
-- [ ] Configurable via [audio] section in controller.ini
-  - enabled=true, volume=80, mute=false
+  - Beep tone generator (numpy-based)
+- [x] Configurable via [audio] section in controller.ini
+  - enabled=true, volume=0.7
+  - device=hw:2,0 (Sabrent USB DAC)
   - sounds_dir=assets/sounds
+- [x] Integrate into controller.py (startup, event hooks)
+  - Audio manager initialization during startup
+  - Startup chime (3-tone ascending A4→C#5→E5)
+  - Shutdown beep (descending E5→A4)
+  - Clean shutdown of audio manager
 
-#### AU2. System Event Sounds
-- [ ] Startup chime (on controller boot)
-- [ ] Shutdown sound (on graceful exit)
-- [ ] Low battery warning (beep pattern when < threshold)
+#### AU2. System Event Sounds ✅
+- [x] Startup chime (on controller boot)
+- [x] Shutdown sound (on graceful exit)
+- [x] Low battery warning (3-beep alert when < threshold)
 - [ ] Safety lockout alert
-- [ ] Teensy connect/disconnect tones
+- [x] Teensy connect/disconnect tones
 
-#### AU3. Gait & Mode Sounds
-- [ ] Gait enable/disable clicks
+#### AU3. Gait & Mode Sounds ✅
+- [x] Gait start/stop chirps
 - [ ] Gait type change confirmation (different tone per gait)
 - [ ] Autonomy mode toggle sound
 - [ ] Stand/Tuck confirmation
 
-#### AU4. Controller Feedback
+#### AU4. Controller Feedback ✅
 - [ ] Xbox controller connect/disconnect
-- [ ] Button press acknowledgment (optional, subtle)
+- [x] Button press click (all ABXY/LB/RB buttons)
 - [ ] Menu navigation clicks (optional)
 
 #### AU5. Voice Announcements (TTS)
@@ -384,11 +391,15 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
 - [x] Edit PID/IMP/EST tuning parameters
 - [x] Save to controller.ini from dashboard (via existing save_*_settings functions)
 
-### W4. Phase 4: Graphs & Historical Data
-- [ ] Rolling graph for battery voltage over time
-- [ ] Loop time jitter histogram
-- [ ] Servo temperature trends
-- [ ] Export telemetry data as CSV
+### W4. Phase 4: Graphs & Historical Data ✅ COMPLETE (v0.8.7)
+- [x] Rolling graph for battery voltage over time
+- [x] Loop time chart (converted from histogram to line chart)
+- [x] Servo temperature trends
+- [x] Export telemetry data as CSV
+- [x] Chart.js integration with LCARS styling
+- [x] Tab-based chart switching (Voltage/Loop Time/Temperature)
+- [x] Selectable time windows (1/5/10 min)
+- [x] Sample counter badge
 
 ### W5. Phase 5: Enhanced Integration
 - [ ] Link to point cloud viewer (already available at /pointcloud)

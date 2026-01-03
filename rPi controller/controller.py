@@ -244,11 +244,22 @@
 # 2025-12-31  v0.8.2 b231: Safety: Low battery protection - graceful shutdown (stop gait → TUCK → DISABLE) when voltage drops below critical threshold (default 10.0V); configurable via [low_battery] section; SAFETY menu items for enable/thresholds/status; recovery voltage hysteresis prevents servo current spikes from re-enabling.
 # 2025-12-31  v0.8.3 b232: Input: Screen mirror toggle now works in socket mode (joy_controller); Back+Start combo toggles cv2 mirror window.
 # 2025-12-31  v0.8.4 b233: Dashboard: Web-based telemetry dashboard (dashboard.html on port 8766); real-time telemetry streaming via WebSocket; read-only config view; Phase 1 of web configuration system.
+# 2026-01-02  v0.8.6 b244: Safety: Low battery filter_alpha now configurable via [low_battery] section and dashboard; smaller alpha = slower/smoother voltage filtering.
+# 2026-01-02  v0.8.6 b245: Dashboard: Fixed PID/IMP/EST config - defined missing variables, added initialization from _*_ini dicts, pushed all 5 config categories to dashboard; fixed save handlers to use correct firmware keys.
+# 2026-01-02  v0.8.6 b246: Dashboard: Fixed config section names (Gait/Safety/PID vs gait/safety/pid) to match EDITABLE_CONFIG; editable inputs now appear correctly.
+# 2026-01-02  v0.8.7 b247: Dashboard W4: Telemetry history charts - rolling voltage/loop-time/temperature graphs with Chart.js; 1/5/10 min windows; CSV export; sample counter badge.
+# 2026-01-02  v0.8.7 b248: Dashboard W4: Overlay mode - "Overlay All" tab shows all 3 metrics on single chart with 3 Y-axes; legend and tooltip for overlay mode.
+# 2026-01-02  v0.8.7 b249: Dashboard: Config editing now uses MarsMenu metadata (min/max/step/options); fixed chart x-axis to show full time window; added dropdown support for option items.
+# 2026-01-03  v0.8.7 b250: Dashboard: Fixed config source - now uses MarsMenu.get_all_config() with full metadata (min/max/step/unit) instead of simple dict; periodic refresh every 2s; inputs show correct decimal precision.
+# 2026-01-03  v0.8.8 b251: Audio: Created audio_manager.py - pygame.mixer, sound pool, volume control, beep generator; configured for Sabrent USB DAC (hw:2,0); [audio] section in controller.ini.
+# 2026-01-03  v0.8.9 b252: Audio: Integrated audio_manager into controller.py - startup chime (3-tone ascending), shutdown beep, config from [audio] section.
+# 2026-01-03  v0.9.0 b253: Audio: Added button click sounds, enable/disable tones, low battery warning, Teensy connect/disconnect, gait start/stop audio feedback.
+# 2026-01-03  v0.10.0 b254: Audio: Created click.wav (25ms synthetic), boosted click volume to 1.0 for audibility; wired clicks to all buttons (D-pad, Start, Back).
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.8.6"
+CONTROLLER_VERSION = "0.10.0"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 243
+CONTROLLER_BUILD = 254
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -324,6 +335,9 @@ from config_manager import (
 
 # import posture module (Phase 3 modularization)
 import posture as posture_module
+
+# import audio module (Phase 5 modularization)
+from audio_manager import AudioManager, AudioConfig, PYGAME_AVAILABLE
 
 # import mars_state module (Phase 4 modularization)
 # State container dataclasses for future global state consolidation
@@ -598,6 +612,7 @@ class Controller:
                 self.telemetryRetryCount = 0
                 if self.verbose:
                     print(f"Connected to Teensy on {teensyPath.device} at {baud} baud", end="\r\n")
+                audio_teensy_connect()
                 return True
             except Exception as e:
                 self.teensy = None
@@ -611,6 +626,7 @@ class Controller:
     def handle_teensy_disconnect(self):
         """Handle Teensy disconnection and schedule reconnect."""
         global _teensy_read_buffer
+        audio_teensy_disconnect()  # Play disconnect sound
         try:
             if self.teensy:
                 self.teensy.close()
@@ -1046,6 +1062,7 @@ class Controller:
                         self.mirror = not self.mirror
                         self.forceDisplayUpdate = True
                     elif event.code == 315 and event.value == 1:  # Start button - cycle display mode
+                        audio_click()
                         global _displayMode
                         if self.verbose:
                             print("\nStart button pressed (cycle display)", end="\r\n")
@@ -1082,6 +1099,8 @@ class Controller:
                             mode_names = ["EYES", "ENGINEERING", "MENU"]
                             print(f"  Display mode: {mode_names[_displayMode]}", end="\r\n")
                     elif event.code == 314:  # Back/Select button (used as a modifier)
+                        if event.value == 1:
+                            audio_click()
                         self._backHeld = (event.value == 1)
                         if self.verbose and event.value == 1:
                             print("\nBack/Select pressed", end="\r\n")
@@ -1094,6 +1113,7 @@ class Controller:
                             print(f"\nXbox guide/power button pressed (code {event.code})", end="\r\n")
                         self.requestExit = True
                     elif event.code == 304 and event.value == 1:  # A button
+                        audio_click()
                         if self.verbose:
                             print("\nA button pressed", end="\r\n")
                         if getattr(self, '_backHeld', False):
@@ -1116,6 +1136,7 @@ class Controller:
                         elif self.teensy is not None and _safety_state.get("lockout", False) and self.verbose:
                             print("  Stand blocked: firmware safety lockout is active.", end="\r\n")
                     elif event.code == 305 and event.value == 1:  # B button
+                        audio_click()
                         if self.verbose:
                             print("\nB button pressed", end="\r\n")
                         if _marsMenu.visible:
@@ -1127,6 +1148,7 @@ class Controller:
                             _disable_autonomy_if_active(verbose=self.verbose)
                             apply_posture(b'HOME', auto_disable_s=4.0)
                     elif event.code == 308 and event.value == 1:  # X toggle test/idle (BTN_WEST)
+                        audio_click()
                         if self.verbose:
                             print("\nX button pressed (Toggle Test/Idle)", end="\r\n")
                         _disable_autonomy_if_active(verbose=self.verbose)
@@ -1144,6 +1166,7 @@ class Controller:
                                 if self.verbose:
                                     print("Switched to TEST mode", end="\r\n")
                     elif event.code == 307 and event.value == 1:  # Y tuck (BTN_NORTH)
+                        audio_click()
                         if self.verbose:
                             print("\nY button pressed (Tuck)", end="\r\n")
                         if not _marsMenu.visible and getattr(self, '_backHeld', False):
@@ -1155,6 +1178,7 @@ class Controller:
                         elif self.teensy is not None and _safety_state.get("lockout", False) and self.verbose:
                             print("  Tuck blocked: firmware safety lockout is active.", end="\r\n")
                     elif event.code == 318 and event.value == 1:  # right joystick press - disable
+                        audio_click()
                         if self.verbose:
                             print("\nRight joystick pressed (Disable)", end="\r\n")
                         if self.teensy is not None:
@@ -1178,6 +1202,7 @@ class Controller:
                                 if self.verbose:
                                     print(f"\nGait settings applied (save failed): width={self._gaitWidthMm:.0f}mm, lift={self._gaitLiftMm:.0f}mm", end="\r\n")
                     elif event.code == 310 and event.value == 1:  # LB - prev tab or toggle gait
+                        audio_click()
                         if _marsMenu.visible:
                             _marsMenu.handle_button('LB')
                             self.forceDisplayUpdate = True
@@ -1222,6 +1247,7 @@ class Controller:
                                 _gaitEngine = TripodGait(params)
                                 _gaitEngine.start()
                                 _gaitActive = True
+                                audio_gait_start()
                                 # Reset stick inputs so gait starts at zero speed until user moves stick
                                 self._gaitStrafeInput = 0.0
                                 self._gaitSpeedInput = 0.0
@@ -1233,12 +1259,14 @@ class Controller:
                                 if _gaitEngine is not None:
                                     _gaitEngine.stop()
                                 _gaitActive = False
+                                audio_gait_stop()
                                 send_cmd(b'STAND', force=True)
                                 _autoDisableAt = time.time() + _autoDisableS
                                 self.autoDisableAt = _autoDisableAt
                                 if self.verbose:
                                     print("\nLB: Gait engine STOPPED", end="\r\n")
                     elif event.code == 311 and event.value == 1:  # RB - next tab or cycle gait
+                        audio_click()
                         if _marsMenu.visible:
                             _marsMenu.handle_button('RB')
                             self.forceDisplayUpdate = True
@@ -1400,6 +1428,7 @@ class Controller:
                             if self.verbose:
                                 print(f"Lift height: {self._gaitLiftMm:.0f}mm", end="\r\n")
                     elif event.code == 16 and event.value == 1:  # dpad right
+                        audio_click()
                         if self.verbose:
                             print(f"DPAD RIGHT: {event.value}", end="\r\n")
                         if _marsMenu.visible:
@@ -1412,6 +1441,7 @@ class Controller:
                             self.eyes.update(force_update=True)
                             self.forceDisplayUpdate = True
                     elif event.code == 16 and event.value == -1:  # dpad left
+                        audio_click()
                         if self.verbose:
                             print(f"DPAD LEFT: {event.value}", end="\r\n")
                         if _marsMenu.visible:
@@ -1424,6 +1454,7 @@ class Controller:
                             self.eyes.update(force_update=True)
                             self.forceDisplayUpdate = True
                     elif event.code == 17 and event.value == -1:  # dpad up
+                        audio_click()
                         if self.verbose:
                             print(f"DPAD UP: {event.value}", end="\r\n")
                         if _marsMenu.visible:
@@ -1449,6 +1480,7 @@ class Controller:
                             self.forceDisplayUpdate = True
                             save_eye_shape(self.eyes.left_shape)
                     elif event.code == 17 and event.value == 1:  # dpad down
+                        audio_click()
                         if self.verbose:
                             print(f"DPAD DOWN: {event.value}", end="\r\n")
                         if _marsMenu.visible:
@@ -1516,6 +1548,7 @@ class Controller:
         
         # Start button: Back+Start = toggle mirror; Start alone = cycle display mode
         if joy.button_start and not self._prevJoyState.button_start:
+            audio_click()
             if self._backHeld:
                 # Back + Start: Toggle screen mirror
                 self.mirror = not self.mirror
@@ -1557,12 +1590,15 @@ class Controller:
         
         # Back button (modifier tracking)
         if joy.button_back != self._prevJoyState.button_back:
+            if joy.button_back:
+                audio_click()
             self._backHeld = joy.button_back
             if self.verbose and joy.button_back:
                 print("\nBack/Select pressed", end="\r\n")
         
         # A button
         if joy.button_a and not self._prevJoyState.button_a:
+            audio_click()
             if self.verbose:
                 print("\nA button pressed", end="\r\n")
             if self._backHeld:
@@ -1585,6 +1621,7 @@ class Controller:
         
         # B button
         if joy.button_b and not self._prevJoyState.button_b:
+            audio_click()
             if self.verbose:
                 print("\nB button pressed", end="\r\n")
             if _marsMenu.visible:
@@ -1600,6 +1637,7 @@ class Controller:
         
         # X button: tuck
         if joy.button_x and not self._prevJoyState.button_x:
+            audio_click()
             if self.verbose:
                 print("\nX button pressed (Tuck)", end="\r\n")
             if not _marsMenu.visible and self._backHeld:
@@ -1617,6 +1655,7 @@ class Controller:
         
         # Y button: toggle test/idle mode
         if joy.button_y and not self._prevJoyState.button_y:
+            audio_click()
             if self.verbose:
                 print("\nY button pressed (Toggle Test/Idle)", end="\r\n")
             _disable_autonomy_if_active(verbose=self.verbose)
@@ -1638,6 +1677,7 @@ class Controller:
         
         # LB button: toggle gait
         if joy.button_lb and not self._prevJoyState.button_lb:
+            audio_click()
             if self.verbose:
                 print("\nLB button pressed", end="\r\n")
             if _marsMenu.visible:
@@ -1673,6 +1713,7 @@ class Controller:
                     _gaitEngine.start()
                     _autoDisableAt = None
                     self.autoDisableAt = None
+                    audio_gait_start()
                     # Reset stick inputs so gait starts at zero speed
                     self._gaitStrafeInput = 0.0
                     self._gaitSpeedInput = 0.0
@@ -1684,6 +1725,7 @@ class Controller:
                     if _gaitEngine is not None:
                         _gaitEngine.stop()
                     _gaitActive = False
+                    audio_gait_stop()
                     send_cmd(b'STAND', force=True)
                     _autoDisableAt = time.time() + _autoDisableS
                     self.autoDisableAt = _autoDisableAt
@@ -1692,6 +1734,7 @@ class Controller:
         
         # RB button: next tab or cycle gait
         if joy.button_rb and not self._prevJoyState.button_rb:
+            audio_click()
             if _marsMenu.visible:
                 _marsMenu.handle_button('RB')
                 self.forceDisplayUpdate = True
@@ -1735,6 +1778,7 @@ class Controller:
         
         # D-pad
         if joy.dpad_up and not self._prevJoyState.dpad_up:
+            audio_click()
             if self.verbose:
                 print(f"DPAD UP", end="\r\n")
             if _marsMenu.visible:
@@ -1761,6 +1805,7 @@ class Controller:
                 save_eye_shape(self.eyes.left_shape)
         
         if joy.dpad_down and not self._prevJoyState.dpad_down:
+            audio_click()
             if self.verbose:
                 print(f"DPAD DOWN", end="\r\n")
             if _marsMenu.visible:
@@ -1787,6 +1832,7 @@ class Controller:
                 save_eye_shape(self.eyes.left_shape)
         
         if joy.dpad_left and not self._prevJoyState.dpad_left:
+            audio_click()
             if self.verbose:
                 print(f"DPAD LEFT", end="\r\n")
             if _marsMenu.visible:
@@ -1803,6 +1849,7 @@ class Controller:
                 self.forceDisplayUpdate = True
         
         if joy.dpad_right and not self._prevJoyState.dpad_right:
+            audio_click()
             if self.verbose:
                 print(f"DPAD RIGHT", end="\r\n")
             if _marsMenu.visible:
@@ -2114,6 +2161,21 @@ _lowBatteryTriggered = False      # Latch: prevents re-enable until voltage reco
 _lowBatteryRecoveryVolt = 10.5    # Must exceed this to clear the latch
 _lowBatteryFilteredVoltage = 0.0  # Low-pass filtered voltage for protection
 _lowBatteryFilterAlpha = 0.05     # Slow filter (more stable than display filter)
+
+# Dashboard-editable PID/IMP/EST parameters (synced to _*_ini and firmware)
+_pidEnabled = False
+_pidKp = 0.0
+_pidKi = 0.0
+_pidKd = 0.0
+_pidMaxCorrection = 10.0
+
+_impEnabled = False
+_impKp = 100.0      # scale
+_impKd = 0.0        # jdb_cd
+_impMaxN = 50.0     # max force
+
+_estAlpha = 0.1     # cmd_alpha (0-1)
+_estVelDecay = 0.95 # meas_vel_alpha (0-1)
 
 _pid_state = {
     "enabled": None,        # bool
@@ -2497,6 +2559,13 @@ _dashboardPort = 8766  # WebSocket port for telemetry
 _dashboardHz = 10.0  # Target telemetry streaming rate
 _dashboardServer = None  # TelemetryServer instance
 
+# Audio settings (Sabrent USB DAC + PAM8403 amp)
+_audioEnabled = True  # Master switch for audio feedback
+_audioVolume = 0.7  # Master volume 0.0-1.0
+_audioDevice = "hw:2,0"  # ALSA device: Sabrent USB DAC
+_audioSoundsDir = "assets/sounds"  # Sound files directory
+_audio = None  # AudioManager instance
+
 try:
     _cfg = configparser.ConfigParser()
     _cfg_path = os.path.join(os.path.dirname(__file__), 'controller.ini') if '__file__' in globals() else 'controller.ini'
@@ -2613,6 +2682,29 @@ try:
         _est_ini['meas_alpha_milli'] = _cfg.getint('est', 'meas_alpha_milli', fallback=_est_ini['meas_alpha_milli'])
         _est_ini['meas_vel_alpha_milli'] = _cfg.getint('est', 'meas_vel_alpha_milli', fallback=_est_ini['meas_vel_alpha_milli'])
 
+    # Initialize dashboard-editable PID/IMP/EST variables from parsed config
+    # (Variables already defined at module level, no global needed here)
+    if _pid_ini.get('enabled') is not None:
+        _pidEnabled = bool(_pid_ini['enabled'])
+    if _pid_ini.get('kp'):
+        _pidKp = float(_pid_ini['kp'][0]) if isinstance(_pid_ini['kp'], list) else 0.0
+    if _pid_ini.get('ki'):
+        _pidKi = float(_pid_ini['ki'][0]) if isinstance(_pid_ini['ki'], list) else 0.0
+    if _pid_ini.get('kd'):
+        _pidKd = float(_pid_ini['kd'][0]) if isinstance(_pid_ini['kd'], list) else 0.0
+    
+    if _imp_ini.get('enabled') is not None:
+        _impEnabled = bool(_imp_ini['enabled'])
+    if _imp_ini.get('scale') is not None:
+        _impKp = float(_imp_ini['scale'])
+    if _imp_ini.get('jdb_cd') is not None:
+        _impKd = float(_imp_ini['jdb_cd'])
+    
+    if _est_ini.get('cmd_alpha_milli') is not None:
+        _estAlpha = _est_ini['cmd_alpha_milli'] / 1000.0
+    if _est_ini.get('meas_vel_alpha_milli') is not None:
+        _estVelDecay = _est_ini['meas_vel_alpha_milli'] / 1000.0
+
     # Load safety display thresholds (Pi-side visualization)
     if 'safety_display' in _cfg:
         _safetyDisplayVoltMin = _cfg.getfloat('safety_display', 'volt_min', fallback=_safetyDisplayVoltMin)
@@ -2627,6 +2719,7 @@ try:
         _lowBatteryEnabled = _cfg.getboolean('low_battery', 'enabled', fallback=_lowBatteryEnabled)
         _lowBatteryVoltCritical = _cfg.getfloat('low_battery', 'volt_critical', fallback=_lowBatteryVoltCritical)
         _lowBatteryRecoveryVolt = _cfg.getfloat('low_battery', 'volt_recovery', fallback=_lowBatteryRecoveryVolt)
+        _lowBatteryFilterAlpha = _cfg.getfloat('low_battery', 'filter_alpha', fallback=_lowBatteryFilterAlpha)
 
     # Load behavior/autonomy settings
     if 'behavior' in _cfg:
@@ -2660,6 +2753,13 @@ try:
         _dashboardEnabled = _cfg.getboolean('dashboard', 'enabled', fallback=_dashboardEnabled)
         _dashboardPort = _cfg.getint('dashboard', 'port', fallback=_dashboardPort)
         _dashboardHz = _cfg.getfloat('dashboard', 'stream_hz', fallback=_dashboardHz)
+
+    # Load audio settings
+    if 'audio' in _cfg:
+        _audioEnabled = _cfg.getboolean('audio', 'enabled', fallback=_audioEnabled)
+        _audioVolume = _cfg.getfloat('audio', 'volume', fallback=_audioVolume)
+        _audioDevice = _cfg.get('audio', 'device', fallback=_audioDevice)
+        _audioSoundsDir = _cfg.get('audio', 'sounds_dir', fallback=_audioSoundsDir)
 
     # Merge controller.ini defaults into live PID/IMP/EST menu state (until firmware LIST overwrites)
     try:
@@ -3819,6 +3919,11 @@ def _setup_mars_menu():
         global _lowBatteryRecoveryVolt
         _lowBatteryRecoveryVolt = float(value)
         save_low_battery_settings({'volt_recovery': _lowBatteryRecoveryVolt})
+    
+    def on_lowbatt_filter_change(value):
+        global _lowBatteryFilterAlpha
+        _lowBatteryFilterAlpha = max(0.01, min(1.0, float(value)))
+        save_low_battery_settings({'filter_alpha': _lowBatteryFilterAlpha})
 
     _marsMenu.set_callback(MenuCategory.SAFETY, "Clear Safety", "on_select", on_clear_safety)
     _marsMenu.set_callback(MenuCategory.SAFETY, "Override ALL", "on_select", on_override_all)
@@ -3833,6 +3938,7 @@ def _setup_mars_menu():
     _marsMenu.set_callback(MenuCategory.SAFETY, "LowBatt Prot", "on_change", on_lowbatt_prot_change)
     _marsMenu.set_callback(MenuCategory.SAFETY, "Volt Critical", "on_change", on_volt_critical_change)
     _marsMenu.set_callback(MenuCategory.SAFETY, "Volt Recovery", "on_change", on_volt_recovery_change)
+    _marsMenu.set_callback(MenuCategory.SAFETY, "LowBatt Filter", "on_change", on_lowbatt_filter_change)
     
     # === Sync initial values ===
     _marsMenu.set_value(MenuCategory.EYES, "Style", _eyes.left_shape)
@@ -3876,6 +3982,7 @@ def _setup_mars_menu():
     _marsMenu.set_value(MenuCategory.SAFETY, "LowBatt Prot", 1 if _lowBatteryEnabled else 0)
     _marsMenu.set_value(MenuCategory.SAFETY, "Volt Critical", _lowBatteryVoltCritical)
     _marsMenu.set_value(MenuCategory.SAFETY, "Volt Recovery", _lowBatteryRecoveryVolt)
+    _marsMenu.set_value(MenuCategory.SAFETY, "LowBatt Filter", _lowBatteryFilterAlpha)
     _marsMenu.set_value(MenuCategory.SAFETY, "LowBatt Status", "OK")
     
     # Apply saved theme/palette
@@ -4393,7 +4500,7 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
     
     Args:
         section: Config section name (e.g., 'Gait', 'Safety', 'PID')
-        key: Config key/item label (e.g., 'cycle_ms', 'volt_critical')
+        key: Config key/item label (e.g., 'Cycle Time', 'volt_critical')
         value: New value to set
         
     Returns:
@@ -4404,12 +4511,39 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
     global _lowBatteryEnabled, _lowBatteryVoltCritical, _lowBatteryRecoveryVolt
     global _marsMenu
     
+    # Map menu labels to internal keys (supports both formats)
+    key_aliases = {
+        # Gait
+        'cycle time': 'cycle_ms', 'cycle_ms': 'cycle_ms',
+        'step length': 'step_length_mm', 'step_length_mm': 'step_length_mm',
+        'step height': 'step_height_mm', 'step_height_mm': 'step_height_mm', 'lift_mm': 'step_height_mm',
+        'turn rate': 'turn_rate', 'turn_rate': 'turn_rate', 'turn_max_deg_s': 'turn_rate',
+        # Safety
+        'low batt prot': 'low_battery_enabled', 'low_battery_enabled': 'low_battery_enabled',
+        'volt critical': 'volt_critical', 'volt_critical': 'volt_critical',
+        'volt recovery': 'volt_recovery', 'volt_recovery': 'volt_recovery',
+        'lowbatt filter': 'filter_alpha', 'filter_alpha': 'filter_alpha',
+        # PID
+        'pid enabled': 'enabled', 'enabled': 'enabled',
+        'kp': 'kp', 'ki': 'ki', 'kd': 'kd',
+        'max correction': 'max_correction', 'max_correction': 'max_correction',
+        # Impedance
+        'imp enabled': 'enabled',
+        'max force': 'max_force_n', 'max_force_n': 'max_force_n',
+        # Estimator
+        'est alpha': 'alpha', 'alpha': 'alpha',
+        'velocity decay': 'vel_decay', 'vel_decay': 'vel_decay',
+    }
+    
+    # Normalize key
+    normalized_key = key_aliases.get(key.lower(), key.lower())
+    
     try:
         section_lower = section.lower()
         
         # Gait settings
         if section_lower == 'gait':
-            if key == 'cycle_ms':
+            if normalized_key == 'cycle_ms':
                 _gaitCycleMs = int(value)
                 if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
                     _gaitEngine.params.cycle_ms = _gaitCycleMs
@@ -4420,7 +4554,7 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
                     print(f"[Dashboard] Gait cycle_ms -> {_gaitCycleMs}", end="\r\n")
                 return True
                 
-            elif key == 'step_length_mm':
+            elif normalized_key == 'step_length_mm':
                 _gaitStepLenMm = float(value)
                 if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
                     _gaitEngine.params.step_length_mm = _gaitStepLenMm
@@ -4430,7 +4564,7 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
                     print(f"[Dashboard] Gait step_length_mm -> {_gaitStepLenMm}", end="\r\n")
                 return True
                 
-            elif key == 'step_height_mm' or key == 'lift_mm':
+            elif normalized_key == 'step_height_mm':
                 _savedGaitLiftMm = float(value)
                 if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
                     _gaitEngine.params.lift_mm = _savedGaitLiftMm
@@ -4441,7 +4575,7 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
                     print(f"[Dashboard] Gait lift_mm -> {_savedGaitLiftMm}", end="\r\n")
                 return True
                 
-            elif key == 'turn_max_deg_s' or key == 'turn_rate':
+            elif normalized_key == 'turn_rate':
                 _gaitTurnMaxDegS = float(value)
                 save_gait_settings(_savedGaitWidthMm, _savedGaitLiftMm, cycle_ms=_gaitCycleMs, turn_max_deg_s=_gaitTurnMaxDegS)
                 if _marsMenu:
@@ -4452,45 +4586,55 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
         
         # Safety settings
         elif section_lower == 'safety':
-            if key == 'low_battery_enabled':
-                _lowBatteryEnabled = bool(value)
+            if normalized_key == 'low_battery_enabled':
+                _lowBatteryEnabled = bool(value) if not isinstance(value, int) else value != 0
                 save_low_battery_settings({'enabled': _lowBatteryEnabled})
                 if _marsMenu:
-                    _marsMenu.set_value(MenuCategory.SAFETY, "Low Batt Enabled", 1 if _lowBatteryEnabled else 0)
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Low Batt Prot", 1 if _lowBatteryEnabled else 0)
                 if _verbose:
                     print(f"[Dashboard] Safety low_battery_enabled -> {_lowBatteryEnabled}", end="\r\n")
                 return True
                 
-            elif key == 'volt_critical':
+            elif normalized_key == 'volt_critical':
                 _lowBatteryVoltCritical = float(value)
                 save_low_battery_settings({'volt_critical': _lowBatteryVoltCritical})
                 if _marsMenu:
-                    _marsMenu.set_value(MenuCategory.SAFETY, "Critical Voltage", _lowBatteryVoltCritical)
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Volt Critical", _lowBatteryVoltCritical)
                 if _verbose:
                     print(f"[Dashboard] Safety volt_critical -> {_lowBatteryVoltCritical}", end="\r\n")
                 return True
                 
-            elif key == 'volt_recovery':
+            elif normalized_key == 'volt_recovery':
                 _lowBatteryRecoveryVolt = float(value)
                 save_low_battery_settings({'volt_recovery': _lowBatteryRecoveryVolt})
                 if _marsMenu:
-                    _marsMenu.set_value(MenuCategory.SAFETY, "Recovery Voltage", _lowBatteryRecoveryVolt)
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Volt Recovery", _lowBatteryRecoveryVolt)
                 if _verbose:
                     print(f"[Dashboard] Safety volt_recovery -> {_lowBatteryRecoveryVolt}", end="\r\n")
+                return True
+                
+            elif normalized_key == 'filter_alpha':
+                global _lowBatteryFilterAlpha
+                _lowBatteryFilterAlpha = max(0.01, min(1.0, float(value)))
+                save_low_battery_settings({'filter_alpha': _lowBatteryFilterAlpha})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "LowBatt Filter", _lowBatteryFilterAlpha)
+                if _verbose:
+                    print(f"[Dashboard] Safety filter_alpha -> {_lowBatteryFilterAlpha}", end="\r\n")
                 return True
         
         # PID settings
         elif section_lower == 'pid':
             # Delegate to PID handler
-            return _handle_pid_config_change(key, value)
+            return _handle_pid_config_change(normalized_key, value)
         
         # IMP (Impedance) settings  
         elif section_lower in ('imp', 'impedance'):
-            return _handle_imp_config_change(key, value)
+            return _handle_imp_config_change(normalized_key, value)
         
         # EST (Estimator) settings
         elif section_lower in ('est', 'estimator'):
-            return _handle_est_config_change(key, value)
+            return _handle_est_config_change(normalized_key, value)
         
         if _verbose:
             print(f"[Dashboard] Unknown config: {section}.{key} = {value}", end="\r\n")
@@ -4506,26 +4650,30 @@ def _handle_pid_config_change(key: str, value) -> bool:
     """Handle PID config changes from dashboard."""
     global _pidEnabled, _pidKp, _pidKi, _pidKd, _pidMaxCorrection
     
+    # Normalize key for menu labels
+    key_lower = key.lower()
+    
     try:
-        if key == 'enabled':
-            _pidEnabled = bool(value)
+        if key_lower == 'enabled' or key_lower == 'pid enabled':
+            _pidEnabled = bool(value) if not isinstance(value, int) else value != 0
             save_pid_settings({'enabled': _pidEnabled})
             return True
-        elif key == 'kp':
+        elif key_lower == 'kp':
             _pidKp = float(value)
-            save_pid_settings({'kp': _pidKp})
+            # Save as triplet (same value for all joints)
+            save_pid_settings({'kp': [int(_pidKp), int(_pidKp), int(_pidKp)]})
             return True
-        elif key == 'ki':
+        elif key_lower == 'ki':
             _pidKi = float(value)
-            save_pid_settings({'ki': _pidKi})
+            save_pid_settings({'ki': [int(_pidKi), int(_pidKi), int(_pidKi)]})
             return True
-        elif key == 'kd':
+        elif key_lower == 'kd':
             _pidKd = float(value)
-            save_pid_settings({'kd': _pidKd})
+            save_pid_settings({'kd': [int(_pidKd), int(_pidKd), int(_pidKd)]})
             return True
-        elif key == 'max_correction':
+        elif key_lower in ('max_correction', 'max correction'):
             _pidMaxCorrection = float(value)
-            save_pid_settings({'max_correction': _pidMaxCorrection})
+            # max_correction not in save_pid_settings, store in local state only
             return True
         return False
     except Exception:
@@ -4536,22 +4684,27 @@ def _handle_imp_config_change(key: str, value) -> bool:
     """Handle Impedance config changes from dashboard."""
     global _impEnabled, _impKp, _impKd, _impMaxN
     
+    # Normalize key for menu labels
+    key_lower = key.lower()
+    
     try:
-        if key == 'enabled':
-            _impEnabled = bool(value)
+        if key_lower == 'enabled' or key_lower == 'imp enabled':
+            _impEnabled = bool(value) if not isinstance(value, int) else value != 0
             save_imp_settings({'enabled': _impEnabled})
             return True
-        elif key == 'kp':
+        elif key_lower == 'kp':
             _impKp = float(value)
-            save_imp_settings({'kp': _impKp})
+            # 'kp' in dashboard maps to 'scale' in firmware
+            save_imp_settings({'scale': int(_impKp)})
             return True
-        elif key == 'kd':
+        elif key_lower == 'kd':
             _impKd = float(value)
-            save_imp_settings({'kd': _impKd})
+            # 'kd' in dashboard maps to 'jdb_cd' (joint deadband) in firmware
+            save_imp_settings({'jdb_cd': int(_impKd)})
             return True
-        elif key == 'max_force_n':
+        elif key_lower in ('max_force_n', 'max force'):
             _impMaxN = float(value)
-            save_imp_settings({'max_force_n': _impMaxN})
+            # max_force_n not in save_imp_settings, store in local state only
             return True
         return False
     except Exception:
@@ -4562,14 +4715,18 @@ def _handle_est_config_change(key: str, value) -> bool:
     """Handle Estimator config changes from dashboard."""
     global _estAlpha, _estVelDecay
     
+    # Normalize key for menu labels
+    key_lower = key.lower()
+    
     try:
-        if key == 'alpha':
+        if key_lower in ('alpha', 'est alpha'):
             _estAlpha = float(value)
-            save_est_settings({'alpha': _estAlpha})
+            # Convert to milli (0-1000) for save function
+            save_est_settings({'cmd_alpha_milli': int(_estAlpha * 1000)})
             return True
-        elif key == 'vel_decay':
+        elif key_lower in ('vel_decay', 'velocity decay'):
             _estVelDecay = float(value)
-            save_est_settings({'vel_decay': _estVelDecay})
+            save_est_settings({'meas_vel_alpha_milli': int(_estVelDecay * 1000)})
             return True
         return False
     except Exception:
@@ -4592,19 +4749,9 @@ if _dashboardEnabled and TELEMETRY_SERVER_AVAILABLE:
         if _verbose:
             print(f"Dashboard WebSocket: ws://0.0.0.0:{_dashboardPort}", end="\r\n")
             print(f"Dashboard viewer: http://0.0.0.0:{_pointcloudHttpPort}/dashboard", end="\r\n")
-        # Set initial config (read-only view for dashboard)
-        _dashboardServer.set_config("gait", {
-            "type": GAIT_NAMES[0] if GAIT_NAMES else "TRIPOD",
-            "cycle_ms": _gaitCycleMs,
-            "step_length_mm": _gaitStepLenMm,
-        })
-        _dashboardServer.set_config("safety", {
-            "soft_limits": True,
-            "collision_detect": True,
-            "low_battery_enabled": _lowBatteryEnabled,
-            "volt_critical": _lowBatteryVoltCritical,
-            "volt_recovery": _lowBatteryRecoveryVolt,
-        })
+        # Set initial config from MarsMenu (includes metadata: min, max, step, unit, options)
+        if _marsMenu is not None:
+            _dashboardServer.set_full_config(_marsMenu.get_all_config())
         # Register config change callback for Phase 3 editing
         _dashboardServer.set_config_change_callback(_handle_dashboard_config_change)
     except Exception as e:
@@ -4614,6 +4761,125 @@ if _dashboardEnabled and TELEMETRY_SERVER_AVAILABLE:
         _dashboardServer = None
 elif _dashboardEnabled:
     _startupSplash.log("Dashboard: module not found", "YELLOW")
+
+# --------------------------------------------------------------------------------------------------
+# Audio Manager: Sound feedback via Sabrent USB DAC + PAM8403 amp
+# --------------------------------------------------------------------------------------------------
+if _audioEnabled and PYGAME_AVAILABLE:
+    try:
+        _audio_config = AudioConfig(
+            enabled=_audioEnabled,
+            volume=_audioVolume,
+            device=_audioDevice,
+            sounds_dir=_audioSoundsDir,
+        )
+        _audio = AudioManager(_audio_config)
+        # Preload sounds from directory (if any)
+        _audio.preload()
+        _startupSplash.log("Audio OK (Sabrent DAC)", "GREEN")
+        if _verbose:
+            print(f"Audio initialized: device={_audioDevice}, volume={_audioVolume:.0%}", end="\r\n")
+    except Exception as e:
+        _startupSplash.log(f"Audio failed: {e}", "RED")
+        if _verbose:
+            print(f"Audio manager failed: {e}", end="\r\n")
+        _audio = None
+elif _audioEnabled:
+    _startupSplash.log("Audio: pygame not available", "YELLOW")
+
+# --------------------------------------------------------------------------------------------------
+# Audio Helper Functions
+# --------------------------------------------------------------------------------------------------
+
+def audio_click():
+    """Play a short click sound for button presses."""
+    if _audio is not None:
+        try:
+            _audio.play('click')  # Use preloaded click.wav
+        except Exception:
+            pass
+
+def audio_enable():
+    """Play enable sound (ascending two-tone)."""
+    if _audio is not None:
+        try:
+            _audio.beep(440, 80)
+            time.sleep(0.1)
+            _audio.beep(660, 100)
+        except Exception:
+            pass
+
+def audio_disable():
+    """Play disable sound (descending two-tone)."""
+    if _audio is not None:
+        try:
+            _audio.beep(660, 80)
+            time.sleep(0.1)
+            _audio.beep(440, 100)
+        except Exception:
+            pass
+
+def audio_low_battery_warning():
+    """Play urgent low battery warning (3 fast beeps)."""
+    if _audio is not None:
+        try:
+            for _ in range(3):
+                _audio.beep(880, 100)
+                time.sleep(0.15)
+        except Exception:
+            pass
+
+def audio_safety_lockout():
+    """Play safety lockout alert (descending urgent tone)."""
+    if _audio is not None:
+        try:
+            _audio.beep(880, 150)
+            time.sleep(0.18)
+            _audio.beep(660, 150)
+            time.sleep(0.18)
+            _audio.beep(440, 200)
+        except Exception:
+            pass
+
+def audio_teensy_connect():
+    """Play Teensy connected sound (happy ascending)."""
+    if _audio is not None:
+        try:
+            _audio.beep(523, 80)  # C5
+            time.sleep(0.1)
+            _audio.beep(659, 100)  # E5
+        except Exception:
+            pass
+
+def audio_teensy_disconnect():
+    """Play Teensy disconnected sound (sad descending)."""
+    if _audio is not None:
+        try:
+            _audio.beep(659, 80)  # E5
+            time.sleep(0.1)
+            _audio.beep(392, 150)  # G4
+        except Exception:
+            pass
+
+def audio_gait_start():
+    """Play gait started sound (quick chirp)."""
+    if _audio is not None:
+        try:
+            _audio.beep(880, 50)
+            time.sleep(0.06)
+            _audio.beep(1100, 60)
+        except Exception:
+            pass
+
+def audio_gait_stop():
+    """Play gait stopped sound (quick descending chirp)."""
+    if _audio is not None:
+        try:
+            _audio.beep(1100, 50)
+            time.sleep(0.06)
+            _audio.beep(880, 60)
+        except Exception:
+            pass
 
 # --------------------------------------------------------------------------------------------------
 # Command helper: centralizes Teensy command emission (newline termination + throttling/dedup)
@@ -4834,6 +5100,7 @@ def send_cmd(cmd, force: bool = False, throttle_ms: float = None):
         _enabledLocal = True
     elif cmd_b == b'DISABLE':
         _enabledLocal = False
+        audio_disable()  # Play disable sound
     if _debugSendAll or (_verbose and cmd_b in _gaitDebugCmds):
         print(f"[send_cmd] SENT cmd='{cmd_b}' force={force} throttle_ms={throttle_ms} t={now:.3f}", end="\r\n")
     return True
@@ -4870,6 +5137,7 @@ def ensure_enabled() -> bool:
     )
     if sent:
         _enabledLocal = new_enabled
+        audio_enable()  # Play enable sound
     return sent
 
 
@@ -5974,6 +6242,16 @@ def phase_dashboard(ctrl):
         xbox_connected=xbox_connected,
         teensy_connected=teensy_connected,
     )
+    
+    # Periodically refresh full config from MarsMenu (~every 2 seconds)
+    global _dashboardConfigRefreshCounter
+    if not hasattr(phase_dashboard, '_config_counter'):
+        phase_dashboard._config_counter = 0
+    phase_dashboard._config_counter += 1
+    if phase_dashboard._config_counter >= 60:  # ~2 sec at 30 Hz
+        phase_dashboard._config_counter = 0
+        if _marsMenu is not None:
+            _dashboardServer.set_full_config(_marsMenu.get_all_config())
 
 
 def phase_auto_disable(ctrl):
@@ -6075,6 +6353,9 @@ def phase_auto_disable(ctrl):
         if robot_enabled and ctrl.teensy is not None:
             # Set triggered latch (prevents re-enable until voltage recovers)
             _lowBatteryTriggered = True
+            
+            # Play low battery warning sound
+            audio_low_battery_warning()
             
             print(f"\n[LOW BATTERY] Critical voltage {_lowBatteryFilteredVoltage:.2f}V < {_lowBatteryVoltCritical:.1f}V", end="\r\n")
             print("[LOW BATTERY] Executing graceful shutdown: TUCK → DISABLE", end="\r\n")
@@ -6388,6 +6669,18 @@ if _teensy_connected and ctrl.teensy is not None:
         _startupSplash.log(f"Telemetry error: {e}", "RED")
 
 _startupSplash.finish(True)
+
+# Play startup chime (ascending 3-tone sequence)
+if _audio is not None:
+    try:
+        _audio.beep(440, 100)  # A4
+        time.sleep(0.12)
+        _audio.beep(554, 100)  # C#5
+        time.sleep(0.12)
+        _audio.beep(659, 150)  # E5
+    except Exception:
+        pass
+
 if _startupDelayS > 0:
     time.sleep(_startupDelayS)  # Configurable pause to see startup messages
 
@@ -6492,6 +6785,15 @@ if _dashboardServer is not None:
     if _verbose:
         print("Stopping Dashboard server...", end="\r\n")
     _dashboardServer.stop()
+# Play shutdown beep (descending tone)
+if _audio is not None:
+    try:
+        _audio.beep(659, 100)  # E5
+        time.sleep(0.12)
+        _audio.beep(440, 150)  # A4
+        time.sleep(0.2)
+    except Exception:
+        pass
 # Restore terminal from curses FIRST (endwin() clears screen)
 cleanup_keyboard()
 # NOW print debug info so it persists after script exits
@@ -6512,6 +6814,11 @@ if _teensy is not None:
     send_cmd(b'Y 0', force=True)
     time.sleep(0.05)
 print(end="\r\n")
+
+# Shutdown audio manager
+if _audio is not None:
+    _audio.shutdown()
+    _audio = None
 
 _controller = None
 _eyes = None

@@ -649,6 +649,34 @@
             border-color: var(--lcars-peach);
         }
         
+        /* Editable config select (dropdown) */
+        .lcars-config-select {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid var(--lcars-tan);
+            border-radius: 4px;
+            color: var(--lcars-orange);
+            font-size: 12px;
+            font-weight: 700;
+            padding: 2px 6px;
+            min-width: 80px;
+            cursor: pointer;
+        }
+        
+        .lcars-config-select:focus {
+            outline: none;
+            border-color: var(--lcars-orange);
+            background: rgba(0, 0, 0, 0.7);
+        }
+        
+        .lcars-config-select:hover {
+            border-color: var(--lcars-peach);
+        }
+        
+        .lcars-config-select option {
+            background: #1a1a2e;
+            color: var(--lcars-tan);
+        }
+        
         .lcars-config-item.hidden {
             display: none;
         }
@@ -840,7 +868,84 @@
                 grid-column: span 1;
             }
         }
+        
+        /* ================================================================
+           W4: Charts & Graphs
+           ================================================================ */
+        .lcars-chart-container {
+            position: relative;
+            height: 200px;
+            width: 100%;
+            margin: 8px 0;
+        }
+        .lcars-chart-controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+        .lcars-chart-btn {
+            background: var(--lcars-tan);
+            color: var(--lcars-black);
+            border: none;
+            padding: 4px 12px;
+            border-radius: 10px;
+            font-family: inherit;
+            font-size: var(--font-data);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .lcars-chart-btn:hover {
+            background: var(--lcars-orange);
+        }
+        .lcars-chart-btn.active {
+            background: var(--lcars-orange);
+        }
+        .lcars-chart-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+            border-bottom: 2px solid var(--lcars-tan);
+            padding-bottom: 4px;
+        }
+        .lcars-chart-tab {
+            background: transparent;
+            color: var(--lcars-sunflower);
+            border: none;
+            padding: 6px 16px;
+            font-family: inherit;
+            font-size: var(--font-data);
+            cursor: pointer;
+            border-radius: 10px 10px 0 0;
+            transition: background 0.2s, color 0.2s;
+        }
+        .lcars-chart-tab:hover {
+            background: rgba(255, 136, 0, 0.2);
+        }
+        .lcars-chart-tab.active {
+            background: var(--lcars-tan);
+            color: var(--lcars-black);
+        }
+        .lcars-chart-legend {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            margin-top: 8px;
+            font-size: var(--font-data);
+        }
+        .lcars-chart-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .lcars-chart-legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
     </style>
+    <!-- Chart.js for W4 graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <!-- Connection Dialog -->
@@ -1088,6 +1193,35 @@
                             </div>
                         </div>
                         
+                        <!-- Charts Panel (wide) - W4 -->
+                        <div class="lcars-panel wide">
+                            <div class="lcars-panel-header primary">
+                                <span class="lcars-panel-title">Telemetry History</span>
+                                <span class="lcars-panel-badge" id="chart-sample-count">0 samples</span>
+                            </div>
+                            <div class="lcars-panel-body primary-border">
+                                <!-- Chart tabs -->
+                                <div class="lcars-chart-tabs">
+                                    <button class="lcars-chart-tab active" onclick="showChart('voltage')" id="tab-voltage">Voltage</button>
+                                    <button class="lcars-chart-tab" onclick="showChart('looptime')" id="tab-looptime">Loop Time</button>
+                                    <button class="lcars-chart-tab" onclick="showChart('temperature')" id="tab-temperature">Temperature</button>
+                                    <button class="lcars-chart-tab" onclick="showChart('overlay')" id="tab-overlay">Overlay All</button>
+                                </div>
+                                <!-- Chart controls -->
+                                <div class="lcars-chart-controls">
+                                    <button class="lcars-chart-btn" onclick="setChartWindow(60)">1 min</button>
+                                    <button class="lcars-chart-btn active" onclick="setChartWindow(300)">5 min</button>
+                                    <button class="lcars-chart-btn" onclick="setChartWindow(600)">10 min</button>
+                                    <button class="lcars-chart-btn" onclick="clearHistory()">Clear</button>
+                                    <button class="lcars-chart-btn" onclick="exportCSV()">Export CSV</button>
+                                </div>
+                                <!-- Chart canvas -->
+                                <div class="lcars-chart-container">
+                                    <canvas id="telemetry-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                        
                     </div>
                 </div>
             </div>
@@ -1114,12 +1248,278 @@
         let collapsedCategories = new Set();
         
         // =================================================================
+        // W4: Telemetry History & Charts
+        // =================================================================
+        const MAX_HISTORY_SAMPLES = 3600;  // ~1 hour at 1 sample/sec
+        let telemetryHistory = [];
+        let chartWindowSeconds = 300;  // Default 5 minutes
+        let currentChartType = 'voltage';
+        let telemetryChart = null;
+        
+        function initChart() {
+            const ctx = document.getElementById('telemetry-chart');
+            if (!ctx) return;
+            
+            telemetryChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Battery Voltage (V)',
+                            data: [],
+                            borderColor: '#ff8800',
+                            backgroundColor: 'rgba(255, 136, 0, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.2,
+                            pointRadius: 0,
+                            yAxisID: 'y',
+                        },
+                        {
+                            label: 'Loop Time (ms)',
+                            data: [],
+                            borderColor: '#cc99ff',
+                            backgroundColor: 'rgba(204, 153, 255, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.2,
+                            pointRadius: 0,
+                            yAxisID: 'y1',
+                            hidden: true,
+                        },
+                        {
+                            label: 'Temperature (°C)',
+                            data: [],
+                            borderColor: '#ff5555',
+                            backgroundColor: 'rgba(255, 85, 85, 0.1)',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.2,
+                            pointRadius: 0,
+                            yAxisID: 'y2',
+                            hidden: true,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 0 },
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            grid: { color: 'rgba(255, 170, 0, 0.2)' },
+                            ticks: { color: '#ffcc99', maxTicksLimit: 8 }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            grid: { color: 'rgba(255, 170, 0, 0.2)' },
+                            ticks: { color: '#ff8800' },
+                            title: { display: false, text: 'Voltage (V)', color: '#ff8800' },
+                            suggestedMin: 9,
+                            suggestedMax: 13
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: false,
+                            position: 'right',
+                            grid: { drawOnChartArea: false },
+                            ticks: { color: '#cc99ff' },
+                            title: { display: false, text: 'Loop (ms)', color: '#cc99ff' },
+                            suggestedMin: 0,
+                            suggestedMax: 10
+                        },
+                        y2: {
+                            type: 'linear',
+                            display: false,
+                            position: 'right',
+                            grid: { drawOnChartArea: false },
+                            ticks: { color: '#ff5555' },
+                            title: { display: false, text: 'Temp (°C)', color: '#ff5555' },
+                            suggestedMin: 20,
+                            suggestedMax: 60
+                        }
+                    },
+                    plugins: {
+                        legend: { 
+                            display: false,
+                            labels: { color: '#ffcc99' }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function addTelemetrySample(data) {
+            const sample = {
+                timestamp: Date.now(),
+                battery_v: data.battery_v || 0,
+                loop_time_us: data.loop_time_us || 0,
+                servo_temp_max: data.servo_temp_max || 0,
+                servo_volt_min: data.servo_volt_min || 0,
+                current_a: data.current_a || 0,
+            };
+            
+            telemetryHistory.push(sample);
+            
+            // Trim old samples
+            if (telemetryHistory.length > MAX_HISTORY_SAMPLES) {
+                telemetryHistory = telemetryHistory.slice(-MAX_HISTORY_SAMPLES);
+            }
+            
+            // Update sample count badge
+            const badge = document.getElementById('chart-sample-count');
+            if (badge) badge.textContent = `${telemetryHistory.length} samples`;
+            
+            updateChart();
+        }
+        
+        function updateChart() {
+            if (!telemetryChart) return;
+            
+            const now = Date.now();
+            const windowMs = chartWindowSeconds * 1000;
+            
+            // Generate fixed time slots for the full window (100 slots)
+            const NUM_SLOTS = 100;
+            
+            // Create labels for full time window (oldest on left, newest on right)
+            let labels = [];
+            for (let slot = 0; slot < NUM_SLOTS; slot++) {
+                // slot 0 = oldest (full window age), slot 99 = newest (age 0)
+                const ageSeconds = chartWindowSeconds * (1 - slot / (NUM_SLOTS - 1));
+                const mins = Math.floor(ageSeconds / 60);
+                const secs = Math.floor(ageSeconds % 60);
+                labels.push(`-${mins}:${secs.toString().padStart(2, '0')}`);
+            }
+            
+            // Initialize data arrays with nulls (gaps where no data)
+            let voltageData = new Array(NUM_SLOTS).fill(null);
+            let looptimeData = new Array(NUM_SLOTS).fill(null);
+            let tempData = new Array(NUM_SLOTS).fill(null);
+            
+            // Map telemetry samples to time slots
+            for (const s of telemetryHistory) {
+                const age = now - s.timestamp;
+                if (age > windowMs || age < 0) continue;
+                
+                // Map age to slot index: age=0 -> slot 99, age=windowMs -> slot 0
+                const slotIndex = Math.round((1 - age / windowMs) * (NUM_SLOTS - 1));
+                
+                if (slotIndex >= 0 && slotIndex < NUM_SLOTS) {
+                    // Use latest sample if multiple fall in same slot
+                    voltageData[slotIndex] = s.battery_v;
+                    looptimeData[slotIndex] = s.loop_time_us / 1000;
+                    tempData[slotIndex] = s.servo_temp_max;
+                }
+            }
+            
+            telemetryChart.data.labels = labels;
+            telemetryChart.data.datasets[0].data = voltageData;
+            telemetryChart.data.datasets[1].data = looptimeData;
+            telemetryChart.data.datasets[2].data = tempData;
+            
+            // Show/hide datasets and axes based on chart type
+            const isOverlay = (currentChartType === 'overlay');
+            
+            // Dataset visibility
+            telemetryChart.data.datasets[0].hidden = !(currentChartType === 'voltage' || isOverlay);
+            telemetryChart.data.datasets[1].hidden = !(currentChartType === 'looptime' || isOverlay);
+            telemetryChart.data.datasets[2].hidden = !(currentChartType === 'temperature' || isOverlay);
+            
+            // Axis visibility and titles
+            telemetryChart.options.scales.y.display = (currentChartType === 'voltage' || isOverlay);
+            telemetryChart.options.scales.y.title.display = isOverlay;
+            telemetryChart.options.scales.y1.display = (currentChartType === 'looptime' || isOverlay);
+            telemetryChart.options.scales.y1.title.display = isOverlay;
+            telemetryChart.options.scales.y2.display = (currentChartType === 'temperature' || isOverlay);
+            telemetryChart.options.scales.y2.title.display = isOverlay;
+            
+            // Legend visibility
+            telemetryChart.options.plugins.legend.display = isOverlay;
+            
+            telemetryChart.update('none');
+        }
+        
+        function showChart(type) {
+            currentChartType = type;
+            // Update tab styling
+            document.querySelectorAll('.lcars-chart-tab').forEach(t => t.classList.remove('active'));
+            const tab = document.getElementById('tab-' + type);
+            if (tab) tab.classList.add('active');
+            updateChart();
+        }
+        
+        function setChartWindow(seconds) {
+            chartWindowSeconds = seconds;
+            // Update button styling
+            document.querySelectorAll('.lcars-chart-btn').forEach(b => {
+                if (b.textContent.includes('min')) b.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            updateChart();
+        }
+        
+        function clearHistory() {
+            telemetryHistory = [];
+            const badge = document.getElementById('chart-sample-count');
+            if (badge) badge.textContent = '0 samples';
+            updateChart();
+        }
+        
+        function exportCSV() {
+            if (telemetryHistory.length === 0) {
+                alert('No data to export');
+                return;
+            }
+            
+            // Build CSV
+            const headers = ['timestamp', 'battery_v', 'loop_time_us', 'servo_temp_max', 'servo_volt_min', 'current_a'];
+            let csv = headers.join(',') + '\\n';
+            
+            for (const s of telemetryHistory) {
+                const row = [
+                    new Date(s.timestamp).toISOString(),
+                    s.battery_v.toFixed(2),
+                    s.loop_time_us.toFixed(0),
+                    s.servo_temp_max.toFixed(1),
+                    s.servo_volt_min.toFixed(2),
+                    s.current_a.toFixed(2),
+                ];
+                csv += row.join(',') + '\\n';
+            }
+            
+            // Download
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `mars_telemetry_${new Date().toISOString().slice(0,19).replace(/:/g, '')}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        // =================================================================
         // Initialization
         // =================================================================
         
         function init() {
             const hostname = window.location.hostname || 'localhost';
             document.getElementById('ws-address').value = `ws://${hostname}:8766`;
+            // Initialize chart (Chart.js loaded async)
+            if (typeof Chart !== 'undefined') {
+                initChart();
+            } else {
+                // Wait for Chart.js to load
+                setTimeout(() => { if (typeof Chart !== 'undefined') initChart(); }, 500);
+            }
         }
         
         // =================================================================
@@ -1251,6 +1651,9 @@
         // =================================================================
         
         function updateTelemetry(t) {
+            // Add to history for charts (W4)
+            addTelemetrySample(t);
+            
             // Power
             document.getElementById('battery-v').textContent = t.battery_v.toFixed(2);
             document.getElementById('current-a').textContent = t.current_a.toFixed(2);
@@ -1324,26 +1727,24 @@
         
         // Editable config items: section -> [keys that can be edited]
         const EDITABLE_CONFIG = {
-            'Gait': ['cycle_ms', 'step_length_mm', 'step_height_mm', 'turn_rate'],
-            'Safety': ['low_battery_enabled', 'volt_critical', 'volt_recovery'],
-            'PID': ['enabled', 'kp', 'ki', 'kd', 'max_correction'],
-            'Impedance': ['enabled', 'kp', 'kd', 'max_force_n'],
-            'Estimator': ['alpha', 'vel_decay'],
+            'Gait': ['Cycle Time', 'Step Length', 'Step Height', 'Turn Rate'],
+            'Safety': ['Low Batt Prot', 'Volt Critical', 'Volt Recovery', 'LowBatt Filter'],
+            'PID': ['PID Enabled', 'Kp', 'Ki', 'Kd', 'Max Correction'],
+            'Impedance': ['IMP Enabled', 'Kp', 'Kd', 'Max Force'],
+            'Estimator': ['EST Alpha', 'Velocity Decay'],
         };
         
         function isEditable(section, key) {
             const editableKeys = EDITABLE_CONFIG[section];
             if (!editableKeys) return false;
-            // Match key case-insensitively and with underscores/spaces normalized
-            const normalizedKey = key.toLowerCase().replace(/\s+/g, '_');
+            // Match key case-insensitively
+            const normalizedKey = key.toLowerCase();
             return editableKeys.some(k => k.toLowerCase() === normalizedKey);
         }
         
         function getEditableKey(section, displayKey) {
-            // Convert display key back to config key format
-            const normalizedKey = displayKey.toLowerCase().replace(/\s+/g, '_');
-            const editableKeys = EDITABLE_CONFIG[section] || [];
-            return editableKeys.find(k => k.toLowerCase() === normalizedKey) || normalizedKey;
+            // Return the display key as-is (menu uses labels as keys)
+            return displayKey;
         }
         
         function renderConfig() {
@@ -1374,10 +1775,11 @@
                 const values = config[section];
                 const isCollapsed = collapsedCategories.has(section);
                 
-                const filteredItems = Object.entries(values).filter(([key, value]) => {
+                const filteredItems = Object.entries(values).filter(([key, itemData]) => {
                     if (!searchTerm) return true;
+                    const displayVal = typeof itemData === 'object' ? (itemData.display || '') : String(itemData);
                     return key.toLowerCase().includes(searchTerm) || 
-                           String(value).toLowerCase().includes(searchTerm) ||
+                           displayVal.toLowerCase().includes(searchTerm) ||
                            section.toLowerCase().includes(searchTerm);
                 });
                 
@@ -1391,40 +1793,67 @@
                 </div>`;
                 html += '<div class="lcars-config-items">';
                 
-                for (const [key, value] of filteredItems) {
+                for (const [key, itemData] of filteredItems) {
                     const editable = isEditable(section, key);
                     const configKey = getEditableKey(section, key);
                     
-                    if (editable) {
-                        // Editable item with input
-                        const inputType = typeof value === 'boolean' ? 'checkbox' : 'number';
-                        const inputValue = typeof value === 'boolean' 
-                            ? (value ? 'checked' : '')
-                            : (typeof value === 'string' && value.match(/^[\d.]+/) 
-                                ? parseFloat(value) 
-                                : value);
+                    // Extract metadata from new format or handle legacy simple values
+                    const isNewFormat = typeof itemData === 'object' && itemData !== null && 'display' in itemData;
+                    const displayValue = isNewFormat ? itemData.display : itemData;
+                    const rawValue = isNewFormat ? itemData.raw_value : itemData;
+                    const itemType = isNewFormat ? itemData.type : null;
+                    const minVal = isNewFormat ? itemData.min : null;
+                    const maxVal = isNewFormat ? itemData.max : null;
+                    const step = isNewFormat ? itemData.step : null;
+                    const unit = isNewFormat ? (itemData.unit || '') : '';
+                    const options = isNewFormat ? itemData.options : null;
+                    
+                    if (editable && itemType === 'value') {
+                        // Numeric value with constraints
+                        const minAttr = minVal !== null && minVal !== undefined ? `min="${minVal}"` : '';
+                        const maxAttr = maxVal !== null && maxVal !== undefined ? `max="${maxVal}"` : '';
+                        const stepAttr = step !== null && step !== undefined ? `step="${step}"` : 'step="any"';
                         
-                        if (inputType === 'checkbox') {
-                            html += `<div class="lcars-config-item" data-section="${section}" data-key="${configKey}">
-                                <span class="lcars-config-label">${key}</span>
-                                <input type="checkbox" class="lcars-config-checkbox" 
-                                       ${value ? 'checked' : ''} 
-                                       onchange="setConfig('${section}', '${configKey}', this.checked)">
-                            </div>`;
-                        } else {
-                            html += `<div class="lcars-config-item" data-section="${section}" data-key="${configKey}">
-                                <span class="lcars-config-label">${key}</span>
-                                <input type="number" class="lcars-config-input" 
-                                       value="${inputValue}" step="any"
-                                       onchange="setConfig('${section}', '${configKey}', parseFloat(this.value))"
-                                       onkeydown="if(event.key==='Enter'){this.blur();}">
-                            </div>`;
+                        // Format value to match step precision
+                        let formattedValue = rawValue;
+                        if (step !== null && step !== undefined && typeof rawValue === 'number') {
+                            const decimals = step < 1 ? Math.ceil(-Math.log10(step)) : 0;
+                            formattedValue = rawValue.toFixed(decimals);
                         }
+                        
+                        html += `<div class="lcars-config-item" data-section="${section}" data-key="${configKey}">
+                            <span class="lcars-config-label">${key}${unit ? ' (' + unit + ')' : ''}</span>
+                            <input type="number" class="lcars-config-input" 
+                                   value="${formattedValue}" ${minAttr} ${maxAttr} ${stepAttr}
+                                   onchange="setConfig('${section}', '${configKey}', parseFloat(this.value))"
+                                   onkeydown="if(event.key==='Enter'){this.blur();}">
+                        </div>`;
+                    } else if (editable && itemType === 'option' && options) {
+                        // Dropdown for option type
+                        let optionsHtml = options.map((opt, idx) => 
+                            `<option value="${idx}" ${idx === rawValue ? 'selected' : ''}>${opt}</option>`
+                        ).join('');
+                        html += `<div class="lcars-config-item" data-section="${section}" data-key="${configKey}">
+                            <span class="lcars-config-label">${key}</span>
+                            <select class="lcars-config-select"
+                                    onchange="setConfig('${section}', '${configKey}', parseInt(this.value))">
+                                ${optionsHtml}
+                            </select>
+                        </div>`;
+                    } else if (editable && (typeof rawValue === 'boolean' || displayValue === 'On' || displayValue === 'Off')) {
+                        // Boolean toggle
+                        const isChecked = rawValue === true || rawValue === 1 || displayValue === 'On';
+                        html += `<div class="lcars-config-item" data-section="${section}" data-key="${configKey}">
+                            <span class="lcars-config-label">${key}</span>
+                            <input type="checkbox" class="lcars-config-checkbox" 
+                                   ${isChecked ? 'checked' : ''} 
+                                   onchange="setConfig('${section}', '${configKey}', this.checked ? 1 : 0)">
+                        </div>`;
                     } else {
                         // Read-only item
                         html += `<div class="lcars-config-item">
                             <span class="lcars-config-label">${key}</span>
-                            <span class="lcars-config-value">${formatValue(value)}</span>
+                            <span class="lcars-config-value">${formatValue(displayValue)}</span>
                         </div>`;
                     }
                 }

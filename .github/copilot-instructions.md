@@ -48,7 +48,10 @@ Startup splash
   - `logging.enabled=true` / `logging.rate_hz=166`
   - `test.trigait.enabled=false`
 - Load once at boot in Phase 1. Log invalid keys; don’t crash.
-
+## Configuration parity
+- All configurable parameters MUST be available in BOTH the on‑board screen menu (MarsMenu) AND the web dashboard.
+- When adding a new config option: (1) add to `controller.ini` section, (2) add `MenuItem` in MarsMenu.py, (3) add callback and initial `set_value` in controller.py, (4) add to `EDITABLE_CONFIG` in dashboard.html, (5) add handler in `_handle_dashboard_config_change()`.
+- Keep labels consistent: on‑board menu label should map logically to dashboard key (e.g., "LowBatt Filter" ↔ `filter_alpha`).
 ## Serial command protocol (ASCII)
 - Commands (one per line); respond with `OK` or `ERR <code> <msg>`:
   - `ENABLE`, `DISABLE`
