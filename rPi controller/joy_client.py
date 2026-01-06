@@ -197,7 +197,7 @@ class JoyClient:
         
         if not os.path.exists(self.socket_path):
             if self.verbose:
-                print(f"[JOY_CLIENT] Socket not found: {self.socket_path}")
+                print(f"[JOY_CLIENT] Socket not found: {self.socket_path}", end="\r\n")
             return False
         
         try:
@@ -207,7 +207,7 @@ class JoyClient:
             self.state.connected = True
             
             if self.verbose:
-                print(f"[JOY_CLIENT] Connected to {self.socket_path}")
+                print(f"[JOY_CLIENT] Connected to {self.socket_path}", end="\r\n")
             return True
         
         except BlockingIOError:
@@ -216,7 +216,7 @@ class JoyClient:
             return True
         except Exception as e:
             if self.verbose:
-                print(f"[JOY_CLIENT] Connection failed: {e}")
+                print(f"[JOY_CLIENT] Connection failed: {e}", end="\r\n")
             self.sock = None
             self.state.connected = False
             return False
@@ -251,7 +251,7 @@ class JoyClient:
             if not data:
                 # Connection closed
                 if self.verbose:
-                    print("[JOY_CLIENT] Connection closed by server")
+                    print("[JOY_CLIENT] Connection closed by server", end="\r\n")
                 self.disconnect()
                 return None
             
@@ -262,7 +262,7 @@ class JoyClient:
             pass
         except (ConnectionResetError, BrokenPipeError, OSError) as e:
             if self.verbose:
-                print(f"[JOY_CLIENT] Connection error: {e}")
+                print(f"[JOY_CLIENT] Connection error: {e}", end="\r\n")
             self.disconnect()
             return None
         
@@ -278,7 +278,7 @@ class JoyClient:
                         updated = True
                 except json.JSONDecodeError:
                     if self.verbose:
-                        print(f"[JOY_CLIENT] Invalid JSON: {line[:50]}")
+                        print(f"[JOY_CLIENT] Invalid JSON: {line[:50]}", end="\r\n")
         
         return self.state if updated else None
     

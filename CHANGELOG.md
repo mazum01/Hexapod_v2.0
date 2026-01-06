@@ -1,3 +1,68 @@
+## Python Controller 0.10.17 (b271) — 2026-01-06
+
+### Curses Terminal Compatibility
+
+- **Print statement fixes**: All `print()` calls across controller, servers, and modules now use `end="\r\n"` for proper rendering in curses raw terminal mode.
+- **Startup output cleanup**: Suppressed pygame welcome banner (`PYGAME_HIDE_SUPPORT_PROMPT`), filtered I2C address scanning warnings via `warnings.filterwarnings()`.
+- **Async server shutdown**: Fixed `pointcloud_server.py` and `telemetry_server.py` graceful shutdown — wait for thread before stopping event loop to avoid `RuntimeError`.
+- **Keyboard help fix**: `print_keyboard_help()` now uses `sys.stdout.write(line + "\r\n")` per-line instead of triple-quoted string to prevent progressive indentation.
+
+---
+
+## Python Controller 0.10.16 (b270) — 2026-01-05
+
+### Keyboard Help Command
+
+- **'?' key**: Press `?` to print keyboard command reference to console.
+  - Lists all available keyboard shortcuts organized by category.
+  - Categories: Motion, Autonomy, Display, Debug, System, Menu Navigation.
+- **print_keyboard_help()**: New helper function outputs formatted help text.
+
+---
+
+## Python Controller 0.10.15 (b269) — 2026-01-05
+
+### Wall Follow Menu Integration
+
+- **AUTONOMY menu**: Added Wall Follow behavior controls.
+  - `Wall Follow`: On/Off toggle to enable behavior.
+  - `Wall Side`: Left/Right option for which wall to follow.
+  - `Wall Dist`: Target distance from wall (100-400mm, step 25).
+- **Behavior arbiter**: Wall Following behavior added to arbiter at priority 40.
+- **Config loading**: `wall_follow`, `wall_side`, `wall_distance_mm` in [behavior] section.
+
+### LCD Notification Overlay
+
+- **show_notification()**: New DisplayThread method for temporary text overlays.
+  - Shows centered text box with semi-transparent background.
+  - Auto-dismisses after configurable duration (default 2 seconds).
+  - Returns to eyes display automatically after timeout.
+- **Behavior toggle notifications**: Toggling Patrol or Wall Follow shows notification on LCD.
+  - "Patrol ON/OFF" or "Wall Follow ON/OFF (Left/Right)".
+- **draw_notification_overlay()**: New helper function in display_thread.py.
+
+---
+
+## Python Controller 0.10.14 (b268) — 2026-01-05
+
+### Autonomy A4: Wall Following Behavior
+
+- **WallFollowing class**: New behavior in behaviors.py that tracks left or right ToF zone.
+  - PD controller maintains configurable `wall_distance_mm` (default 200mm).
+  - Parameters: `kp=0.003`, `kd=0.001`, `max_intensity=0.8`, `min_wall_detect_mm=400`.
+  - Steers toward wall when too far, away when too close, forward when on target.
+  - Priority 40 (above Patrol, below safety behaviors).
+  - Disabled by default; enable via menu or command.
+
+### Autonomy A5: Patrol Touch-Stop
+
+- **Patrol touch-stop**: Patrol behavior now checks `touch_active` in sensor_state.
+  - Tap screen during patrol to stop gracefully (returns STOP action).
+  - Works alongside existing E-STOP (touch during gait disables robot).
+- **sensor_state enhancement**: Added `touch_active` field populated from MarsMenu.touched().
+
+---
+
 ## Python Controller 0.7.35 (b219) — 2025-12-27
 
 ### Battery Status Display

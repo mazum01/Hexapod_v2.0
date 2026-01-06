@@ -255,11 +255,28 @@
 # 2026-01-03  v0.8.9 b252: Audio: Integrated audio_manager into controller.py - startup chime (3-tone ascending), shutdown beep, config from [audio] section.
 # 2026-01-03  v0.9.0 b253: Audio: Added button click sounds, enable/disable tones, low battery warning, Teensy connect/disconnect, gait start/stop audio feedback.
 # 2026-01-03  v0.10.0 b254: Audio: Created click.wav (25ms synthetic), boosted click volume to 1.0 for audibility; wired clicks to all buttons (D-pad, Start, Back).
+# 2026-01-03  v0.10.1 b255: Audio: Added safety lockout alert, stand/tuck/home confirmation sounds, Xbox connect/disconnect, autonomy mode toggle sounds.
+# 2026-01-03  v0.10.2 b256: TTS: Integrated pyttsx3 (espeak-ng backend) for voice announcements; speaks enable/disable, postures, safety lockout, autonomy, startup/shutdown; configurable via [tts] section.
+# 2026-01-03  v0.10.3 b257: TTS: Hooked speech to low battery warning (with percent), obstacle detected (autonomy STOP), cliff detected (E-STOP); added speak_cliff() helper.
+# 2026-01-03  v0.10.4 b258: TTS: Switched from pyttsx3 to espeak-ng + sox pipeline for louder output; configurable gain_db (default 30dB); simplified dependencies.
+# 2026-01-03  v0.10.5 b259: TTS: Fixed audio device conflict - route TTS through pygame mixer (espeak→sox→pygame) instead of sox play; non-blocking background threads.
+# 2026-01-03  v0.10.6 b260: TTS: Added 2s delay after shutdown announcement to allow speech to complete before cleanup.
+# 2026-01-03  v0.10.7 b261: Audio: Added gait type change confirmation tones - distinct audio signature per gait (Standing, Tripod, Wave, Ripple, Stationary); played on transition complete.
+# 2026-01-03  v0.10.8 b262: Audio: AU4 menu navigation clicks (nav/tab/adjust/select events via MarsMenu audio callback); AU6 generated 22 WAV sound assets (generate_sounds.py).
+# 2026-01-03  v0.10.9 b263: TTS: Added Piper neural TTS as alternative engine; engine=piper|espeak in config; natural-sounding voices (en_US-lessac-medium default).
+# 2026-01-03  v0.10.10 b264: TTS: Pre-cached TTS phrases as WAV files for instant playback; eliminates Piper ~300ms latency for fixed announcements. 15 cached phrases via generate_tts_phrases.py.
+# 2026-01-04  v0.10.11 b265: Audio: Sound queue for sequential playback; sounds no longer overlap/cut off. Short UI sounds (clicks) bypass queue; priority sounds can interrupt.
+# 2026-01-04  v0.10.12 b266: ToF: Added temporal EMA filter for smooth distance readings. Filters jitter, rejects high-sigma noise, attenuates outliers. Configurable alpha/thresholds in [tof] section.
+# 2026-01-05  v0.10.13 b267: ToF: Changed filter to mode-based: 'off' (raw/SLAM), 'light' (reject bad only, no lag), 'full' (EMA smooth). Default 'light' for motion-friendly filtering.
+# 2026-01-05  v0.10.14 b268: Autonomy A4+A5: Wall Following behavior (PD control to maintain target distance from left/right wall); Patrol touch-stop (tap screen to stop patrol gracefully).
+# 2026-01-05  v0.10.15 b269: Menu: Wall Follow behavior in AUTONOMY tab (enable/side/distance); LCD notification overlay when behaviors toggled (auto-dismisses after 2s).
+# 2026-01-05  v0.10.16 b270: Help: Press '?' to print keyboard command reference to console.
+# 2026-01-06  v0.10.17 b271: Curses: Fixed all print() to use end="\r\n"; suppressed pygame/I2C warnings; fixed async server shutdown.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.10.0"
+CONTROLLER_VERSION = "0.10.17"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 254
+CONTROLLER_BUILD = 271
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -276,13 +293,15 @@ import configparser
 import time
 import struct
 import curses
+import warnings
 import numpy as np
 import threading
 from dataclasses import dataclass
 from queue import Queue, Empty
-#import os
-#import math
-#import logging
+
+# Suppress known harmless warnings from I2C libraries
+warnings.filterwarnings("ignore", message="I2C frequency is not settable")
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="adafruit_blinka")
 import serial
 import serial.tools.list_ports
 import cv2 as cv
@@ -387,7 +406,7 @@ from tof_sensor import ToFThread, ToFConfig, ToFSensorConfig, ToFFrame, create_t
 
 # import behavior engine (autonomy)
 from behavior_engine import BehaviorArbiter, Action, ActionRequest
-from behaviors import ObstacleAvoidance, CliffDetection, CaughtFootRecovery, Patrol
+from behaviors import ObstacleAvoidance, CliffDetection, CaughtFootRecovery, Patrol, WallFollowing
 
 # import point cloud server (SLAM prototype)
 try:
@@ -986,6 +1005,8 @@ class Controller:
                                 send_cmd(b'DISABLE', force=True)
                             except Exception:
                                 pass
+                            audio_safety_lockout()  # Play urgent alert
+                            speak_safety_lockout()  # Voice announcement
                             if self.verbose:
                                 print("Firmware reported SAFETY LOCKOUT; issued LEG ALL DISABLE + DISABLE.", end="\r\n")
                         _last_safety_lockout = lockout
@@ -1058,14 +1079,14 @@ class Controller:
                 if event.type == 1:  # button
                     if event.code == 158 and event.value == 1:  # mirror toggle
                         if self.verbose:
-                            print("\nscreen mirror button pressed", end="\r\n")
+                            print("\r\nscreen mirror button pressed", end="\r\n")
                         self.mirror = not self.mirror
                         self.forceDisplayUpdate = True
                     elif event.code == 315 and event.value == 1:  # Start button - cycle display mode
                         audio_click()
                         global _displayMode
                         if self.verbose:
-                            print("\nStart button pressed (cycle display)", end="\r\n")
+                            print("\r\nStart button pressed (cycle display)", end="\r\n")
                         # Get robot state for menu safety check
                         if self.system_telem.valid:
                             robot_enabled = self.system_telem.robot_enabled
@@ -1103,19 +1124,19 @@ class Controller:
                             audio_click()
                         self._backHeld = (event.value == 1)
                         if self.verbose and event.value == 1:
-                            print("\nBack/Select pressed", end="\r\n")
+                            print("\r\nBack/Select pressed", end="\r\n")
                     elif event.code == 172 and event.value == 1:  # power
                         if self.verbose:
-                            print("\npower button pressed", end="\r\n")
+                            print("\r\npower button pressed", end="\r\n")
                         self.requestExit = True
                     elif event.code in [139, 158, 172] and event.value == 1:  # menu/guide/power variants
                         if self.verbose:
-                            print(f"\nXbox guide/power button pressed (code {event.code})", end="\r\n")
+                            print(f"\r\nXbox guide/power button pressed (code {event.code})", end="\r\n")
                         self.requestExit = True
                     elif event.code == 304 and event.value == 1:  # A button
                         audio_click()
                         if self.verbose:
-                            print("\nA button pressed", end="\r\n")
+                            print("\r\nA button pressed", end="\r\n")
                         if getattr(self, '_backHeld', False):
                             # Back + A: Toggle autonomy mode
                             try:
@@ -1138,7 +1159,7 @@ class Controller:
                     elif event.code == 305 and event.value == 1:  # B button
                         audio_click()
                         if self.verbose:
-                            print("\nB button pressed", end="\r\n")
+                            print("\r\nB button pressed", end="\r\n")
                         if _marsMenu.visible:
                             # Close menu
                             _marsMenu.hide()
@@ -1150,7 +1171,7 @@ class Controller:
                     elif event.code == 308 and event.value == 1:  # X toggle test/idle (BTN_WEST)
                         audio_click()
                         if self.verbose:
-                            print("\nX button pressed (Toggle Test/Idle)", end="\r\n")
+                            print("\r\nX button pressed (Toggle Test/Idle)", end="\r\n")
                         _disable_autonomy_if_active(verbose=self.verbose)
                         if self.teensy is not None:
                             # Check current mode from telemetry state (assuming test mode tracking)
@@ -1168,7 +1189,7 @@ class Controller:
                     elif event.code == 307 and event.value == 1:  # Y tuck (BTN_NORTH)
                         audio_click()
                         if self.verbose:
-                            print("\nY button pressed (Tuck)", end="\r\n")
+                            print("\r\nY button pressed (Tuck)", end="\r\n")
                         if not _marsMenu.visible and getattr(self, '_backHeld', False):
                             # Shortcut: Back + Y = Pounce
                             start_pounce_move(source="pad")
@@ -1180,14 +1201,14 @@ class Controller:
                     elif event.code == 318 and event.value == 1:  # right joystick press - disable
                         audio_click()
                         if self.verbose:
-                            print("\nRight joystick pressed (Disable)", end="\r\n")
+                            print("\r\nRight joystick pressed (Disable)", end="\r\n")
                         if self.teensy is not None:
                             send_cmd(b'DISABLE', force=True)
                     elif event.code == 317:  # left joystick press - gait width adjustment mode
                         if event.value == 1:  # Button pressed
                             self._leftStickHeld = True
                             if self.verbose:
-                                print(f"\nLeft joystick pressed - Gait adjustment mode (width: {self._gaitWidthMm:.0f}mm, lift: {self._gaitLiftMm:.0f}mm)", end="\r\n")
+                                print(f"\r\nLeft joystick pressed - Gait adjustment mode (width: {self._gaitWidthMm:.0f}mm, lift: {self._gaitLiftMm:.0f}mm)", end="\r\n")
                         else:  # Button released (value == 0)
                             self._leftStickHeld = False
                             # Apply saved parameters to active gait engine
@@ -1197,10 +1218,10 @@ class Controller:
                             # Persist to ini file
                             if save_gait_settings(self._gaitWidthMm, self._gaitLiftMm):
                                 if self.verbose:
-                                    print(f"\nGait settings saved: width={self._gaitWidthMm:.0f}mm, lift={self._gaitLiftMm:.0f}mm", end="\r\n")
+                                    print(f"\r\nGait settings saved: width={self._gaitWidthMm:.0f}mm, lift={self._gaitLiftMm:.0f}mm", end="\r\n")
                             else:
                                 if self.verbose:
-                                    print(f"\nGait settings applied (save failed): width={self._gaitWidthMm:.0f}mm, lift={self._gaitLiftMm:.0f}mm", end="\r\n")
+                                    print(f"\r\nGait settings applied (save failed): width={self._gaitWidthMm:.0f}mm, lift={self._gaitLiftMm:.0f}mm", end="\r\n")
                     elif event.code == 310 and event.value == 1:  # LB - prev tab or toggle gait
                         audio_click()
                         if _marsMenu.visible:
@@ -1212,7 +1233,7 @@ class Controller:
                             if not _gaitActive or is_standing_gait:
                                 if _safety_state.get("lockout", False):
                                     if self.verbose:
-                                        print("\nGait start blocked: firmware safety lockout is active.", end="\r\n")
+                                        print("\r\nGait start blocked: firmware safety lockout is active.", end="\r\n")
                                     continue
                                 # Stop StandingGait if transitioning
                                 if is_standing_gait and _gaitEngine is not None:
@@ -1253,7 +1274,7 @@ class Controller:
                                 self._gaitSpeedInput = 0.0
                                 self._updateGaitHeading()  # Sync gait engine with current (zero) inputs
                                 if self.verbose:
-                                    print("\nLB: Gait engine STARTED (tripod)", end="\r\n")
+                                    print("\r\nLB: Gait engine STARTED (tripod)", end="\r\n")
                             else:
                                 # Stop gait
                                 if _gaitEngine is not None:
@@ -1264,7 +1285,7 @@ class Controller:
                                 _autoDisableAt = time.time() + _autoDisableS
                                 self.autoDisableAt = _autoDisableAt
                                 if self.verbose:
-                                    print("\nLB: Gait engine STOPPED", end="\r\n")
+                                    print("\r\nLB: Gait engine STOPPED", end="\r\n")
                     elif event.code == 311 and event.value == 1:  # RB - next tab or cycle gait
                         audio_click()
                         if _marsMenu.visible:
@@ -1292,10 +1313,10 @@ class Controller:
                             # Request phase-locked transition
                             if _gaitTransition.request_transition(_gaitEngine, pending_gait):
                                 if self.verbose:
-                                    print(f"\nRB: Transitioning to {next_name} gait (waiting for phase boundary)", end="\r\n")
+                                    print(f"\r\nRB: Transitioning to {next_name} gait (waiting for phase boundary)", end="\r\n")
                             else:
                                 if self.verbose:
-                                    print(f"\nRB: Transition already in progress", end="\r\n")
+                                    print(f"\r\nRB: Transition already in progress", end="\r\n")
                 elif event.type == 3:  # analog
                     # Debug: show all analog events when left stick is held
                     if self._leftStickHeld and self.verbose:
@@ -1530,10 +1551,26 @@ class Controller:
         if self.joyClient is None:
             return False
         
+        # Track previous Xbox connection state for audio feedback
+        prev_xbox_connected = getattr(self, '_prevXboxConnected', None)
+        
         # Poll for new state (non-blocking)
         new_state = self.joyClient.poll()
         if new_state is None and not self.joyClient.connected:
             return False
+        
+        # Check for Xbox connect/disconnect state change
+        curr_xbox_connected = self.joyClient.xbox_connected
+        if prev_xbox_connected is not None and curr_xbox_connected != prev_xbox_connected:
+            if curr_xbox_connected:
+                audio_xbox_connect()
+                if self.verbose:
+                    print("Xbox controller connected", end="\r\n")
+            else:
+                audio_xbox_disconnect()
+                if self.verbose:
+                    print("Xbox controller disconnected", end="\r\n")
+        self._prevXboxConnected = curr_xbox_connected
         
         # Get current state (may be updated or stale)
         joy = self.joyClient.state
@@ -1554,11 +1591,11 @@ class Controller:
                 self.mirror = not self.mirror
                 self.forceDisplayUpdate = True
                 if self.verbose:
-                    print(f"\nScreen mirror {'ON' if self.mirror else 'OFF'}", end="\r\n")
+                    print(f"\r\nScreen mirror {'ON' if self.mirror else 'OFF'}", end="\r\n")
             else:
                 # Start alone: Cycle display mode
                 if self.verbose:
-                    print("\nStart button pressed (cycle display)", end="\r\n")
+                    print("\r\nStart button pressed (cycle display)", end="\r\n")
                 # Get robot state for menu safety check
                 if self.system_telem.valid:
                     robot_enabled = self.system_telem.robot_enabled
@@ -1594,13 +1631,13 @@ class Controller:
                 audio_click()
             self._backHeld = joy.button_back
             if self.verbose and joy.button_back:
-                print("\nBack/Select pressed", end="\r\n")
+                print("\r\nBack/Select pressed", end="\r\n")
         
         # A button
         if joy.button_a and not self._prevJoyState.button_a:
             audio_click()
             if self.verbose:
-                print("\nA button pressed", end="\r\n")
+                print("\r\nA button pressed", end="\r\n")
             if self._backHeld:
                 # Back + A: Toggle autonomy mode
                 try:
@@ -1623,7 +1660,7 @@ class Controller:
         if joy.button_b and not self._prevJoyState.button_b:
             audio_click()
             if self.verbose:
-                print("\nB button pressed", end="\r\n")
+                print("\r\nB button pressed", end="\r\n")
             if _marsMenu.visible:
                 _marsMenu.hide()
                 self.forceDisplayUpdate = True
@@ -1639,7 +1676,7 @@ class Controller:
         if joy.button_x and not self._prevJoyState.button_x:
             audio_click()
             if self.verbose:
-                print("\nX button pressed (Tuck)", end="\r\n")
+                print("\r\nX button pressed (Tuck)", end="\r\n")
             if not _marsMenu.visible and self._backHeld:
                 # Shortcut: Back + X = Pounce
                 start_pounce_move(source="pad")
@@ -1657,7 +1694,7 @@ class Controller:
         if joy.button_y and not self._prevJoyState.button_y:
             audio_click()
             if self.verbose:
-                print("\nY button pressed (Toggle Test/Idle)", end="\r\n")
+                print("\r\nY button pressed (Toggle Test/Idle)", end="\r\n")
             _disable_autonomy_if_active(verbose=self.verbose)
             if self.teensy is not None:
                 # Stop any active gait first
@@ -1679,7 +1716,7 @@ class Controller:
         if joy.button_lb and not self._prevJoyState.button_lb:
             audio_click()
             if self.verbose:
-                print("\nLB button pressed", end="\r\n")
+                print("\r\nLB button pressed", end="\r\n")
             if _marsMenu.visible:
                 _marsMenu.handle_button('LB')
                 self.forceDisplayUpdate = True
@@ -1719,7 +1756,7 @@ class Controller:
                     self._gaitSpeedInput = 0.0
                     self._updateGaitHeading()
                     if self.verbose:
-                        print("\nLB: Gait engine STARTED (tripod)", end="\r\n")
+                        print("\r\nLB: Gait engine STARTED (tripod)", end="\r\n")
                 else:
                     # Stop gait
                     if _gaitEngine is not None:
@@ -1730,7 +1767,7 @@ class Controller:
                     _autoDisableAt = time.time() + _autoDisableS
                     self.autoDisableAt = _autoDisableAt
                     if self.verbose:
-                        print("\nLB: Gait engine STOPPED", end="\r\n")
+                        print("\r\nLB: Gait engine STOPPED", end="\r\n")
         
         # RB button: next tab or cycle gait
         if joy.button_rb and not self._prevJoyState.button_rb:
@@ -1757,18 +1794,18 @@ class Controller:
                 
                 if _gaitTransition.request_transition(_gaitEngine, pending_gait):
                     if self.verbose:
-                        print(f"\nRB: Transitioning to {next_name} gait", end="\r\n")
+                        print(f"\r\nRB: Transitioning to {next_name} gait", end="\r\n")
         
         # Left stick button (modifier)
         if joy.button_lstick != self._prevJoyState.button_lstick:
             self._leftStickHeld = joy.button_lstick
             if self.verbose and joy.button_lstick:
-                print("\nLeft stick button held (param adjust mode)", end="\r\n")
+                print("\r\nLeft stick button held (param adjust mode)", end="\r\n")
         
         # Right stick button: disable
         if joy.button_rstick and not self._prevJoyState.button_rstick:
             if self.verbose:
-                print("\nRight stick button pressed (Disable)", end="\r\n")
+                print("\r\nRight stick button pressed (Disable)", end="\r\n")
             if self.teensy is not None:
                 # Stop any active gait first
                 if _gaitActive and _gaitEngine is not None:
@@ -2524,6 +2561,12 @@ _tofHz = 15.0  # Target update rate (max 15 Hz at 8x8, 60 Hz at 4x4)
 _tofBus = 1  # I2C bus number (run 'i2cdetect -y N' to find device)
 _tofResolution = 64  # 16 (4x4) or 64 (8x8) zones - library format
 _tofSensors = [("front", 0x29)]  # List of (name, address) tuples
+# ToF filter settings (smooths jittery readings)
+# filter_mode: 'off' (raw/SLAM), 'light' (reject bad only), 'full' (EMA smooth)
+_tofFilterMode = 'light'  # 'light' recommended for motion, 'full' for stationary
+_tofFilterAlpha = 0.5  # EMA alpha for 'full' mode (higher = more responsive)
+_tofFilterSigmaThresh = 20  # Reject high-sigma readings (mm)
+_tofFilterOutlierMm = 100  # Jump threshold for outlier attenuation
 
 # Autonomy / Behavior settings
 _autonomyEnabled = False  # Master switch (keyboard 'a' toggles)
@@ -2531,6 +2574,9 @@ _autonomyObstacleAvoidance = True
 _autonomyCliffDetection = True
 _autonomyCaughtFootRecovery = True
 _autonomyPatrol = False
+_autonomyWallFollow = False  # Wall following behavior
+_autonomyWallSide = 'left'  # Which side to follow: 'left' or 'right'
+_autonomyWallDistMm = 200  # Target distance from wall
 _autonomyStopDistMm = 150
 _autonomySlowDistMm = 300
 _autonomyCliffThresholdMm = 100
@@ -2565,6 +2611,25 @@ _audioVolume = 0.7  # Master volume 0.0-1.0
 _audioDevice = "hw:2,0"  # ALSA device: Sabrent USB DAC
 _audioSoundsDir = "assets/sounds"  # Sound files directory
 _audio = None  # AudioManager instance
+
+# TTS (Text-to-Speech) settings - supports espeak-ng or piper backends
+_ttsEnabled = True  # Master switch for voice announcements
+_ttsEngine = "espeak"  # TTS engine: "espeak" or "piper"
+_ttsRate = 140  # Speech rate (espeak: wpm 80-200; piper: length_scale 0.5-2.0)
+_ttsGainDb = 30  # Sox amplification gain in dB
+_ttsVoice = "en-us"  # espeak voice (en-us, en-gb, Storm) or piper model name
+_ttsPitch = 50  # Voice pitch (espeak: 0-99, 50=normal; piper: ignored)
+_ttsPiperModel = os.path.expanduser("~/.local/share/piper/en_US-lessac-medium.onnx")  # Piper model path
+_ttsLastSpeak = 0.0  # Anti-spam: last speech time
+_ttsCooldownSec = 2.0  # Minimum seconds between speech
+_ttsAvailable = False  # Set True if TTS engine is available
+_ttsPiperAvailable = False  # Set True if piper is available
+import subprocess
+import shutil
+if shutil.which('espeak-ng') and shutil.which('sox'):
+    _ttsAvailable = True
+if shutil.which('piper'):
+    _ttsPiperAvailable = True
 
 try:
     _cfg = configparser.ConfigParser()
@@ -2652,6 +2717,11 @@ try:
                         _tofSensors.append((name.strip(), addr))
                     except ValueError:
                         pass
+        # Filter settings
+        _tofFilterMode = _cfg.get('tof', 'filter_mode', fallback=_tofFilterMode)
+        _tofFilterAlpha = _cfg.getfloat('tof', 'filter_alpha', fallback=_tofFilterAlpha)
+        _tofFilterSigmaThresh = _cfg.getint('tof', 'filter_sigma_threshold', fallback=_tofFilterSigmaThresh)
+        _tofFilterOutlierMm = _cfg.getint('tof', 'filter_outlier_mm', fallback=_tofFilterOutlierMm)
 
     # Load optional PID/IMP/EST defaults
     if 'pid' in _cfg:
@@ -2728,6 +2798,9 @@ try:
         _autonomyCliffDetection = _cfg.getboolean('behavior', 'cliff_detection', fallback=_autonomyCliffDetection)
         _autonomyCaughtFootRecovery = _cfg.getboolean('behavior', 'caught_foot_recovery', fallback=_autonomyCaughtFootRecovery)
         _autonomyPatrol = _cfg.getboolean('behavior', 'patrol', fallback=_autonomyPatrol)
+        _autonomyWallFollow = _cfg.getboolean('behavior', 'wall_follow', fallback=_autonomyWallFollow)
+        _autonomyWallSide = _cfg.get('behavior', 'wall_side', fallback=_autonomyWallSide).lower().strip()
+        _autonomyWallDistMm = _cfg.getint('behavior', 'wall_distance_mm', fallback=_autonomyWallDistMm)
         _autonomyStopDistMm = _cfg.getint('behavior', 'stop_distance_mm', fallback=_autonomyStopDistMm)
         _autonomySlowDistMm = _cfg.getint('behavior', 'slow_distance_mm', fallback=_autonomySlowDistMm)
         _autonomyCliffThresholdMm = _cfg.getint('behavior', 'cliff_threshold_mm', fallback=_autonomyCliffThresholdMm)
@@ -2760,6 +2833,17 @@ try:
         _audioVolume = _cfg.getfloat('audio', 'volume', fallback=_audioVolume)
         _audioDevice = _cfg.get('audio', 'device', fallback=_audioDevice)
         _audioSoundsDir = _cfg.get('audio', 'sounds_dir', fallback=_audioSoundsDir)
+
+    # Load TTS (text-to-speech) settings
+    if 'tts' in _cfg:
+        _ttsEnabled = _cfg.getboolean('tts', 'enabled', fallback=_ttsEnabled)
+        _ttsEngine = _cfg.get('tts', 'engine', fallback=_ttsEngine).lower().strip()
+        _ttsRate = _cfg.getint('tts', 'rate', fallback=_ttsRate)
+        _ttsGainDb = _cfg.getint('tts', 'gain_db', fallback=_ttsGainDb)
+        _ttsVoice = _cfg.get('tts', 'voice', fallback=_ttsVoice)
+        _ttsPitch = _cfg.getint('tts', 'pitch', fallback=_ttsPitch)
+        _ttsPiperModel = os.path.expanduser(_cfg.get('tts', 'piper_model', fallback=_ttsPiperModel))
+        _ttsCooldownSec = _cfg.getfloat('tts', 'cooldown_sec', fallback=_ttsCooldownSec)
 
     # Merge controller.ini defaults into live PID/IMP/EST menu state (until firmware LIST overwrites)
     try:
@@ -2934,6 +3018,7 @@ _menu = GUIMenu(_touch)
 
 # Create new MARS menu system
 _marsMenu = MarsMenu(_touch)
+# Audio callback will be set later after audio_menu_callback is defined
 _startupSplash.log("Menu systems OK", "GREEN")
 
 # create and initialize the SimpleEyes object
@@ -3510,8 +3595,46 @@ def _setup_mars_menu():
         _autonomyPatrol = (val == 1)
         if _behaviorArbiter is not None:
             _behaviorArbiter.set_behavior_enabled("Patrol", _autonomyPatrol)
+        # Show notification on LCD
+        if _displayThread is not None:
+            _displayThread.show_notification(f"Patrol {'ON' if _autonomyPatrol else 'OFF'}", 2.0)
         if _verbose:
             print(f"Patrol: {'On' if _autonomyPatrol else 'Off'}", end="\r\n")
+
+    def on_wall_follow_change(val):
+        """Toggle wall following behavior."""
+        global _autonomyWallFollow, _behaviorArbiter
+        _autonomyWallFollow = (val == 1)
+        if _behaviorArbiter is not None:
+            _behaviorArbiter.set_behavior_enabled("WallFollow", _autonomyWallFollow)
+        # Show notification on LCD
+        if _displayThread is not None:
+            side_str = _autonomyWallSide.capitalize()
+            _displayThread.show_notification(f"Wall Follow {'ON' if _autonomyWallFollow else 'OFF'} ({side_str})", 2.0)
+        if _verbose:
+            print(f"Wall follow: {'On' if _autonomyWallFollow else 'Off'} ({_autonomyWallSide})", end="\r\n")
+
+    def on_wall_side_change(val):
+        """Update wall following side."""
+        global _autonomyWallSide, _behaviorArbiter
+        _autonomyWallSide = 'left' if val == 0 else 'right'
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("WallFollow")
+            if behavior is not None:
+                behavior.wall_side = _autonomyWallSide
+        if _verbose:
+            print(f"Wall side: {_autonomyWallSide}", end="\r\n")
+
+    def on_wall_dist_change(val):
+        """Update wall following distance."""
+        global _autonomyWallDistMm, _behaviorArbiter
+        _autonomyWallDistMm = int(val)
+        if _behaviorArbiter is not None:
+            behavior = _behaviorArbiter.get_behavior("WallFollow")
+            if behavior is not None:
+                behavior.wall_distance_mm = _autonomyWallDistMm
+        if _verbose:
+            print(f"Wall distance: {_autonomyWallDistMm}mm", end="\r\n")
 
     def on_stop_dist_change(val):
         """Update obstacle stop distance."""
@@ -3610,6 +3733,9 @@ def _setup_mars_menu():
             'obstacle_avoidance': _autonomyObstacleAvoidance,
             'cliff_detection': _autonomyCliffDetection,
             'caught_foot_recovery': _autonomyCaughtFootRecovery,
+            'wall_follow': _autonomyWallFollow,
+            'wall_side': _autonomyWallSide,
+            'wall_distance_mm': _autonomyWallDistMm,
             'patrol': _autonomyPatrol,
             'stop_distance_mm': _autonomyStopDistMm,
             'slow_distance_mm': _autonomySlowDistMm,
@@ -3631,6 +3757,9 @@ def _setup_mars_menu():
     _marsMenu.set_callback(MenuCategory.AUTO, "Obstacle Avoid", "on_change", on_obstacle_avoid_change)
     _marsMenu.set_callback(MenuCategory.AUTO, "Cliff Detect", "on_change", on_cliff_detect_change)
     _marsMenu.set_callback(MenuCategory.AUTO, "Caught Foot", "on_change", on_caught_foot_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Wall Follow", "on_change", on_wall_follow_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Wall Side", "on_change", on_wall_side_change)
+    _marsMenu.set_callback(MenuCategory.AUTO, "Wall Dist", "on_change", on_wall_dist_change)
     _marsMenu.set_callback(MenuCategory.AUTO, "Patrol", "on_change", on_patrol_change)
     _marsMenu.set_callback(MenuCategory.AUTO, "Stop Dist", "on_change", on_stop_dist_change)
     _marsMenu.set_callback(MenuCategory.AUTO, "Slow Dist", "on_change", on_slow_dist_change)
@@ -4312,6 +4441,9 @@ def update_menu_info(ctrl: Controller | None = None):
     _marsMenu.set_value(MenuCategory.AUTO, "Obstacle Avoid", 1 if _autonomyObstacleAvoidance else 0)
     _marsMenu.set_value(MenuCategory.AUTO, "Cliff Detect", 1 if _autonomyCliffDetection else 0)
     _marsMenu.set_value(MenuCategory.AUTO, "Caught Foot", 1 if _autonomyCaughtFootRecovery else 0)
+    _marsMenu.set_value(MenuCategory.AUTO, "Wall Follow", 1 if _autonomyWallFollow else 0)
+    _marsMenu.set_value(MenuCategory.AUTO, "Wall Side", 0 if _autonomyWallSide == 'left' else 1)
+    _marsMenu.set_value(MenuCategory.AUTO, "Wall Dist", _autonomyWallDistMm)
     _marsMenu.set_value(MenuCategory.AUTO, "Patrol", 1 if _autonomyPatrol else 0)
     _marsMenu.set_value(MenuCategory.AUTO, "Stop Dist", _autonomyStopDistMm)
     _marsMenu.set_value(MenuCategory.AUTO, "Slow Dist", _autonomySlowDistMm)
@@ -4417,7 +4549,7 @@ def _on_tilt_safety_triggered(pitch_deg: float, roll_deg: float) -> None:
     global _enabledLocal, _verbose
     tilt_max = max(abs(pitch_deg), abs(roll_deg))
     if _verbose:
-        print(f"\n[LEVELING] TILT SAFETY: pitch={pitch_deg:.1f}° roll={roll_deg:.1f}° (>{_levelingTiltLimitDeg:.0f}°)", end="\r\n")
+        print(f"\r\n[LEVELING] TILT SAFETY: pitch={pitch_deg:.1f}° roll={roll_deg:.1f}° (>{_levelingTiltLimitDeg:.0f}°)", end="\r\n")
         print(f"[LEVELING] Issuing emergency TUCK + DISABLE", end="\r\n")
     # Issue TUCK with auto-disable (protective posture)
     apply_posture(b'TUCK', auto_disable_s=2.0, require_enable=False)
@@ -4437,6 +4569,10 @@ if _tofEnabled:
         target_hz=_tofHz,
         resolution=_tofResolution,
         sensors=_tof_sensor_configs,
+        filter_mode=_tofFilterMode,
+        filter_alpha=_tofFilterAlpha,
+        filter_sigma_threshold=_tofFilterSigmaThresh,
+        filter_outlier_mm=_tofFilterOutlierMm,
     )
     _tofThread = ToFThread(_tofConfig)
     # Initialize sensors on main thread (VL53L5CX ctypes library segfaults if init from thread)
@@ -4788,6 +4924,31 @@ elif _audioEnabled:
     _startupSplash.log("Audio: pygame not available", "YELLOW")
 
 # --------------------------------------------------------------------------------------------------
+# TTS Engine: Text-to-Speech via espeak-ng or piper + sox amplification
+# --------------------------------------------------------------------------------------------------
+if _ttsEnabled:
+    if _ttsEngine == "piper" and _ttsPiperAvailable:
+        # Check piper model exists
+        if os.path.isfile(_ttsPiperModel):
+            _ttsAvailable = True
+            _model_name = os.path.basename(_ttsPiperModel).replace('.onnx', '')
+            _startupSplash.log(f"TTS OK (piper/{_model_name})", "GREEN")
+            if _verbose:
+                print(f"TTS initialized: engine=piper, model={_model_name}, gain=+{_ttsGainDb}dB", end="\r\n")
+        else:
+            _startupSplash.log(f"TTS: piper model not found", "YELLOW")
+            if _verbose:
+                print(f"TTS: piper model not found: {_ttsPiperModel}", end="\r\n")
+    elif _ttsEngine == "espeak" and _ttsAvailable:
+        _startupSplash.log(f"TTS OK (espeak/{_ttsVoice})", "GREEN")
+        if _verbose:
+            print(f"TTS initialized: engine=espeak, voice={_ttsVoice}, rate={_ttsRate}, pitch={_ttsPitch}, gain=+{_ttsGainDb}dB", end="\r\n")
+    elif _ttsEngine == "piper":
+        _startupSplash.log("TTS: piper not installed", "YELLOW")
+    else:
+        _startupSplash.log("TTS: espeak-ng or sox not found", "YELLOW")
+
+# --------------------------------------------------------------------------------------------------
 # Audio Helper Functions
 # --------------------------------------------------------------------------------------------------
 
@@ -4880,6 +5041,370 @@ def audio_gait_stop():
             _audio.beep(880, 60)
         except Exception:
             pass
+
+def audio_stand():
+    """Play stand posture confirmation (rising tone)."""
+    if _audio is not None:
+        try:
+            _audio.beep(523, 60)  # C5
+            time.sleep(0.08)
+            _audio.beep(659, 80)  # E5
+        except Exception:
+            pass
+
+def audio_tuck():
+    """Play tuck posture confirmation (falling tone)."""
+    if _audio is not None:
+        try:
+            _audio.beep(659, 60)  # E5
+            time.sleep(0.08)
+            _audio.beep(440, 80)  # A4
+        except Exception:
+            pass
+
+def audio_home():
+    """Play home posture confirmation (neutral tone)."""
+    if _audio is not None:
+        try:
+            _audio.beep(587, 100)  # D5
+        except Exception:
+            pass
+
+def audio_autonomy_on():
+    """Play autonomy enabled sound (sci-fi ascending)."""
+    if _audio is not None:
+        try:
+            _audio.beep(440, 60)   # A4
+            time.sleep(0.07)
+            _audio.beep(554, 60)   # C#5
+            time.sleep(0.07)
+            _audio.beep(659, 80)   # E5
+        except Exception:
+            pass
+
+def audio_autonomy_off():
+    """Play autonomy disabled sound (descending)."""
+    if _audio is not None:
+        try:
+            _audio.beep(659, 60)   # E5
+            time.sleep(0.07)
+            _audio.beep(440, 80)   # A4
+        except Exception:
+            pass
+
+def audio_xbox_connect():
+    """Play Xbox controller connected sound."""
+    if _audio is not None:
+        try:
+            _audio.beep(784, 60)   # G5
+            time.sleep(0.08)
+            _audio.beep(988, 100)  # B5
+        except Exception:
+            pass
+
+def audio_xbox_disconnect():
+    """Play Xbox controller disconnected sound."""
+    if _audio is not None:
+        try:
+            _audio.beep(659, 80)   # E5
+            time.sleep(0.1)
+            _audio.beep(392, 120)  # G4
+        except Exception:
+            pass
+
+def audio_gait_changed(gait_name: str):
+    """Play a distinct confirmation tone for each gait type.
+    
+    Tones are designed to be memorable and distinguishable:
+    - Standing:   Low double-beep (stable, grounded)
+    - Tripod:     Quick triple-pulse (fast, 3-leg rhythm)
+    - Wave:       Rising sweep (flowing motion)
+    - Ripple:     Descending cascade (rippling water)
+    - Stationary: Gentle pulse (subtle, in-place)
+    """
+    if _audio is None:
+        return
+    try:
+        name = gait_name.lower() if gait_name else ""
+        if "standing" in name:
+            # Low double-beep: stable, grounded
+            _audio.beep(262, 80)   # C4
+            time.sleep(0.1)
+            _audio.beep(262, 80)   # C4
+        elif "tripod" in name:
+            # Quick triple-pulse: fast 3-leg rhythm
+            _audio.beep(523, 50)   # C5
+            time.sleep(0.06)
+            _audio.beep(523, 50)   # C5
+            time.sleep(0.06)
+            _audio.beep(659, 70)   # E5
+        elif "wave" in name:
+            # Rising sweep: flowing motion
+            _audio.beep(392, 60)   # G4
+            time.sleep(0.07)
+            _audio.beep(494, 60)   # B4
+            time.sleep(0.07)
+            _audio.beep(587, 80)   # D5
+        elif "ripple" in name:
+            # Descending cascade: rippling water
+            _audio.beep(659, 50)   # E5
+            time.sleep(0.06)
+            _audio.beep(523, 50)   # C5
+            time.sleep(0.06)
+            _audio.beep(440, 50)   # A4
+            time.sleep(0.06)
+            _audio.beep(349, 70)   # F4
+        elif "stationary" in name:
+            # Gentle pulse: subtle, in-place movement
+            _audio.beep(440, 100)  # A4 - single mellow tone
+        else:
+            # Unknown gait: neutral confirmation beep
+            _audio.beep(523, 80)   # C5
+    except Exception:
+        pass
+
+def audio_menu_callback(event: str):
+    """Audio feedback for menu navigation.
+    
+    Called by MarsMenu for navigation sounds:
+    - 'nav': up/down cursor movement (subtle tick)
+    - 'tab': tab change (slightly higher pitch)  
+    - 'adjust': value adjustment (quick blip)
+    - 'select': item selection (confirmation)
+    
+    Sounds are kept short and subtle to not be annoying during rapid navigation.
+    """
+    if _audio is None:
+        return
+    try:
+        if event == 'nav':
+            # Subtle tick for cursor movement - very short, quiet
+            _audio.beep(1200, 15)  # High, short tick
+        elif event == 'tab':
+            # Tab switch - slightly more noticeable
+            _audio.beep(880, 25)   # A5, short
+        elif event == 'adjust':
+            # Value adjustment - quick blip
+            _audio.beep(1000, 20)  # Short blip
+        elif event == 'select':
+            # Selection confirmation - two quick tones
+            _audio.beep(660, 30)   # E5
+            time.sleep(0.04)
+            _audio.beep(880, 40)   # A5
+    except Exception:
+        pass
+
+# Register audio callback with menu now that function is defined
+if _marsMenu is not None:
+    _marsMenu.set_audio_callback(audio_menu_callback)
+
+# --------------------------------------------------------------------------------------------------
+# TTS (Text-to-Speech) Helper Functions - supports espeak-ng or piper, with sox amplification
+# --------------------------------------------------------------------------------------------------
+import io
+
+def _speak_worker_espeak(text: str):
+    """Background worker for espeak-ng TTS.
+    Uses espeak-ng -> sox (amplify) -> pygame mixer for playback.
+    """
+    try:
+        # Pipe espeak through sox for amplification, output WAV to stdout
+        # -v: voice, -s: speed (wpm), -p: pitch (0-99), -a: amplitude
+        espeak = subprocess.Popen(
+            ['espeak-ng', '-v', _ttsVoice, '-s', str(_ttsRate), '-p', str(_ttsPitch), 
+             '-a', '200', '--stdout', text],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL
+        )
+        sox = subprocess.Popen(
+            ['sox', '-t', 'wav', '-', '-t', 'wav', '-', 'gain', str(_ttsGainDb)],
+            stdin=espeak.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL
+        )
+        wav_data, _ = sox.communicate()
+        espeak.wait()
+        
+        _play_wav_data(wav_data)
+    except Exception:
+        pass
+
+def _speak_worker_piper(text: str):
+    """Background worker for Piper neural TTS.
+    Uses piper -> sox (amplify) -> pygame mixer for playback.
+    """
+    try:
+        # Piper reads from stdin and outputs WAV to stdout
+        piper = subprocess.Popen(
+            ['piper', '-m', _ttsPiperModel, '--output-raw'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL
+        )
+        # Sox converts raw PCM (22050Hz, 16-bit, mono) to WAV and amplifies
+        sox = subprocess.Popen(
+            ['sox', '-t', 'raw', '-r', '22050', '-e', 'signed', '-b', '16', '-c', '1', '-',
+             '-t', 'wav', '-', 'gain', str(_ttsGainDb)],
+            stdin=piper.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL
+        )
+        # Send text to piper
+        piper.stdin.write(text.encode('utf-8'))
+        piper.stdin.close()
+        
+        wav_data, _ = sox.communicate()
+        piper.wait()
+        
+        _play_wav_data(wav_data)
+    except Exception:
+        pass
+
+def _play_wav_data(wav_data: bytes):
+    """Play WAV data through pygame mixer."""
+    if wav_data and _audio is not None and PYGAME_AVAILABLE:
+        wav_io = io.BytesIO(wav_data)
+        try:
+            import pygame
+            sound = pygame.mixer.Sound(wav_io)
+            sound.set_volume(1.0)
+            sound.play()
+            # Wait for playback to complete
+            while pygame.mixer.get_busy():
+                time.sleep(0.05)
+        except Exception:
+            pass
+
+def _speak_worker(text: str):
+    """Background worker to run TTS without blocking.
+    Dispatches to the appropriate engine based on config.
+    """
+    if _ttsEngine == "piper":
+        _speak_worker_piper(text)
+    else:
+        _speak_worker_espeak(text)
+
+def speak(text: str, force: bool = False, blocking: bool = False) -> bool:
+    """
+    Speak text using espeak-ng with sox amplification via pygame.
+    
+    Args:
+        text: Text to speak
+        force: If True, bypass cooldown timer
+        blocking: If True, wait for speech to complete; if False, run in background thread
+    
+    Returns:
+        True if speech was initiated, False if skipped (cooldown/disabled)
+    """
+    global _ttsLastSpeak
+    if not _ttsEnabled or not _ttsAvailable:
+        return False
+    if _audio is None:
+        return False  # Need pygame mixer for playback
+    
+    now = time.monotonic()
+    if not force and (now - _ttsLastSpeak) < _ttsCooldownSec:
+        return False  # Anti-spam: too soon since last speech
+    
+    _ttsLastSpeak = now
+    
+    if blocking:
+        _speak_worker(text)
+    else:
+        # Run in background thread to avoid blocking
+        t = threading.Thread(target=_speak_worker, args=(text,), daemon=True)
+        t.start()
+    
+    return True
+
+def speak_battery_low(percent: int):
+    """Announce low battery warning with percentage.
+    
+    Uses pre-cached WAV for known percentages (10, 15, 20, 25),
+    falls back to real-time TTS for other values.
+    """
+    cached_percentages = {10, 15, 20, 25}
+    if percent in cached_percentages and _audio:
+        _audio.play(f'tts_battery_{percent}', priority=True)
+    else:
+        speak(f"Battery low, {percent} percent remaining")
+
+def speak_enabled():
+    """Announce robot enabled (pre-cached)."""
+    if _audio:
+        _audio.play('tts_enabled', priority=True)
+    else:
+        speak("Robot enabled", force=True)
+
+def speak_disabled():
+    """Announce robot disabled (pre-cached)."""
+    if _audio:
+        _audio.play('tts_disabled', priority=True)
+    else:
+        speak("Robot disabled", force=True)
+
+def speak_safety_lockout():
+    """Announce safety lockout - urgent (pre-cached)."""
+    if _audio:
+        _audio.play('tts_safety_lockout', priority=True)
+    else:
+        speak("Safety lockout activated", force=True)
+
+def speak_stand():
+    """Announce stand posture (pre-cached)."""
+    if _audio:
+        _audio.play('tts_standing', priority=True)
+    else:
+        speak("Standing")
+
+def speak_tuck():
+    """Announce tuck posture (pre-cached)."""
+    if _audio:
+        _audio.play('tts_tucking', priority=True)
+    else:
+        speak("Tucking")
+
+def speak_autonomy_on():
+    """Announce autonomy mode enabled (pre-cached)."""
+    if _audio:
+        _audio.play('tts_autonomy_on', priority=True)
+    else:
+        speak("Autonomy mode on")
+
+def speak_autonomy_off():
+    """Announce autonomy mode off (pre-cached)."""
+    if _audio:
+        _audio.play('tts_autonomy_off', priority=True)
+    else:
+        speak("Autonomy mode off")
+
+def speak_obstacle():
+    """Announce obstacle detected (pre-cached)."""
+    if _audio:
+        _audio.play('tts_obstacle', priority=True)
+    else:
+        speak("Obstacle detected")
+
+def speak_cliff():
+    """Announce cliff detected - emergency (pre-cached)."""
+    if _audio:
+        _audio.play('tts_cliff', priority=True)
+    else:
+        speak("Cliff detected", force=True)
+
+def speak_startup():
+    """Announce system startup (pre-cached)."""
+    if _audio:
+        _audio.play('tts_startup', priority=True)
+    else:
+        speak("Mars online", force=True)
+
+def speak_shutdown():
+    """Announce system shutdown (pre-cached)."""
+    if _audio:
+        _audio.play('tts_shutdown', priority=True)
+    else:
+        speak("Mars shutting down", force=True)
 
 # --------------------------------------------------------------------------------------------------
 # Command helper: centralizes Teensy command emission (newline termination + throttling/dedup)
@@ -5101,6 +5626,7 @@ def send_cmd(cmd, force: bool = False, throttle_ms: float = None):
     elif cmd_b == b'DISABLE':
         _enabledLocal = False
         audio_disable()  # Play disable sound
+        speak_disabled()  # Voice announcement
     if _debugSendAll or (_verbose and cmd_b in _gaitDebugCmds):
         print(f"[send_cmd] SENT cmd='{cmd_b}' force={force} throttle_ms={throttle_ms} t={now:.3f}", end="\r\n")
     return True
@@ -5138,6 +5664,7 @@ def ensure_enabled() -> bool:
     if sent:
         _enabledLocal = new_enabled
         audio_enable()  # Play enable sound
+        speak_enabled()  # Voice announcement
     return sent
 
 
@@ -5176,6 +5703,19 @@ def apply_posture(name, auto_disable_s: float = None, require_enable: bool = Tru
     _autoDisableAt = new_disable_at
     _autoDisableReason = new_disable_reason
     _autoDisableGen = new_disable_gen
+    
+    # Play posture confirmation sound and speech
+    if success:
+        posture_name = name.decode('ascii').upper() if isinstance(name, bytes) else str(name).upper()
+        if posture_name == 'STAND':
+            audio_stand()
+            speak_stand()
+        elif posture_name == 'TUCK':
+            audio_tuck()
+            speak_tuck()
+        elif posture_name == 'HOME':
+            audio_home()
+    
     return success
 
 
@@ -5428,7 +5968,7 @@ def phase_touch_input(menu, ctrl):
                 time.sleep(0.05)
                 send_cmd(b'DISABLE', force=True)
             if _verbose:
-                print("\nTouchscreen E-STOP: gait stopped, robot disabled", end="\r\n")
+                print("\r\nTouchscreen E-STOP: gait stopped, robot disabled", end="\r\n")
             ctrl.forceDisplayUpdate = True
             return True
         
@@ -5502,18 +6042,18 @@ def phase_keyboard_input(ctrl):
             _marsMenu.hide()
             ctrl.forceDisplayUpdate = True
             if _verbose:
-                print("\nMARS menu closed (ESC)", end="\r\n")
+                print("\r\nMARS menu closed (ESC)", end="\r\n")
             return True
 
     if key == 27:  # ESC key with no menu open: exit application
         if _verbose:
-            print("\nESC key pressed, exiting loop", end="\r\n")
+            print("\r\nESC key pressed, exiting loop", end="\r\n")
         return False
     
     elif key in (ord('t'), ord('T')):  # Test gait
         if _safety_state.get("lockout", False):
             if _verbose:
-                print("\nTest gait blocked: firmware safety lockout is active.", end="\r\n")
+                print("\r\nTest gait blocked: firmware safety lockout is active.", end="\r\n")
         else:
             enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
                            else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
@@ -5521,12 +6061,12 @@ def phase_keyboard_input(ctrl):
                 ensure_enabled()
             send_cmd(b'T', force=True)
             if _verbose:
-                print("\nTest gait command sent to Teensy", end="\r\n")
+                print("\r\nTest gait command sent to Teensy", end="\r\n")
     
     elif key in (ord('k'), ord('K')):  # Tuck posture
         if _safety_state.get("lockout", False):
             if _verbose:
-                print("\nTUCK blocked: firmware safety lockout is active.", end="\r\n")
+                print("\r\nTUCK blocked: firmware safety lockout is active.", end="\r\n")
         else:
             enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
                            else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
@@ -5539,7 +6079,7 @@ def phase_keyboard_input(ctrl):
     elif key in (ord('s'), ord('S')):  # Stand posture (gait-based for leveling)
         if _safety_state.get("lockout", False):
             if _verbose:
-                print("\nSTAND blocked: firmware safety lockout is active.", end="\r\n")
+                print("\r\nSTAND blocked: firmware safety lockout is active.", end="\r\n")
         else:
             enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
                            else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
@@ -5566,7 +6106,7 @@ def phase_keyboard_input(ctrl):
                 # Skip menu, go to EYES instead
                 next_mode = DisplayMode.EYES
                 if _verbose:
-                    print("\nMenu blocked: disable robot first", end="\r\n")
+                    print("\r\nMenu blocked: disable robot first", end="\r\n")
         
         # Apply mode change
         _displayMode = next_mode
@@ -5580,20 +6120,20 @@ def phase_keyboard_input(ctrl):
         ctrl.forceDisplayUpdate = True
         if _verbose:
             mode_names = ["EYES", "ENGINEERING", "MENU"]
-            print(f"\nDisplay mode: {mode_names[_displayMode]} (keyboard 'n')", end="\r\n")
+            print(f"\r\nDisplay mode: {mode_names[_displayMode]} (keyboard 'n')", end="\r\n")
     
     elif key in (ord('m'), ord('M')):  # Mirror toggle
         _mirrorDisplay = not _mirrorDisplay
         ctrl.mirror = _mirrorDisplay
         if _verbose:
-            print("\nMirror display mode ON" if _mirrorDisplay else "\nMirror display mode OFF", end="\r\n")
+            print("\r\nMirror display mode ON" if _mirrorDisplay else "\r\nMirror display mode OFF", end="\r\n")
         _forceDisplayUpdate = True
         ctrl.forceDisplayUpdate = True
     
     elif key in (ord('v'), ord('V')):  # Verbose toggle
         _verbose = not _verbose
         ctrl.verbose = _verbose
-        print("\nverbose mode ON" if _verbose else "\nverbose mode OFF", end="\r\n")
+        print("\r\nverbose mode ON" if _verbose else "\r\nverbose mode OFF", end="\r\n")
     
     elif key in (ord('d'), ord('D')):  # Telemetry debug toggle
         _debugTelemetry = not _debugTelemetry
@@ -5621,7 +6161,7 @@ def phase_keyboard_input(ctrl):
     elif key in (ord('w'), ord('W')):  # Start gait (walk)
         if _safety_state.get("lockout", False):
             if _verbose:
-                print("\nGait start blocked: firmware safety lockout is active.", end="\r\n")
+                print("\r\nGait start blocked: firmware safety lockout is active.", end="\r\n")
         elif not _gaitActive:
             enabled_now = (ctrl.system_telem.robot_enabled if (getattr(ctrl, 'system_telem', None) is not None and ctrl.system_telem.valid)
                            else ((_state[IDX_ROBOT_ENABLED] == 1.0) if (len(_state) > IDX_ROBOT_ENABLED) else False))
@@ -5643,9 +6183,9 @@ def phase_keyboard_input(ctrl):
             ctrl._gaitStrafeInput = 0.0
             ctrl._updateGaitHeading()
             if _verbose:
-                print("\nGait engine STARTED (tripod walk)", end="\r\n")
+                print("\r\nGait engine STARTED (tripod walk)", end="\r\n")
         elif _verbose:
-            print("\nGait already active", end="\r\n")
+            print("\r\nGait already active", end="\r\n")
     
     elif key in (ord('h'), ord('H')):  # Stop gait (halt)
         if _gaitActive and _gaitEngine is not None:
@@ -5655,9 +6195,9 @@ def phase_keyboard_input(ctrl):
             _autoDisableAt = time.time() + _autoDisableS
             ctrl.autoDisableAt = _autoDisableAt
             if _verbose:
-                print("\nGait engine STOPPED (halt)", end="\r\n")
+                print("\r\nGait engine STOPPED (halt)", end="\r\n")
         elif _verbose:
-            print("\nNo gait active to stop", end="\r\n")
+            print("\r\nNo gait active to stop", end="\r\n")
     
     elif key in (ord('p'), ord('P')):  # Stationary pattern
         if not _gaitActive:
@@ -5670,9 +6210,9 @@ def phase_keyboard_input(ctrl):
             _gaitEngine.start()
             _gaitActive = True
             if _verbose:
-                print("\nStationary pattern STARTED", end="\r\n")
+                print("\r\nStationary pattern STARTED", end="\r\n")
         elif _verbose:
-            print("\nGait already active (press 'h' to stop first)", end="\r\n")
+            print("\r\nGait already active (press 'h' to stop first)", end="\r\n")
 
     elif key in (ord('u'), ord('U')):  # Pounce (jump attack)
         start_pounce_move(source="kbd")
@@ -5688,17 +6228,71 @@ def phase_keyboard_input(ctrl):
             time.sleep(0.05)
             send_cmd(b'DISABLE', force=True)
         if _verbose:
-            print("\n'q' key pressed: idle + LEG ALL DISABLE + DISABLE sequence sent", end="\r\n")
+            print("\r\n'q' key pressed: idle + LEG ALL DISABLE + DISABLE sequence sent", end="\r\n")
     
     elif key in (ord('x'), ord('X')):  # Exit
         if _verbose:
-            print("\n'x' key pressed, exiting loop", end="\r\n")
+            print("\r\n'x' key pressed, exiting loop", end="\r\n")
         return False
     
     elif key in (ord('a'), ord('A')):  # Toggle autonomy mode
         _toggle_autonomy(verbose=_verbose)
     
+    elif key in (ord('?'),):  # Help - show keyboard commands
+        print_keyboard_help()
+    
     return True
+
+
+def print_keyboard_help():
+    """Print keyboard command help to console."""
+    lines = [
+        "╔═══════════════════════════════════════════════════════════════════════╗",
+        "║                    MARS Controller Keyboard Commands                  ║",
+        "╠═══════════════════════════════════════════════════════════════════════╣",
+        "║  MOTION                                                               ║",
+        "║    w/W    Start tripod walk gait                                      ║",
+        "║    h/H    Halt gait (stop walking)                                    ║",
+        "║    p/P    Start stationary pattern (march in place)                   ║",
+        "║    s/S    Stand posture (with body leveling)                          ║",
+        "║    k/K    Tuck posture (crouch down)                                  ║",
+        "║    t/T    Test gait (firmware tripod test)                            ║",
+        "║    u/U    Pounce move (jump attack)                                   ║",
+        "║                                                                       ║",
+        "║  AUTONOMY                                                             ║",
+        "║    a/A    Toggle autonomy mode on/off                                 ║",
+        "║                                                                       ║",
+        "║  DISPLAY                                                              ║",
+        "║    n/N    Cycle display mode (Eyes -> Engineering -> Menu)            ║",
+        "║    m/M    Toggle mirror display window                                ║",
+        "║    e/E    Cycle eye shape                                             ║",
+        "║                                                                       ║",
+        "║  DEBUG                                                                ║",
+        "║    v/V    Toggle verbose output                                       ║",
+        "║    d/D    Toggle telemetry debug                                      ║",
+        "║    g/G    Toggle send_cmd debug (all commands)                        ║",
+        "║                                                                       ║",
+        "║  SYSTEM                                                               ║",
+        "║    q/Q    Emergency stop (idle + disable all)                         ║",
+        "║    x/X    Exit controller                                             ║",
+        "║    ESC    Exit controller (or close menu if open)                     ║",
+        "║    ?      Show this help                                              ║",
+        "║                                                                       ║",
+        "║  MENU NAVIGATION (when menu visible)                                  ║",
+        "║    up/k   Navigate up                                                 ║",
+        "║    dn/j   Navigate down                                               ║",
+        "║    lt/h   Previous tab                                                ║",
+        "║    rt/l   Next tab                                                    ║",
+        "║    a/A    Adjust value left / previous option                         ║",
+        "║    d/D    Adjust value right / next option                            ║",
+        "║    Enter  Select / activate item                                      ║",
+        "║    ESC    Close menu                                                  ║",
+        "╚══════════════════════════════════════════════════════════════════════╝",
+    ]
+    import sys
+    for line in lines:
+        sys.stdout.write(line + "\r\n")
+    sys.stdout.flush()
 
 
 def _toggle_autonomy(verbose: bool = True) -> None:
@@ -5715,11 +6309,15 @@ def _toggle_autonomy(verbose: bool = True) -> None:
         # Initialize arbiter if not already done
         if _behaviorArbiter is None:
             _behaviorArbiter = _init_behavior_arbiter()
+        audio_autonomy_on()
+        speak_autonomy_on()
         if verbose:
-            print(f"\nAUTONOMY MODE ENABLED ({_behaviorArbiter.behavior_count} behaviors)", end="\r\n")
+            print(f"\r\nAUTONOMY MODE ENABLED ({_behaviorArbiter.behavior_count} behaviors)", end="\r\n")
     else:
+        audio_autonomy_off()
+        speak_autonomy_off()
         if verbose:
-            print("\nAUTONOMY MODE DISABLED", end="\r\n")
+            print("\r\nAUTONOMY MODE DISABLED", end="\r\n")
 
 
 def _disable_autonomy_if_active(verbose: bool = True) -> None:
@@ -5772,6 +6370,15 @@ def _init_behavior_arbiter():
             enabled=True
         ))
     
+    # Wall following (priority 40: above Patrol, below safety behaviors)
+    if _autonomyWallFollow:
+        arbiter.add_behavior(WallFollowing(
+            wall_distance_mm=_autonomyWallDistMm,
+            wall_side=_autonomyWallSide,
+            priority=40,
+            enabled=True
+        ))
+    
     if _autonomyPatrol:
         arbiter.add_behavior(Patrol(
             turn_interval_s=_autonomyTurnIntervalS,
@@ -5796,7 +6403,12 @@ def _gather_sensor_state(ctrl):
         'servo_positions': [],
         'servo_targets': [],
         'gait_active': _gaitActive,
+        'touch_active': False,
     }
+    
+    # Touch detection for touch-stop patrol
+    if _marsMenu is not None:
+        state['touch_active'] = _marsMenu.touched()
     
     # ToF data
     if _tofThread is not None and _tofThread.connected:
@@ -5849,7 +6461,7 @@ def phase_autonomy(ctrl):
     
     # Debug: show what autonomy is doing (only when action != CONTINUE)
     if _verbose and action_req.action != Action.CONTINUE:
-        print(f"\n[Autonomy] {action_req.action.name}: {action_req.reason}", end="\r\n")
+        print(f"\r\n[Autonomy] {action_req.action.name}: {action_req.reason}", end="\r\n")
     
     # Apply action
     if action_req.action == Action.EMERGENCY_STOP:
@@ -5859,8 +6471,11 @@ def phase_autonomy(ctrl):
         _gaitActive = False
         _autonomyEnabled = False
         send_cmd(b'DISABLE', force=True)
+        # Announce cliff if reason mentions cliff/edge/drop
+        if action_req.reason and ('cliff' in action_req.reason.lower() or 'edge' in action_req.reason.lower() or 'drop' in action_req.reason.lower()):
+            speak_cliff()
         if _verbose:
-            print(f"\n!!! AUTONOMY E-STOP: {action_req.reason}", end="\r\n")
+            print(f"\r\n!!! AUTONOMY E-STOP: {action_req.reason}", end="\r\n")
     
     elif action_req.action == Action.STOP:
         # Stop gait but remain enabled
@@ -5868,8 +6483,11 @@ def phase_autonomy(ctrl):
             _gaitEngine.stop()
             _gaitActive = False
             send_cmd(b'STAND', force=True)
+            # Announce obstacle if reason mentions obstacle/blocked
+            if action_req.reason and ('blocked' in action_req.reason.lower() or 'obstacle' in action_req.reason.lower()):
+                speak_obstacle()
         if _verbose and action_req.reason:
-            print(f"\nAutonomy STOP: {action_req.reason}", end="\r\n")
+            print(f"\r\nAutonomy STOP: {action_req.reason}", end="\r\n")
     
     elif action_req.action == Action.BACK_UP:
         # Set gait heading to reverse
@@ -5927,7 +6545,7 @@ def phase_autonomy(ctrl):
             _gaitEngine.start()
             _gaitActive = True
             if _verbose:
-                print("\n[Autonomy] Started gait engine (WALK_FORWARD)", end="\r\n")
+                print("\r\n[Autonomy] Started gait engine (WALK_FORWARD)", end="\r\n")
         
         # Set forward direction and speed (even if gait was already running)
         if _gaitActive and _gaitEngine is not None:
@@ -5942,7 +6560,7 @@ def phase_autonomy(ctrl):
             if _gaitEngine is not None and hasattr(_gaitEngine, 'params'):
                 _gaitEngine.params.lift_mm += extra_lift
                 if _verbose:
-                    print(f"\nAutonomy: Lifting leg {action_req.data.get('leg')} +{extra_lift}mm", end="\r\n")
+                    print(f"\r\nAutonomy: Lifting leg {action_req.data.get('leg')} +{extra_lift}mm", end="\r\n")
     
     # Update autonomy menu status
     if _marsMenu is not None:
@@ -6015,8 +6633,10 @@ def phase_gait_tick(ctrl, gaitEngine, gaitActive):
                     new_name = GAIT_NAMES[new_idx]
                 except ValueError:
                     new_name = "Unknown"
+                # Play gait-specific confirmation tone
+                audio_gait_changed(new_name)
                 if ctrl.verbose:
-                    print(f"\nGait transition complete: now running {new_name}", end="\r\n")
+                    print(f"\r\nGait transition complete: now running {new_name}", end="\r\n")
             _gaitTransition.reset()
         
         # Send blended FEET command
@@ -6276,7 +6896,7 @@ def phase_auto_disable(ctrl):
             if ctrl.teensy is not None and enabled_now:
                 send_cmd(b'DISABLE', force=True)
                 if ctrl.verbose:
-                    print(f"\nAuto DISABLE executed (reason={reason})", end="\r\n")
+                    print(f"\r\nAuto DISABLE executed (reason={reason})", end="\r\n")
         # Clear any pending auto-disable (stale or executed)
         ctrl.autoDisableAt = None
         ctrl.autoDisableReason = None
@@ -6337,7 +6957,7 @@ def phase_auto_disable(ctrl):
     if _lowBatteryTriggered and _lowBatteryFilteredVoltage >= _lowBatteryRecoveryVolt:
         _lowBatteryTriggered = False
         if ctrl.verbose:
-            print(f"\n[LOW BATTERY] Voltage recovered to {_lowBatteryFilteredVoltage:.2f}V - protection cleared", end="\r\n")
+            print(f"\r\n[LOW BATTERY] Voltage recovered to {_lowBatteryFilteredVoltage:.2f}V - protection cleared", end="\r\n")
     
     # Check for critical low battery
     if (_lowBatteryFilteredVoltage > 0 and 
@@ -6356,8 +6976,11 @@ def phase_auto_disable(ctrl):
             
             # Play low battery warning sound
             audio_low_battery_warning()
+            # Voice announcement with percentage
+            battery_percent = int(max(0, min(100, ((_lowBatteryFilteredVoltage - 9.0) / 3.6) * 100)))  # 9V=0%, 12.6V=100%
+            speak_battery_low(battery_percent)
             
-            print(f"\n[LOW BATTERY] Critical voltage {_lowBatteryFilteredVoltage:.2f}V < {_lowBatteryVoltCritical:.1f}V", end="\r\n")
+            print(f"\r\n[LOW BATTERY] Critical voltage {_lowBatteryFilteredVoltage:.2f}V < {_lowBatteryVoltCritical:.1f}V", end="\r\n")
             print("[LOW BATTERY] Executing graceful shutdown: TUCK → DISABLE", end="\r\n")
             
             # Stop any active gait first
@@ -6606,7 +7229,7 @@ def _sigterm_handler(signum, frame):
     """Handle SIGTERM for graceful shutdown."""
     global _run
     _run = False
-    print("\n[CTRL] SIGTERM received, shutting down...", end="\r\n")
+    print("\r\n[CTRL] SIGTERM received, shutting down...", end="\r\n")
 
 signal.signal(signal.SIGTERM, _sigterm_handler)
 
@@ -6680,6 +7303,9 @@ if _audio is not None:
         _audio.beep(659, 150)  # E5
     except Exception:
         pass
+
+# TTS startup announcement
+speak_startup()
 
 if _startupDelayS > 0:
     time.sleep(_startupDelayS)  # Configurable pause to see startup messages
@@ -6794,6 +7420,11 @@ if _audio is not None:
         time.sleep(0.2)
     except Exception:
         pass
+
+# TTS shutdown announcement
+speak_shutdown()
+time.sleep(2.0)  # Wait for TTS to finish before cleanup
+
 # Restore terminal from curses FIRST (endwin() clears screen)
 cleanup_keyboard()
 # NOW print debug info so it persists after script exits

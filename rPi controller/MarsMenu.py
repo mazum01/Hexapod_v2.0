@@ -279,6 +279,10 @@ class MarsMenu:
         # Callbacks will be set by controller
         self._callbacks = {}
         
+        # Audio callback for menu navigation sounds (set by controller)
+        # Signature: audio_callback(event: str) where event is 'nav', 'tab', 'adjust', 'select'
+        self._audio_callback = None
+        
         # Build default items (values will be updated by controller)
         self._build_menu_items()
         
@@ -564,6 +568,10 @@ class MarsMenu:
             MenuItem("Obstacle Avoid", "option", value=1, options=["Off", "On"]),
             MenuItem("Cliff Detect", "option", value=1, options=["Off", "On"]),
             MenuItem("Caught Foot", "option", value=1, options=["Off", "On"]),
+            MenuItem("Wall Follow", "option", value=0, options=["Off", "On"]),
+            MenuItem("Wall Side", "option", value=0, options=["Left", "Right"]),
+            MenuItem("Wall Dist", "value", value=200, min_val=100, max_val=400, step=25,
+                     format_func=lambda v: f"{v}mm"),
             MenuItem("Patrol", "option", value=0, options=["Off", "On"]),
             # Obstacle avoidance thresholds
             MenuItem("Stop Dist", "value", value=150, min_val=50, max_val=500, step=25,
@@ -683,6 +691,26 @@ class MarsMenu:
         self._needs_render = True
         return self._visible
     
+    def set_audio_callback(self, callback):
+        """Set callback for menu audio feedback.
+        
+        Args:
+            callback: Function(event: str) where event is one of:
+                     'nav' - up/down navigation
+                     'tab' - tab change
+                     'adjust' - value adjustment
+                     'select' - item selection
+        """
+        self._audio_callback = callback
+    
+    def _play_audio(self, event: str):
+        """Play audio feedback for menu event."""
+        if self._audio_callback is not None:
+            try:
+                self._audio_callback(event)
+            except Exception:
+                pass  # Audio errors shouldn't break menu
+    
     # === Navigation ===
     
     def nav_up(self):
@@ -694,6 +722,7 @@ class MarsMenu:
             self._selected_item = (self._selected_item - 1) % len(items)
             self._ensure_visible()
             self._needs_render = True
+            self._play_audio('nav')
     
     def nav_down(self):
         """Move selection down."""
@@ -704,6 +733,7 @@ class MarsMenu:
             self._selected_item = (self._selected_item + 1) % len(items)
             self._ensure_visible()
             self._needs_render = True
+            self._play_audio('nav')
     
     def nav_left(self):
         """Adjust value left or switch to previous tab."""
@@ -715,6 +745,7 @@ class MarsMenu:
             if item.item_type in ("option", "value"):
                 item.adjust(-1)
                 self._needs_render = True
+                self._play_audio('adjust')
             else:
                 self.nav_tab_left()
     
@@ -728,6 +759,7 @@ class MarsMenu:
             if item.item_type in ("option", "value"):
                 item.adjust(1)
                 self._needs_render = True
+                self._play_audio('adjust')
             else:
                 self.nav_tab_right()
     
@@ -748,6 +780,7 @@ class MarsMenu:
         self._selected_item = 0
         self._scroll_offset = 0
         self._needs_render = True
+        self._play_audio('tab')
     
     def nav_tab_right(self):
         """Switch to next tab."""
@@ -766,6 +799,7 @@ class MarsMenu:
         self._selected_item = 0
         self._scroll_offset = 0
         self._needs_render = True
+        self._play_audio('tab')
     
     def select(self):
         """Select/activate the current item."""
@@ -775,11 +809,13 @@ class MarsMenu:
         if items and 0 <= self._selected_item < len(items):
             item = items[self._selected_item]
             if item.item_type == "action":
+                self._play_audio('select')
                 return item.select()
             elif item.item_type == "option":
                 # Cycle to next option on select
                 item.adjust(1)
                 self._needs_render = True
+                self._play_audio('select')
                 return True
         return False
     

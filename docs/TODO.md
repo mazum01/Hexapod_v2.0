@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2026-01-03 (Audio Integration)
+Last updated: 2026-01-06 (Curses print fixes, async shutdown fixes v0.10.17)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -104,16 +104,16 @@ Sensors → Behaviors → Arbitration → Gait Commands
 - [x] Configurable cliff_threshold_mm (default 100 = 10cm drop) — **DONE v0.7.39**
 
 #### A4. Wall Following Behavior
-- [ ] Track ToF edge readings (left or right side zones)
-- [ ] Maintain configurable wall_distance_mm (default 200)
-- [ ] PD controller to steer parallel to wall
-- [ ] Enable via menu or command
+- [x] Track ToF edge readings (left or right side zones) — **DONE v0.10.14**
+- [x] Maintain configurable wall_distance_mm (default 200) — **DONE v0.10.14**
+- [x] PD controller to steer parallel to wall — **DONE v0.10.14**
+- [x] Enable via menu or command — **DONE v0.10.15**
 
 #### A5. Patrol Mode
 - [x] Simple timed forward walk with random turns — **DONE v0.7.39**
 - [x] Configurable patrol_duration_s, turn_interval_s — **DONE v0.7.39**
 - [x] Respects obstacle avoidance (higher priority) — **DONE v0.7.39**
-- [ ] Stop on touch screen tap (E-stop already implemented)
+- [x] Stop on touch screen tap (E-stop already implemented) — **DONE v0.10.14**
 
 #### A6. Behavior Menu Tab
 - [x] Add AUTONOMY tab to MarsMenu — **DONE v0.7.41**
@@ -281,35 +281,43 @@ Pi 5 USB → Sabrent DAC → 3.5mm → PAM8403 L/R inputs → Speakers
 - [x] Startup chime (on controller boot)
 - [x] Shutdown sound (on graceful exit)
 - [x] Low battery warning (3-beep alert when < threshold)
-- [ ] Safety lockout alert
+- [x] Safety lockout alert (urgent 3-tone warning)
 - [x] Teensy connect/disconnect tones
 
 #### AU3. Gait & Mode Sounds ✅
 - [x] Gait start/stop chirps
-- [ ] Gait type change confirmation (different tone per gait)
-- [ ] Autonomy mode toggle sound
-- [ ] Stand/Tuck confirmation
+- [x] Gait type change confirmation (different tone per gait) — **DONE v0.10.7**
+- [x] Autonomy mode toggle sound (ascending/descending tones)
+- [x] Stand/Tuck/Home confirmation sounds
 
 #### AU4. Controller Feedback ✅
-- [ ] Xbox controller connect/disconnect
+- [x] Xbox controller connect/disconnect (rising/falling tones)
 - [x] Button press click (all ABXY/LB/RB buttons)
-- [ ] Menu navigation clicks (optional)
+- [x] Menu navigation clicks (nav/tab/adjust/select) — **DONE v0.10.8**
 
-#### AU5. Voice Announcements (TTS)
-- [ ] Integrate pyttsx3 or espeak for text-to-speech
-  - "Battery low, twenty percent remaining"
-  - "Obstacle detected"
-  - "Entering patrol mode"
-- [ ] Configurable: tts_enabled, tts_voice, tts_rate
-- [ ] Limit announcement frequency (no spam)
+#### AU5. Voice Announcements (TTS) ✅
+- [x] Integrate pyttsx3 (espeak-ng backend) for text-to-speech
+  - [x] "Mars online" (startup)
+  - [x] "Mars shutting down" (shutdown)
+  - [x] "Robot enabled" / "Robot disabled"
+  - [x] "Standing" / "Tucking" (posture confirmations)
+  - [x] "Safety lockout activated"
+  - [x] "Autonomy mode on" / "Autonomy mode off"
+  - [x] "Battery low, X percent remaining" (hooked to low battery event)
+  - [x] "Obstacle detected" (hooked to autonomy STOP)
+  - [x] "Cliff detected" (hooked to autonomy E-STOP)
+- [x] Configurable: [tts] enabled, rate, volume, voice, cooldown_sec
+- [x] Limit announcement frequency (cooldown_sec anti-spam)
+- [x] Piper neural TTS integration (engine=piper|espeak) — **DONE v0.10.9**
+- [x] Pre-cached TTS WAV files for instant playback (15 phrases, generate_tts_phrases.py) — **DONE v0.10.10**
 
-#### AU6. Sound Assets
-- [ ] Create/source royalty-free sound effects
-  - Robotic beeps/chirps for events
+#### AU6. Sound Assets ✅
+- [x] Create/source royalty-free sound effects — **DONE v0.10.8**
+  - Robotic beeps/chirps for events (generate_sounds.py)
   - Warning tones (escalating urgency)
   - Confirmation clicks
-- [ ] Store in `assets/sounds/` directory
-- [ ] Keep files small (8-bit, 22kHz mono OK for robot sounds)
+- [x] Store in `assets/sounds/` directory (22 WAV files generated)
+- [x] Keep files small (16-bit, 44.1kHz mono)
 
 ---
 

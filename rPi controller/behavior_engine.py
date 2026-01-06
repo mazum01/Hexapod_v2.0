@@ -309,7 +309,7 @@ class BehaviorArbiter:
                     
             except Exception as e:
                 # Log error but don't crash - behavior failed gracefully
-                print(f"Behavior '{behavior.name}' error: {e}")
+                print(f"Behavior '{behavior.name}' error: {e}", end="\r\n")
                 continue
         
         # Update active states
