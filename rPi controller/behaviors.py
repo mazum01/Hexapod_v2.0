@@ -8,6 +8,9 @@ Change log:
   2025-12-27: Initial creation
               - ObstacleAvoidance: ToF-based obstacle detection and avoidance
               - CaughtFootRecovery: Detect and recover from snagged feet
+  2026-01-05: v0.10.14 b268
+              - WallFollowing: PD control to maintain target distance from wall
+              - Patrol touch-stop: Stop patrol gracefully on screen tap
 """
 
 from dataclasses import dataclass
@@ -491,6 +494,13 @@ class Patrol(Behavior):
         
         current_time = time.monotonic()
         
+        # Touch-stop: stop patrol gracefully on screen tap
+        if sensor_state.get('touch_active', False):
+            return True, ActionRequest(
+                action=Action.STOP,
+                reason="Patrol: Touch-stop activated"
+            )
+        
         # Check patrol duration
         if self.patrol_duration_s > 0:
             elapsed = current_time - self._patrol_start
@@ -534,6 +544,157 @@ class Patrol(Behavior):
                 intensity=0.7,
                 reason="Patrol: walking forward"
             )
+
+
+# =============================================================================
+# Wall Following Behavior
+# =============================================================================
+
+class WallFollowing(Behavior):
+    """Follow a wall at a set distance using PD control.
+    
+    Tracks left or right ToF zone readings and steers to maintain
+    a target distance from the wall. Uses proportional-derivative
+    control for smooth steering.
+    
+    Priority: 40 (above Patrol, below safety behaviors)
+    """
+    
+    def __init__(self,
+                 wall_distance_mm: int = 200,
+                 wall_side: str = 'left',
+                 kp: float = 0.003,
+                 kd: float = 0.001,
+                 max_intensity: float = 0.8,
+                 min_wall_detect_mm: int = 400,
+                 priority: int = 40,
+                 enabled: bool = False):
+        """Initialize wall following behavior.
+        
+        Args:
+            wall_distance_mm: Target distance from wall (default 200mm)
+            wall_side: Which side to follow ('left' or 'right')
+            kp: Proportional gain for steering
+            kd: Derivative gain for steering damping
+            max_intensity: Maximum steering intensity (0-1)
+            min_wall_detect_mm: Max distance to consider wall present
+            priority: Behavior priority
+            enabled: Initial enabled state
+        """
+        super().__init__("WallFollow", priority, enabled)
+        self.wall_distance_mm = wall_distance_mm
+        self.wall_side = wall_side
+        self.kp = kp
+        self.kd = kd
+        self.max_intensity = max_intensity
+        self.min_wall_detect_mm = min_wall_detect_mm
+        
+        self._last_error: float = 0.0
+        self._last_time: float = 0.0
+        self._wall_acquired: bool = False
+    
+    def on_activate(self) -> None:
+        """Reset PD state on activation."""
+        self._last_error = 0.0
+        self._last_time = time.monotonic()
+        self._wall_acquired = False
+    
+    def on_deactivate(self) -> None:
+        """Clear state on deactivation."""
+        self._wall_acquired = False
+    
+    def compute(self, sensor_state: Dict[str, Any]) -> Tuple[bool, ActionRequest]:
+        """Follow wall using PD control.
+        
+        Args:
+            sensor_state: Sensor readings including tof_distances, tof_statuses
+            
+        Returns:
+            (is_active, ActionRequest) - active when wall is detected
+        """
+        # Require ToF connection
+        if not sensor_state.get('tof_connected', False):
+            return False, ActionRequest(
+                action=Action.CONTINUE,
+                reason="WallFollow: No ToF data"
+            )
+        
+        # Parse ToF zones
+        distances = sensor_state.get('tof_distances', [])
+        statuses = sensor_state.get('tof_statuses', [])
+        zones = parse_tof_zones(distances, statuses)
+        
+        # Get wall distance based on side
+        if self.wall_side == 'left':
+            wall_dist = zones.left_min
+        else:
+            wall_dist = zones.right_min
+        
+        # Check if wall is present (within detection range)
+        if wall_dist >= self.min_wall_detect_mm or wall_dist <= 0:
+            self._wall_acquired = False
+            return False, ActionRequest(
+                action=Action.CONTINUE,
+                reason=f"WallFollow: No wall on {self.wall_side} (dist={wall_dist})"
+            )
+        
+        self._wall_acquired = True
+        
+        # PD control
+        current_time = time.monotonic()
+        dt = current_time - self._last_time if self._last_time > 0 else 0.02
+        dt = max(dt, 0.01)  # Clamp minimum dt
+        
+        error = self.wall_distance_mm - wall_dist  # positive = too close
+        d_error = (error - self._last_error) / dt if dt > 0 else 0.0
+        
+        # PD output
+        output = self.kp * error + self.kd * d_error
+        
+        # Store for next iteration
+        self._last_error = error
+        self._last_time = current_time
+        
+        # Clamp and determine action
+        intensity = min(abs(output), self.max_intensity)
+        
+        # If error magnitude is small enough, just walk forward
+        if abs(error) < 20:  # Within 20mm of target
+            return True, ActionRequest(
+                action=Action.WALK_FORWARD,
+                intensity=0.6,
+                reason=f"WallFollow: On target ({wall_dist}mm from {self.wall_side} wall)"
+            )
+        
+        # Determine turn direction based on wall side and error sign
+        # Following left wall:
+        #   - Too close (error>0): turn right (away from wall)
+        #   - Too far (error<0): turn left (toward wall)
+        # Following right wall:
+        #   - Too close (error>0): turn left (away from wall)
+        #   - Too far (error<0): turn right (toward wall)
+        
+        if self.wall_side == 'left':
+            if error > 0:  # Too close to left wall
+                action = Action.TURN_RIGHT
+                direction = "away"
+            else:  # Too far from left wall
+                action = Action.TURN_LEFT
+                direction = "toward"
+        else:  # right wall
+            if error > 0:  # Too close to right wall
+                action = Action.TURN_LEFT
+                direction = "away"
+            else:  # Too far from right wall
+                action = Action.TURN_RIGHT
+                direction = "toward"
+        
+        return True, ActionRequest(
+            action=action,
+            intensity=intensity,
+            reason=f"WallFollow: {direction} {self.wall_side} wall (err={error:.0f}mm)",
+            data={'wall_dist': wall_dist, 'error': error, 'pd_output': output}
+        )
 
 
 # =============================================================================
@@ -661,5 +822,72 @@ if __name__ == "__main__":
     print(f"  After timeout (recovery triggered): {arbiter.active_behavior_name} -> {action.action.name}")
     if action.data:
         print(f"    Data: {action.data}")
+    
+    # Test WallFollowing behavior
+    print("\n--- Testing WallFollowing behavior ---")
+    wall_follow = WallFollowing(wall_distance_mm=200, wall_side='left', priority=40, enabled=True)
+    
+    # Build a grid with wall on left side
+    def make_wall_grid(left_dist=150, right_dist=500):
+        """Create grid with wall at specified distance on sides."""
+        grid = []
+        for row in range(8):
+            for col in range(8):
+                if col < 2:  # Left columns
+                    grid.append(left_dist)
+                elif col > 5:  # Right columns
+                    grid.append(right_dist)
+                elif row < 2:  # Front
+                    grid.append(500)
+                elif row > 5:  # Bottom
+                    grid.append(200)
+                else:
+                    grid.append(500)
+        return grid
+    
+    wall_tests = [
+        ("Wall at target distance (200mm)", 200, "WALK_FORWARD"),
+        ("Wall too close (100mm)", 100, "TURN_RIGHT"),
+        ("Wall too far (300mm)", 300, "TURN_LEFT"),
+        ("No wall detected (600mm)", 600, "CONTINUE"),
+    ]
+    
+    for name, left_dist, expected in wall_tests:
+        state = {
+            "tof_connected": True,
+            "tof_distances": make_wall_grid(left_dist=left_dist),
+            "tof_statuses": [5] * 64,
+            "gait_active": True,
+        }
+        is_active, action = wall_follow.compute(state)
+        status = "PASS" if action.action.name == expected else "FAIL"
+        print(f"  {name}: {action.action.name} [{status}]")
+        if action.data:
+            print(f"    Data: wall_dist={action.data.get('wall_dist')}mm, err={action.data.get('error', 0):.0f}mm")
+    
+    # Test Patrol touch-stop
+    print("\n--- Testing Patrol touch-stop ---")
+    patrol = Patrol(turn_interval_s=10.0, patrol_duration_s=0, enabled=True)
+    patrol.on_activate()
+    
+    # Without touch - should walk forward
+    state_no_touch = {
+        "tof_connected": False,
+        "touch_active": False,
+        "gait_active": True,
+    }
+    is_active, action = patrol.compute(state_no_touch)
+    status = "PASS" if action.action == Action.WALK_FORWARD else "FAIL"
+    print(f"  Without touch: {action.action.name} [{status}]")
+    
+    # With touch - should stop
+    state_touch = {
+        "tof_connected": False,
+        "touch_active": True,
+        "gait_active": True,
+    }
+    is_active, action = patrol.compute(state_touch)
+    status = "PASS" if action.action == Action.STOP else "FAIL"
+    print(f"  With touch: {action.action.name} - \"{action.reason}\" [{status}]")
     
     print("\n=== Self-test complete ===")

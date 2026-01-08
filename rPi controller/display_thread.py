@@ -1198,6 +1198,66 @@ def draw_low_battery_warning(
     return img
 
 
+def draw_notification_overlay(
+    image: Image.Image,
+    text: str,
+    width: int = 0,
+    height: int = 0,
+) -> Image.Image:
+    """Draw a notification overlay on the image.
+    
+    Shows a centered text box with semi-transparent background.
+    
+    Args:
+        image: Base image to draw on (will be copied)
+        text: Notification text to display
+        width, height: Display dimensions
+    
+    Returns:
+        Modified image with notification overlay
+    """
+    if not text:
+        return image
+    
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    
+    if width <= 0:
+        width = img.width
+    if height <= 0:
+        height = img.height
+    
+    # Box dimensions
+    font = get_font(16)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    
+    padding_x = 12
+    padding_y = 8
+    box_width = text_width + padding_x * 2
+    box_height = text_height + padding_y * 2
+    
+    # Center the box
+    box_x = (width - box_width) // 2
+    box_y = (height - box_height) // 2
+    
+    # Draw semi-transparent dark background
+    draw.rectangle(
+        (box_x, box_y, box_x + box_width, box_y + box_height),
+        fill=(30, 30, 40),
+        outline=(100, 100, 120),
+        width=2
+    )
+    
+    # Draw text centered in box
+    text_x = box_x + (box_width - text_width) // 2
+    text_y = box_y + (box_height - text_height) // 2
+    draw.text((text_x, text_y), text, fill=(220, 220, 255), font=font)
+    
+    return img
+
+
 def draw_voltage_bar(
     draw: ImageDraw.Draw,
     x: int,
@@ -2377,8 +2437,27 @@ class DisplayThread(threading.Thread):
         # Display mode (EYES, ENGINEERING, MENU)
         self._display_mode = DisplayMode.EYES
         
+        # Notification overlay (temporary text that auto-dismisses)
+        self._notification_text = ""
+        self._notification_expire = 0.0  # monotonic time when notification expires
+        self._notification_duration = 2.0  # default duration in seconds
+        
         # Startup suppression: prevent rendering until startup splash is complete
         self._startup_complete = False
+    
+    def show_notification(self, text: str, duration: float = 2.0) -> None:
+        """Show a temporary notification overlay on the eyes display.
+        
+        The notification will automatically dismiss after the specified duration.
+        
+        Args:
+            text: Text to display (short, fits on one line)
+            duration: How long to show notification (seconds)
+        """
+        with self._lock:
+            self._notification_text = text
+            self._notification_expire = time.monotonic() + duration
+            self._notification_duration = duration
 
     def set_startup_complete(self, complete: bool = True) -> None:
         """Signal that startup splash is complete and display thread can render.
@@ -2607,6 +2686,14 @@ class DisplayThread(threading.Thread):
                     view_elevation = self._eng_view_elevation
                     eng_lcars_theme = self._eng_lcars_theme
                     lcars_palette = self._lcars_palette
+                    # Notification state
+                    notification_text = self._notification_text
+                    notification_expire = self._notification_expire
+                    # Clear expired notifications
+                    current_time = time.monotonic()
+                    if notification_text and current_time >= notification_expire:
+                        self._notification_text = ""
+                        notification_text = ""
                 
                 status_changed = (teensy_connected != last_teensy_connected or 
                                  controller_connected != last_controller_connected or
@@ -2789,6 +2876,15 @@ class DisplayThread(threading.Thread):
                                 width=self.disp.height,  # Swapped due to rotation
                                 height=self.disp.width,
                             )
+                        
+                        # Notification overlay (temporary text that auto-dismisses)
+                        if notification_text:
+                            display_image = draw_notification_overlay(
+                                display_image,
+                                text=notification_text,
+                                width=self.disp.height,  # Swapped due to rotation
+                                height=self.disp.width,
+                            )
                     
                     UpdateDisplay(
                         self.disp, display_image,
@@ -2884,6 +2980,7 @@ __all__ = [
     # Drawing functions
     'drawLogo', 'drawMarsSplash', 'draw_imu_overlay', 'draw_tof_heatmap',
     'draw_engineering_view', 'get_tof_color', 'draw_hexapod_heatmap', 'draw_voltage_bar',
+    'draw_notification_overlay',
     # Leg/servo constants
     'LEG_NAMES', 'JOINT_NAMES', 'LEG_ANGLES',
     # Main display functions

@@ -45,7 +45,7 @@ try:
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
-    print("Warning: websockets not installed. Run: pip install websockets")
+    print("Warning: websockets not installed. Run: pip install websockets", end="\r\n")
 
 
 # =============================================================================
@@ -211,7 +211,7 @@ class TelemetryServer:
     def start(self) -> bool:
         """Start the telemetry server."""
         if not WEBSOCKETS_AVAILABLE:
-            print("[TelemetryServer] websockets library not available")
+            print("[TelemetryServer] websockets library not available", end="\r\n")
             return False
 
         if self._running:
@@ -227,8 +227,8 @@ class TelemetryServer:
         self._ws_thread = threading.Thread(target=self._run_ws_server, daemon=True)
         self._ws_thread.start()
 
-        print(f"[TelemetryServer] HTTP: http://0.0.0.0:{self.config.http_port}")
-        print(f"[TelemetryServer] WebSocket: ws://0.0.0.0:{self.config.ws_port}")
+        print(f"[TelemetryServer] HTTP: http://0.0.0.0:{self.config.http_port}", end="\r\n")
+        print(f"[TelemetryServer] WebSocket: ws://0.0.0.0:{self.config.ws_port}", end="\r\n")
         return True
 
     def _run_http_server(self) -> None:
@@ -246,27 +246,31 @@ class TelemetryServer:
                     httpd.handle_request()
         except OSError as e:
             if "Address already in use" in str(e):
-                print(f"[TelemetryServer] HTTP port {self.config.http_port} in use (point cloud may be serving)")
+                print(f"[TelemetryServer] HTTP port {self.config.http_port} in use (point cloud may be serving)", end="\r\n")
             else:
-                print(f"[TelemetryServer] HTTP server error: {e}")
+                print(f"[TelemetryServer] HTTP server error: {e}", end="\r\n")
         except Exception as e:
-            print(f"[TelemetryServer] HTTP server error: {e}")
+            print(f"[TelemetryServer] HTTP server error: {e}", end="\r\n")
 
     def stop(self) -> None:
         """Stop the telemetry server."""
         self._running = False
 
-        # Cancel WebSocket server
-        if self._loop and self._server_task:
-            self._loop.call_soon_threadsafe(self._server_task.cancel)
-
+        # Wait for WebSocket server to finish gracefully first
         if self._ws_thread:
-            self._ws_thread.join(timeout=2.0)
+            self._ws_thread.join(timeout=3.0)
+
+        # Only force-cancel if still running after timeout
+        if self._loop and not self._loop.is_closed() and self._server_task:
+            try:
+                self._loop.call_soon_threadsafe(self._server_task.cancel)
+            except RuntimeError:
+                pass  # Loop already closed
 
         if self._http_thread:
             self._http_thread.join(timeout=2.0)
 
-        print("[TelemetryServer] Stopped")
+        print("[TelemetryServer] Stopped", end="\r\n")
 
     def _run_ws_server(self) -> None:
         """WebSocket server thread."""
@@ -276,7 +280,7 @@ class TelemetryServer:
         try:
             self._loop.run_until_complete(self._ws_main())
         except Exception as e:
-            print(f"[TelemetryServer] WebSocket server error: {e}")
+            print(f"[TelemetryServer] WebSocket server error: {e}", end="\r\n")
         finally:
             self._loop.close()
 
@@ -284,17 +288,26 @@ class TelemetryServer:
         """Main WebSocket server coroutine."""
         async with serve(self._handle_client, self.config.host, self.config.ws_port):
             # Start telemetry broadcast task
-            self._server_task = asyncio.create_task(self._broadcast_loop())
+            broadcast_task = asyncio.create_task(self._broadcast_loop())
+            self._server_task = broadcast_task
+            
             try:
-                await self._server_task
-            except asyncio.CancelledError:
-                pass
+                # Run until stopped
+                while self._running:
+                    await asyncio.sleep(0.1)
+            finally:
+                # Cancel broadcast task and wait for it
+                broadcast_task.cancel()
+                try:
+                    await broadcast_task
+                except asyncio.CancelledError:
+                    pass
 
     async def _handle_client(self, websocket) -> None:
         """Handle a WebSocket client connection."""
         self._clients.add(websocket)
         client_addr = websocket.remote_address
-        print(f"[TelemetryServer] Client connected: {client_addr}")
+        print(f"[TelemetryServer] Client connected: {client_addr}", end="\r\n")
 
         try:
             # Send initial config
@@ -306,7 +319,7 @@ class TelemetryServer:
             pass
         finally:
             self._clients.discard(websocket)
-            print(f"[TelemetryServer] Client disconnected: {client_addr}")
+            print(f"[TelemetryServer] Client disconnected: {client_addr}", end="\r\n")
 
     async def _handle_message(self, websocket, message: str) -> None:
         """Handle incoming WebSocket message."""
@@ -345,7 +358,7 @@ class TelemetryServer:
         except json.JSONDecodeError:
             pass
         except Exception as e:
-            print(f"[TelemetryServer] Error handling message: {e}")
+            print(f"[TelemetryServer] Error handling message: {e}", end="\r\n")
 
     async def _send_config(self, websocket) -> None:
         """Send configuration to a client."""
@@ -471,9 +484,9 @@ class TelemetryServer:
 if __name__ == "__main__":
     import random
 
-    print("Telemetry Server Test Mode")
-    print("Connect to ws://localhost:8766 to see telemetry")
-    print("Press Ctrl+C to stop\n")
+    print("Telemetry Server Test Mode", end="\r\n")
+    print("Connect to ws://localhost:8766 to see telemetry", end="\r\n")
+    print("Press Ctrl+C to stop\n", end="\r\n")
 
     config = TelemetryServerConfig()
     server = TelemetryServer(config)
@@ -493,7 +506,7 @@ if __name__ == "__main__":
     })
 
     if not server.start():
-        print("Failed to start server")
+        print("Failed to start server", end="\r\n")
         exit(1)
 
     try:
@@ -524,6 +537,6 @@ if __name__ == "__main__":
             time.sleep(0.1)
 
     except KeyboardInterrupt:
-        print("\nStopping...")
+        print("\nStopping...", end="\r\n")
 
     server.stop()

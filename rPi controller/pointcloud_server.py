@@ -46,7 +46,7 @@ try:
     WEBSOCKETS_AVAILABLE = True
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
-    print("Warning: websockets not installed. Run: pip install websockets")
+    print("Warning: websockets not installed. Run: pip install websockets", end="\r\n")
 
 import numpy as np
 
@@ -540,7 +540,7 @@ class PointCloudServer:
     def start(self) -> bool:
         """Start the WebSocket server and HTTP server in background threads."""
         if not WEBSOCKETS_AVAILABLE:
-            print("Cannot start PointCloudServer: websockets not installed")
+            print("Cannot start PointCloudServer: websockets not installed", end="\r\n")
             return False
         
         if self._running:
@@ -559,9 +559,9 @@ class PointCloudServer:
         )
         self._server_thread.start()
         
-        print(f"PointCloudServer started (mode={self._mode}):")
-        print(f"  HTTP viewer: http://{self.config.host}:{self.config.http_port}/")
-        print(f"  WebSocket:   ws://{self.config.host}:{self.config.port}")
+        print(f"PointCloudServer started (mode={self._mode}):", end="\r\n")
+        print(f"  HTTP viewer: http://{self.config.host}:{self.config.http_port}/", end="\r\n")
+        print(f"  WebSocket:   ws://{self.config.host}:{self.config.port}", end="\r\n")
         return True
     
     def _start_http_server(self) -> None:
@@ -583,7 +583,7 @@ class PointCloudServer:
             )
             self._http_thread.start()
         except Exception as e:
-            print(f"Failed to start HTTP server on port {self.config.http_port}: {e}")
+            print(f"Failed to start HTTP server on port {self.config.http_port}: {e}", end="\r\n")
     
     def stop(self) -> None:
         """Stop the server."""
@@ -596,15 +596,18 @@ class PointCloudServer:
             except Exception:
                 pass
         
-        # Stop WebSocket server
+        # Wait for WebSocket server thread to finish gracefully
+        # (the _serve loop exits when _running becomes False)
+        if self._server_thread:
+            self._server_thread.join(timeout=3.0)
+        
+        # Only force-stop the loop if it's still running after timeout
         if self._loop and not self._loop.is_closed():
             try:
                 self._loop.call_soon_threadsafe(self._loop.stop)
             except RuntimeError:
                 pass  # Loop already closed
-        if self._server_thread:
-            self._server_thread.join(timeout=2.0)
-        print("PointCloudServer stopped")
+        print("PointCloudServer stopped", end="\r\n")
     
     def _run_server(self) -> None:
         """Run the async server (called in background thread)."""
@@ -614,7 +617,7 @@ class PointCloudServer:
         try:
             self._loop.run_until_complete(self._serve())
         except Exception as e:
-            print(f"PointCloudServer error: {e}")
+            print(f"PointCloudServer error: {e}", end="\r\n")
         finally:
             self._loop.close()
     
@@ -624,16 +627,22 @@ class PointCloudServer:
             # Start broadcast task
             broadcast_task = asyncio.create_task(self._broadcast_loop())
             
-            # Run until stopped
-            while self._running:
-                await asyncio.sleep(0.1)
-            
-            broadcast_task.cancel()
+            try:
+                # Run until stopped
+                while self._running:
+                    await asyncio.sleep(0.1)
+            finally:
+                # Cancel broadcast task and wait for it
+                broadcast_task.cancel()
+                try:
+                    await broadcast_task
+                except asyncio.CancelledError:
+                    pass
     
     async def _handle_client(self, websocket) -> None:
         """Handle a connected WebSocket client."""
         self._clients.add(websocket)
-        print(f"PointCloud client connected ({len(self._clients)} total)")
+        print(f"PointCloud client connected ({len(self._clients)} total)", end="\r\n")
         
         try:
             # Send config on connect
@@ -653,8 +662,8 @@ class PointCloudServer:
             pass
         finally:
             self._clients.discard(websocket)
-            print(f"PointCloud client disconnected ({len(self._clients)} remaining)")
-    
+            print(f"PointCloud client disconnected ({len(self._clients)} remaining)", end="\r\n")
+
     async def _handle_message(self, message: str) -> None:
         """Handle incoming command from client."""
         try:
@@ -663,7 +672,7 @@ class PointCloudServer:
             
             if cmd == "clear":
                 self.cloud.clear()
-                print("PointCloud cleared")
+                print("PointCloud cleared", end="\r\n")
             
             elif cmd == "pause":
                 self._paused = True
@@ -673,11 +682,11 @@ class PointCloudServer:
             
             elif cmd == "set_mode":
                 self._mode = data.get("mode", "live")
-                print(f"PointCloud mode: {self._mode}")
+                print(f"PointCloud mode: {self._mode}", end="\r\n")
             
             elif cmd == "reset_pose":
                 self.pose.reset_position()
-                print("Pose reset")
+                print("Pose reset", end="\r\n")
         
         except json.JSONDecodeError:
             pass
@@ -752,7 +761,7 @@ class PointCloudServer:
             if valid_count == 0:
                 pass  # No valid readings - normal
             else:
-                print(f"[PointCloud] {valid_count} valid statuses but 0 points projected")
+                print(f"[PointCloud] {valid_count} valid statuses but 0 points projected", end="\r\n")
             return 0
         
         # Transform to world frame
@@ -769,7 +778,7 @@ class PointCloudServer:
                 self._debug_counter = 0
             self._debug_counter += 1
             if self._debug_counter % 100 == 1:  # Every 100 frames
-                print(f"[PointCloud] Frame: {len(world_points)} pts, cloud: {len(self.cloud)}, clients: {len(self._clients)}")
+                print(f"[PointCloud] Frame: {len(world_points)} pts, cloud: {len(self.cloud)}, clients: {len(self._clients)}", end="\r\n")
         
         # Add to accumulated cloud
         if self._mode == "accumulate":
@@ -809,15 +818,15 @@ class PointCloudServer:
 if __name__ == "__main__":
     import random
     
-    print("PointCloud Server Test Mode")
-    print("Open pointcloud_viewer.html in a browser to connect")
-    print("Press Ctrl+C to stop\n")
+    print("PointCloud Server Test Mode", end="\r\n")
+    print("Open pointcloud_viewer.html in a browser to connect", end="\r\n")
+    print("Press Ctrl+C to stop\n", end="\r\n")
     
     config = PointCloudConfig()
     server = PointCloudServer(config)
     
     if not server.start():
-        print("Failed to start server")
+        print("Failed to start server", end="\r\n")
         exit(1)
     
     try:
@@ -840,6 +849,6 @@ if __name__ == "__main__":
             time.sleep(0.1)
     
     except KeyboardInterrupt:
-        print("\nStopping...")
+        print("\nStopping...", end="\r\n")
     
     server.stop()

@@ -1,3 +1,116 @@
+## Python Controller 0.11.14 (b286) — 2026-01-08
+
+### M5: Code Hygiene & Standardization
+
+- **Exception Safety**: Replaced all bare `except: pass` blocks with proper logging to `mars_error.log` to expose silent failures.
+- **Naming Standardization**: Renamed legacy Hungarian/camelCase local variables (e.g. `_prevJoyState` -> `_prev_joy_state`) to PEP 8 snake_case.
+- **Logging**: Configured file-based logging to capture warnings without interfering with the Curses UI.
+
+## Python Controller 0.11.11 (b283) — 2026-01-08
+
+### M4 Phase 7: Autonomy State Migration
+
+- **State Encapsulation**: Migrated Autonomy and Behavior globals (`_autonomyEnabled`, `_behaviorArbiter`, etc.) to `Controller.autonomy_state` and `Controller.behavior_arbiter`.
+- **Refactoring**: Moved `_toggle_autonomy`, `_disable_autonomy_if_active`, and `_init_behavior_arbiter` logic into `Controller` class methods.
+- **Config Loader**: Updated `load_config()` to load behavior settings directly into `Controller`, with arbiter invalidation on change.
+- **Cleanup**: Removed ~20 global variables and associated helper functions from `controller.py`.
+
+## Python Controller 0.11.10 (b282) — 2026-01-08
+
+### M4 Phase 6: PID/IMP/EST State Migration
+
+- **State Encapsulation**: Migrated PID, Impedance, and Estimator state from global dictionaries (`_pid_ini`, `_imp_ini`, `_est_ini`) to `Controller` instance (`self.pid_state`, `imp_state`, `est_state`).
+- **Config Loader**: Updated `load_config()` to load PID/IMP/EST settings directly into `Controller`.
+- **Dashboard Handlers**: Rewrote PID/IMP/EST dashboard config handlers to use instance state and global `send_cmd()`.
+- **Cleanup**: Removed legacy globals and configuration unpacking logic.
+
+---
+## Python Controller 0.11.5 (b277) — 2026-01-06
+
+### M3.2: Menu Logic Extraction — SYSTEM Callbacks
+
+- **SYSTEM callbacks extracted**: `setup_system_callbacks()` and `sync_system_initial_values()` added to `menu_controller.py`.
+- Handles: Theme, Palette, Brightness, Auto-Disable, Verbose, Mirror, Save All, Shutdown.
+- **controller.py reduced**: ~50 lines moved to menu_controller.py.
+
+---
+
+## Python Controller 0.11.4 (b276) — 2026-01-06
+
+### M3.1: Menu Logic Extraction — EYES Callbacks
+
+- **New module**: Created `menu_controller.py` for extracted menu callback logic.
+- **EYES callbacks extracted**: `setup_eyes_callbacks()` and `sync_eyes_initial_values()` now handle all EYES menu functionality.
+- **Bridge pattern**: Uses `SimpleNamespace` context to pass globals safely without circular imports.
+- **controller.py reduced**: ~35 lines moved to new module.
+
+---
+
+## Python Controller 0.10.17 (b271) — 2026-01-06
+
+### Curses Terminal Compatibility
+
+- **Print statement fixes**: All `print()` calls across controller, servers, and modules now use `end="\r\n"` for proper rendering in curses raw terminal mode.
+- **Startup output cleanup**: Suppressed pygame welcome banner (`PYGAME_HIDE_SUPPORT_PROMPT`), filtered I2C address scanning warnings via `warnings.filterwarnings()`.
+- **Async server shutdown**: Fixed `pointcloud_server.py` and `telemetry_server.py` graceful shutdown — wait for thread before stopping event loop to avoid `RuntimeError`.
+- **Keyboard help fix**: `print_keyboard_help()` now uses `sys.stdout.write(line + "\r\n")` per-line instead of triple-quoted string to prevent progressive indentation.
+
+---
+
+## Python Controller 0.10.16 (b270) — 2026-01-05
+
+### Keyboard Help Command
+
+- **'?' key**: Press `?` to print keyboard command reference to console.
+  - Lists all available keyboard shortcuts organized by category.
+  - Categories: Motion, Autonomy, Display, Debug, System, Menu Navigation.
+- **print_keyboard_help()**: New helper function outputs formatted help text.
+
+---
+
+## Python Controller 0.10.15 (b269) — 2026-01-05
+
+### Wall Follow Menu Integration
+
+- **AUTONOMY menu**: Added Wall Follow behavior controls.
+  - `Wall Follow`: On/Off toggle to enable behavior.
+  - `Wall Side`: Left/Right option for which wall to follow.
+  - `Wall Dist`: Target distance from wall (100-400mm, step 25).
+- **Behavior arbiter**: Wall Following behavior added to arbiter at priority 40.
+- **Config loading**: `wall_follow`, `wall_side`, `wall_distance_mm` in [behavior] section.
+
+### LCD Notification Overlay
+
+- **show_notification()**: New DisplayThread method for temporary text overlays.
+  - Shows centered text box with semi-transparent background.
+  - Auto-dismisses after configurable duration (default 2 seconds).
+  - Returns to eyes display automatically after timeout.
+- **Behavior toggle notifications**: Toggling Patrol or Wall Follow shows notification on LCD.
+  - "Patrol ON/OFF" or "Wall Follow ON/OFF (Left/Right)".
+- **draw_notification_overlay()**: New helper function in display_thread.py.
+
+---
+
+## Python Controller 0.10.14 (b268) — 2026-01-05
+
+### Autonomy A4: Wall Following Behavior
+
+- **WallFollowing class**: New behavior in behaviors.py that tracks left or right ToF zone.
+  - PD controller maintains configurable `wall_distance_mm` (default 200mm).
+  - Parameters: `kp=0.003`, `kd=0.001`, `max_intensity=0.8`, `min_wall_detect_mm=400`.
+  - Steers toward wall when too far, away when too close, forward when on target.
+  - Priority 40 (above Patrol, below safety behaviors).
+  - Disabled by default; enable via menu or command.
+
+### Autonomy A5: Patrol Touch-Stop
+
+- **Patrol touch-stop**: Patrol behavior now checks `touch_active` in sensor_state.
+  - Tap screen during patrol to stop gracefully (returns STOP action).
+  - Works alongside existing E-STOP (touch during gait disables robot).
+- **sensor_state enhancement**: Added `touch_active` field populated from MarsMenu.touched().
+
+---
+
 ## Python Controller 0.7.35 (b219) — 2025-12-27
 
 ### Battery Status Display

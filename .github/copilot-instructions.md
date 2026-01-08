@@ -48,7 +48,10 @@ Startup splash
   - `logging.enabled=true` / `logging.rate_hz=166`
   - `test.trigait.enabled=false`
 - Load once at boot in Phase 1. Log invalid keys; don’t crash.
-
+## Configuration parity
+- All configurable parameters MUST be available in BOTH the on‑board screen menu (MarsMenu) AND the web dashboard.
+- When adding a new config option: (1) add to `controller.ini` section, (2) add `MenuItem` in MarsMenu.py, (3) add callback and initial `set_value` in controller.py, (4) add to `EDITABLE_CONFIG` in dashboard.html, (5) add handler in `_handle_dashboard_config_change()`.
+- Keep labels consistent: on‑board menu label should map logically to dashboard key (e.g., "LowBatt Filter" ↔ `filter_alpha`).
 ## Serial command protocol (ASCII)
 - Commands (one per line); respond with `OK` or `ERR <code> <msg>`:
   - `ENABLE`, `DISABLE`
@@ -84,6 +87,22 @@ Startup splash
 - When touching the main loop, show the revised tick budget comments and confirm 166 Hz viability in comments.
 - Always update: (1) main `.ino` header change log, (2) `CHANGELOG.md`, and (3) `docs/PROJECT_SPEC.md` if the behavior/contract changes.
  - After finishing a todo, bump `FW_VERSION` (SemVer patch by default) and verify splash/STATUS print the new version.
+
+## Python Coding Standards (Controller)
+- **Style**: Follow PEP 8 guidelines. Use 4-space indentation.
+- **Naming**: 
+  - Class names: `CapWords` (e.g., `Controller`).
+  - Method/Function names: `snake_case` (e.g., `send_cmd`).
+  - Variables: `snake_case` (e.g., `telemetry_data`).
+  - Constants: `UPPER_CASE` (e.g., `MAX_RETRIES`).
+  - **Avoid Hungarian notation** or global-style underscores for local variables (e.g., use `teensy_connected`, NOT `_teensyConnected`).
+  - Private class members can use a single leading underscore (e.g., `self._internal_state`).
+- **Error Handling**:
+  - **No bare excepts**: Never use `except:` or `except Exception: pass`. Always catch specific exceptions (e.g., `except serial.SerialException:`) or log the error if catching `Exception` is truly necessary.
+  - Use `try...finally` for resource cleanup (threads, sockets, serial ports).
+- **Structure**:
+  - Prefer class-based encapsulation over module-level globals.
+  - Use type hints (`def func(a: int) -> bool:`) where helpful for clarity.
 
 ## TODO management directive
 - Maintain a persistent project TODO list in `docs/TODO.md`.

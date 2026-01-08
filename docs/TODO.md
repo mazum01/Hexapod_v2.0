@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2025-12-31 (Web Dashboard Phase 1 COMPLETE)
+Last updated: 2026-01-06 (Modularization plan for v0.11.x)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -8,6 +8,59 @@ Conventions
 - Keep items short and actionable; mirror high-level plan in docs/PROJECT_SPEC.md when relevant.
 - Copilot will update this file when TODOs change, and reference it in commits.
 - Reminder: On any behavior change or TODO completion, also bump FW/Controller versions, update in-file change logs, update CHANGELOG.md, and keep docs/USER_MANUAL.md in sync with the new versions.
+
+---
+
+## Modularization & Refactoring — Phase 2 (Jan 2026)
+
+Goal: Reduce `controller.py` complexity (currently ~7.5k lines), eliminate module-level globals, and improve state management before Phase 2 Autonomy.
+
+### M1. Entry Point Separation ✅ COMPLETE
+- [x] Create `main.py` as the new entry point.
+- [x] Update `joy_controller.py` to launch `main.py` instead of `controller.py` (update `CONTROLLER_SCRIPT` and process killing logic).
+- [x] Move module-level initialization code — deferred. `main.py` wraps `controller.py` via import; full separation would require wrapping 7k lines in `main()` with low practical benefit.
+- [x] Protect `main.py` execution with `if __name__ == "__main__":`. Done in main.py; controller runs on import by design (legacy wrapper pattern).
+- [x] Ensure `controller.py` contains only `class Controller` — deferred. Current structure works; M4 will migrate globals into Controller naturally.
+
+### M2. Configuration Refactor ✅ COMPLETE
+- [x] Extend `config_manager.py` to handle all INI loading logic (was ~400 lines in `controller.py`).
+- [x] Create `RobotConfig` class to hold all config values. (Done: `ControllerConfig` master dataclass with 22 sub-configs)
+- [x] Add `_unpack_config_to_globals()` helper function to bridge typed config to legacy globals. (Done: v0.11.3 b275)
+- [x] Remove redundant ConfigParser parsing (~350 lines) from controller.py. (Done: v0.11.3 b275, file reduced to 7483 lines)
+- [x] Update `Controller.__init__` to accept a `RobotConfig` instance — deferred. Globals bridge works; M4 will clean this up as state migrates into Controller.
+
+### M3. Menu Logic Extraction ✓ Complete (v0.11.6 b278)
+- [x] Create `menu_controller.py`. (Done: v0.11.4 b276)
+- [x] Move `_setup_mars_menu()` callback functions out of `controller.py` — phased extraction:
+  - [x] M3.1: EYES callbacks (v0.11.4 b276)
+  - [x] M3.2: SYSTEM callbacks (v0.11.5 b277)
+  - [x] M3.3: PID/IMP/EST callbacks (v0.11.6 b278)
+  - [x] M3.4: IMU/Leveling callbacks (v0.11.6 b278)
+  - [x] M3.5: ToF callbacks (v0.11.6 b278)
+  - [x] M3.6: GAIT callbacks (v0.11.6 b278)
+  - [x] M3.7: POSTURE + Pounce callbacks (v0.11.6 b278)
+  - [x] M3.8: AUTONOMY callbacks (v0.11.6 b278)
+  - [x] M3.9: SAFETY callbacks (v0.11.6 b278)
+  - [x] M3.10: Initial value sync + final wiring (v0.11.6 b278)
+- [x] Refactor callbacks to use `Controller` instance methods (Done implicitly via M4 state migration).
+
+### M4. State Encapsulation [~] In Progress
+- [x] Phase 1: Fix `_setup_mars_menu` deferred binding (pass `ctrl`). (Done: v0.11.7 b279)
+- [x] Phase 2: Refactor `phase_keyboard_input` to use `ctrl` for `verbose`/`mirror`/`forceDisplayUpdate`. (Done: v0.11.7 b279)
+- [x] Phase 3: Update `sync_globals_to_ctrl` to stop overwriting authoritative `ctrl` state. (Done: v0.11.7 b279)
+- [x] Phase 4: Gait state migration (gait engine, feet tracking, active flags). (Done: v0.11.8 b280)
+- [x] Phase 5: Safety, Power, and Leveling state migration. (Done: v0.11.9)
+- [x] Phase 6: PID, Impedance, and Estimator state migration. (Done: v0.11.10)
+- [x] Phase 7: Autonomy state migration.
+- [x] Phase 8: PointCloud and Dashboard state migration.
+- [x] Final: Remove all `global` statements from `controller.py`.
+- [x] Phase 4: Migrate Gait state (`gaitEngine`, `gaitActive`, `send_feet_cmd`) to `Controller`. (Done: v0.11.8 b280)
+
+- [x] Remove `sync_globals_to_ctrl` entirely (once all incoming globals are migrated).
+
+### M5. Code Hygiene ✅ COMPLETE
+- [x] Audit and fix bare `try...except: pass` blocks (add logging). (Done: v0.11.14)
+- [x] Standardize variable naming (remove Hungarian/global style underscores where inappropriate). (Done: v0.11.14 - Fixed `_prevJoyState`, `_lastMode`, `_backGroundImage`, etc.)
 
 ---
 
@@ -104,16 +157,16 @@ Sensors → Behaviors → Arbitration → Gait Commands
 - [x] Configurable cliff_threshold_mm (default 100 = 10cm drop) — **DONE v0.7.39**
 
 #### A4. Wall Following Behavior
-- [ ] Track ToF edge readings (left or right side zones)
-- [ ] Maintain configurable wall_distance_mm (default 200)
-- [ ] PD controller to steer parallel to wall
-- [ ] Enable via menu or command
+- [x] Track ToF edge readings (left or right side zones) — **DONE v0.10.14**
+- [x] Maintain configurable wall_distance_mm (default 200) — **DONE v0.10.14**
+- [x] PD controller to steer parallel to wall — **DONE v0.10.14**
+- [x] Enable via menu or command — **DONE v0.10.15**
 
 #### A5. Patrol Mode
 - [x] Simple timed forward walk with random turns — **DONE v0.7.39**
 - [x] Configurable patrol_duration_s, turn_interval_s — **DONE v0.7.39**
 - [x] Respects obstacle avoidance (higher priority) — **DONE v0.7.39**
-- [ ] Stop on touch screen tap (E-stop already implemented)
+- [x] Stop on touch screen tap (E-stop already implemented) — **DONE v0.10.14**
 
 #### A6. Behavior Menu Tab
 - [x] Add AUTONOMY tab to MarsMenu — **DONE v0.7.41**
@@ -260,49 +313,64 @@ Pi 5 USB → Sabrent DAC → 3.5mm → PAM8403 L/R inputs → Speakers
 
 ### Tasks
 
-#### AU1. Audio Module
-- [ ] Create `audio_manager.py` module
+#### AU1. Audio Module ✅
+- [x] Create `audio_manager.py` module
   - pygame.mixer based for low-latency, non-blocking playback
   - Sound pool for preloaded common sounds
   - Volume control (0-100%)
   - Mute toggle
-- [ ] Configurable via [audio] section in controller.ini
-  - enabled=true, volume=80, mute=false
+  - Beep tone generator (numpy-based)
+- [x] Configurable via [audio] section in controller.ini
+  - enabled=true, volume=0.7
+  - device=hw:2,0 (Sabrent USB DAC)
   - sounds_dir=assets/sounds
+- [x] Integrate into controller.py (startup, event hooks)
+  - Audio manager initialization during startup
+  - Startup chime (3-tone ascending A4→C#5→E5)
+  - Shutdown beep (descending E5→A4)
+  - Clean shutdown of audio manager
 
-#### AU2. System Event Sounds
-- [ ] Startup chime (on controller boot)
-- [ ] Shutdown sound (on graceful exit)
-- [ ] Low battery warning (beep pattern when < threshold)
-- [ ] Safety lockout alert
-- [ ] Teensy connect/disconnect tones
+#### AU2. System Event Sounds ✅
+- [x] Startup chime (on controller boot)
+- [x] Shutdown sound (on graceful exit)
+- [x] Low battery warning (3-beep alert when < threshold)
+- [x] Safety lockout alert (urgent 3-tone warning)
+- [x] Teensy connect/disconnect tones
 
-#### AU3. Gait & Mode Sounds
-- [ ] Gait enable/disable clicks
-- [ ] Gait type change confirmation (different tone per gait)
-- [ ] Autonomy mode toggle sound
-- [ ] Stand/Tuck confirmation
+#### AU3. Gait & Mode Sounds ✅
+- [x] Gait start/stop chirps
+- [x] Gait type change confirmation (different tone per gait) — **DONE v0.10.7**
+- [x] Autonomy mode toggle sound (ascending/descending tones)
+- [x] Stand/Tuck/Home confirmation sounds
 
-#### AU4. Controller Feedback
-- [ ] Xbox controller connect/disconnect
-- [ ] Button press acknowledgment (optional, subtle)
-- [ ] Menu navigation clicks (optional)
+#### AU4. Controller Feedback ✅
+- [x] Xbox controller connect/disconnect (rising/falling tones)
+- [x] Button press click (all ABXY/LB/RB buttons)
+- [x] Menu navigation clicks (nav/tab/adjust/select) — **DONE v0.10.8**
 
-#### AU5. Voice Announcements (TTS)
-- [ ] Integrate pyttsx3 or espeak for text-to-speech
-  - "Battery low, twenty percent remaining"
-  - "Obstacle detected"
-  - "Entering patrol mode"
-- [ ] Configurable: tts_enabled, tts_voice, tts_rate
-- [ ] Limit announcement frequency (no spam)
+#### AU5. Voice Announcements (TTS) ✅
+- [x] Integrate pyttsx3 (espeak-ng backend) for text-to-speech
+  - [x] "Mars online" (startup)
+  - [x] "Mars shutting down" (shutdown)
+  - [x] "Robot enabled" / "Robot disabled"
+  - [x] "Standing" / "Tucking" (posture confirmations)
+  - [x] "Safety lockout activated"
+  - [x] "Autonomy mode on" / "Autonomy mode off"
+  - [x] "Battery low, X percent remaining" (hooked to low battery event)
+  - [x] "Obstacle detected" (hooked to autonomy STOP)
+  - [x] "Cliff detected" (hooked to autonomy E-STOP)
+- [x] Configurable: [tts] enabled, rate, volume, voice, cooldown_sec
+- [x] Limit announcement frequency (cooldown_sec anti-spam)
+- [x] Piper neural TTS integration (engine=piper|espeak) — **DONE v0.10.9**
+- [x] Pre-cached TTS WAV files for instant playback (15 phrases, generate_tts_phrases.py) — **DONE v0.10.10**
 
-#### AU6. Sound Assets
-- [ ] Create/source royalty-free sound effects
-  - Robotic beeps/chirps for events
+#### AU6. Sound Assets ✅
+- [x] Create/source royalty-free sound effects — **DONE v0.10.8**
+  - Robotic beeps/chirps for events (generate_sounds.py)
   - Warning tones (escalating urgency)
   - Confirmation clicks
-- [ ] Store in `assets/sounds/` directory
-- [ ] Keep files small (8-bit, 22kHz mono OK for robot sounds)
+- [x] Store in `assets/sounds/` directory (22 WAV files generated)
+- [x] Keep files small (16-bit, 44.1kHz mono)
 
 ---
 
@@ -370,19 +438,29 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
 - [x] Add configuration search/filter
 - [x] Collapsible sections for better organization
 
-### W3. Phase 3: Configuration Editing
-- [ ] Add set_config WebSocket command support
-- [ ] Implement config change callback in controller
-- [ ] Edit gait parameters (cycle_ms, step_height, step_length)
-- [ ] Edit safety thresholds (volt limits, temp limits)
-- [ ] Edit PID/IMP/EST tuning parameters
-- [ ] Save to controller.ini from dashboard
+### W2b. LCARS Styling Polish
+- [ ] Fix dashboard swept elbow curves (header/sidebar/footer)
+  - Inner curve sizing and radius proportions per LCARS Manifesto
+  - Reference: http://www.lcars-terminal.de/tutorial/guideline.htm
+- [ ] Apply same fixes to pointcloud_viewer.html swept elbows
 
-### W4. Phase 4: Graphs & Historical Data
-- [ ] Rolling graph for battery voltage over time
-- [ ] Loop time jitter histogram
-- [ ] Servo temperature trends
-- [ ] Export telemetry data as CSV
+### W3. Phase 3: Configuration Editing ✅ COMPLETE (v0.8.6)
+- [x] Add set_config WebSocket command support
+- [x] Implement config change callback in controller (_handle_dashboard_config_change)
+- [x] Edit gait parameters (cycle_ms, step_height, step_length, turn_rate)
+- [x] Edit safety thresholds (low_battery_enabled, volt_critical, volt_recovery)
+- [x] Edit PID/IMP/EST tuning parameters
+- [x] Save to controller.ini from dashboard (via existing save_*_settings functions)
+
+### W4. Phase 4: Graphs & Historical Data ✅ COMPLETE (v0.8.7)
+- [x] Rolling graph for battery voltage over time
+- [x] Loop time chart (converted from histogram to line chart)
+- [x] Servo temperature trends
+- [x] Export telemetry data as CSV
+- [x] Chart.js integration with LCARS styling
+- [x] Tab-based chart switching (Voltage/Loop Time/Temperature)
+- [x] Selectable time windows (1/5/10 min)
+- [x] Sample counter badge
 
 ### W5. Phase 5: Enhanced Integration
 - [ ] Link to point cloud viewer (already available at /pointcloud)

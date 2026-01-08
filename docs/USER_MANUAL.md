@@ -1,6 +1,6 @@
 # MARS Hexapod User Manual
 
-Revision: Firmware 0.2.41/b157 · Controller 0.5.39/b151
+Revision: Firmware 0.2.41/b157 · Controller 0.10.17/b271
 
 > Command imperative: Whenever firmware (`FW_VERSION`/`FW_BUILD`) or controller
 > (`CONTROLLER_VERSION`/`CONTROLLER_BUILD`) behavior changes, this manual **must**
@@ -157,6 +157,7 @@ On startup the controller:
 
 ### 4.2 Keyboard Controls (Terminal)
 
+- `?` – print keyboard command reference to console
 - `n` – toggle MARS menu (only when robot disabled and not moving)
 - `Esc` – close MARS menu when open; exit app when menu not visible
 - `w` / `h` / `p` – gait start/stop/pattern (legacy keyboard gaits)
@@ -380,6 +381,7 @@ hard safety mode:
 
 ### 8.2 Controller Keyboard (Terminal)
 
+- `?` – print keyboard command reference to console
 - `n` – toggle MARS menu (when robot disabled & stationary)
 - `Esc` – close menu; exit app if menu not visible
 - `w` / `h` / `p` – legacy gait controls (walk/halt/pattern)

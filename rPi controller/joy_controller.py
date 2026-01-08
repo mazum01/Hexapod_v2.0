@@ -57,7 +57,7 @@ JOY_BUILD = 184
 
 # Paths
 SCRIPT_DIR = Path(__file__).parent.resolve()
-CONTROLLER_SCRIPT = SCRIPT_DIR / "controller.py"
+CONTROLLER_SCRIPT = SCRIPT_DIR / "main.py"  # Launch the new entry point wrapper
 SOCKET_PATH = "/tmp/mars_joy.sock"
 
 # Xbox button codes (evdev)
@@ -373,11 +373,10 @@ class XboxController:
 # Controller Process Manager
 #----------------------------------------------------------------------------------------------------------------------
 
-def find_controller_pids(script_name: str = "controller.py") -> list:
-    """Find PIDs of any running controller.py processes.
+def find_controller_pids(script_name: str = "main.py") -> list:
+    """Find PIDs of any running main.py (controller wrapper) processes.
     
-    Uses a pattern that matches controller.py preceded by / or whitespace,
-    but NOT preceded by word characters (to exclude joy_controller.py).
+    Uses a pattern that matches the script name preceded by / or whitespace.
     
     Returns:
         List of integer PIDs.
@@ -385,10 +384,9 @@ def find_controller_pids(script_name: str = "controller.py") -> list:
     pids = []
     my_pid = os.getpid()
     try:
-        # Pattern: / or whitespace followed by controller.py
-        # This matches "/controller.py" or " controller.py" but NOT "joy_controller.py"
-        # because joy_ doesn't end with / or whitespace
-        pattern = f"(^|/|\\s){script_name}($|\\s)"
+        # Pattern: / or whitespace followed by script_name (e.g. main.py)
+        # We also look for the legacy controller.py just in case
+        pattern = f"(^|/|\\s)({script_name}|controller.py)($|\\s)"
         result = subprocess.run(
             ["pgrep", "-f", pattern],
             capture_output=True, text=True, timeout=5
@@ -408,8 +406,8 @@ def find_controller_pids(script_name: str = "controller.py") -> list:
     return pids
 
 
-def kill_existing_controllers(script_name: str = "controller.py", verbose: bool = False) -> int:
-    """Kill any existing controller.py processes.
+def kill_existing_controllers(script_name: str = "main.py", verbose: bool = False) -> int:
+    """Kill any existing MARS controller processes.
     
     Returns:
         Number of processes killed.

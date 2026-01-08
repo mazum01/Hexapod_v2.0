@@ -75,6 +75,18 @@
             background: var(--lcars-orange);
             border-bottom-right-radius: var(--swept-radius);
             flex-shrink: 0;
+            position: relative;
+        }
+        
+        .lcars-header-swept::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 40px;
+            height: 20px;
+            background: var(--lcars-black);
+            border-top-left-radius: var(--swept-radius);
         }
         
         .lcars-header-bar {
@@ -189,6 +201,18 @@
             height: 40px;
             background: var(--lcars-tan);
             border-top-right-radius: var(--swept-radius);
+            position: relative;
+        }
+        
+        .lcars-sidebar-swept::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 30px;
+            height: 15px;
+            background: var(--lcars-black);
+            border-bottom-left-radius: var(--swept-radius);
         }
         
         /* ================================================================
@@ -292,6 +316,18 @@
             width: 120px;
             background: var(--lcars-tan);
             border-top-right-radius: var(--swept-radius);
+            position: relative;
+        }
+        
+        .lcars-footer-swept::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 30px;
+            height: 8px;
+            background: var(--lcars-black);
+            border-bottom-left-radius: var(--swept-radius);
         }
         
         .lcars-footer-bar {
@@ -427,7 +463,7 @@
             </div>
             <div class="lcars-dialog-body">
                 <div class="lcars-dialog-subtitle">3D ToF Sensor Visualization</div>
-                <input type="text" class="lcars-dialog-input" id="ws-address" placeholder="ws://192.168.1.100:8766">
+                <input type="text" class="lcars-dialog-input" id="ws-address" placeholder="ws://192.168.1.100:8765">
                 <br>
                 <button class="lcars-dialog-btn" onclick="connect()">Engage</button>
             </div>
@@ -447,6 +483,9 @@
                         <div class="lcars-cap">
                             <span id="point-count">0</span>&nbsp;Points
                         </div>
+                        <div class="lcars-cap">
+                            <span id="mode-display">Live</span>
+                        </div>
                         <div class="lcars-cap status">
                             <span class="status-dot" id="ws-status"></span>
                             <span id="connection-text">Offline</span>
@@ -465,6 +504,11 @@
                     <div class="lcars-sidebar-btn" onclick="setView('side')">Side</div>
                     <div class="lcars-sidebar-btn" onclick="setView('iso')">Iso</div>
                     <div class="lcars-sidebar-spacer"></div>
+                    <div class="lcars-sidebar-btn active" id="btn-live" onclick="setMode('live')">Live</div>
+                    <div class="lcars-sidebar-btn" id="btn-accumulate" onclick="setMode('accumulate')">Accum</div>
+                    <div class="lcars-sidebar-spacer"></div>
+                    <div class="lcars-sidebar-btn" id="btn-pause" onclick="togglePause()">Pause</div>
+                    <div class="lcars-sidebar-btn" onclick="clearPoints()">Clear</div>
                     <div class="lcars-sidebar-btn" onclick="toggleGrid()">Grid</div>
                     <div class="lcars-sidebar-btn" onclick="resetCamera()">Reset</div>
                     <div class="lcars-sidebar-swept"></div>
@@ -531,7 +575,8 @@
         
         function init() {
             const hostname = window.location.hostname || 'localhost';
-            document.getElementById('ws-address').value = `ws://${hostname}:8766`;
+            // Point cloud server runs on port 8765 (telemetry/dashboard is 8766)
+            document.getElementById('ws-address').value = `ws://${hostname}:8765`;
         }
         
         function initScene() {
@@ -657,12 +702,34 @@
         }
         
         function handleMessage(data) {
-            // Server sends type='frame' with points as [[x,y,z], ...] arrays
+            // Server sends type='frame' with points and pose
             if (data.type === 'frame') {
-                updatePointCloud(data);
+                if (data.pose) updatePose(data.pose);
+                if (data.points) updatePointCloud(data);
             }
         }
         
+        // =================================================================
+        // Pose Updates
+        // =================================================================
+        
+        function updatePose(pose) {
+            if (!robotMarker || !pose.rotation) return;
+            
+            // pose.rotation is [roll, pitch, yaw] in radians
+            const [roll, pitch, yaw] = pose.rotation;
+            
+            // Map Robot Frame (Z-up) to Scene Frame (Y-up)
+            // Robot Yaw (Z)   -> Scene Y
+            // Robot Pitch (Y) -> Scene X
+            // Robot Roll (X)  -> Scene Z
+            
+            robotMarker.rotation.order = 'YXZ';
+            robotMarker.rotation.y = yaw;
+            robotMarker.rotation.x = pitch;
+            robotMarker.rotation.z = -roll;
+        }
+
         // =================================================================
         // Point Cloud Updates
         // =================================================================
@@ -767,6 +834,54 @@
             camera.position.set(0, 600, 400);
             camera.lookAt(0, 0, 0);
             controls.reset();
+        }
+        
+        // =================================================================
+        // Mode & Control Functions
+        // =================================================================
+        
+        let isPaused = false;
+        let currentMode = 'live';
+        
+        function setMode(mode) {
+            currentMode = mode;
+            document.getElementById('btn-live').classList.toggle('active', mode === 'live');
+            document.getElementById('btn-accumulate').classList.toggle('active', mode === 'accumulate');
+            document.getElementById('mode-display').textContent = mode === 'live' ? 'Live' : 'Accumulate';
+            
+            // Send mode command to server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ cmd: 'set_mode', mode: mode }));
+            }
+        }
+        
+        function togglePause() {
+            isPaused = !isPaused;
+            const btn = document.getElementById('btn-pause');
+            btn.textContent = isPaused ? 'Resume' : 'Pause';
+            btn.classList.toggle('active', isPaused);
+            
+            // Send pause/resume command to server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ cmd: isPaused ? 'pause' : 'resume' }));
+            }
+        }
+        
+        function clearPoints() {
+            // Clear local point cloud
+            if (pointCloud && pointCloud.geometry) {
+                const positions = new Float32Array(0);
+                const colors = new Float32Array(0);
+                pointCloud.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                pointCloud.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                pointCloud.geometry.computeBoundingSphere();
+            }
+            document.getElementById('point-count').textContent = '0';
+            
+            // Send clear command to server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ cmd: 'clear' }));
+            }
         }
         
         // =================================================================

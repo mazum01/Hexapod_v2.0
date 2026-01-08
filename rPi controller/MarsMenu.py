@@ -279,6 +279,10 @@ class MarsMenu:
         # Callbacks will be set by controller
         self._callbacks = {}
         
+        # Audio callback for menu navigation sounds (set by controller)
+        # Signature: audio_callback(event: str) where event is 'nav', 'tab', 'adjust', 'select'
+        self._audio_callback = None
+        
         # Build default items (values will be updated by controller)
         self._build_menu_items()
         
@@ -413,6 +417,8 @@ class MarsMenu:
                      format_func=lambda v: f"{v:.1f}V"),
             MenuItem("Volt Recovery", "value", value=10.5, min_val=9.5, max_val=11.5, step=0.1, unit="V",
                      format_func=lambda v: f"{v:.1f}V"),
+            MenuItem("LowBatt Filter", "value", value=0.005, min_val=0.001, max_val=0.100, step=0.001, unit="α",
+                     format_func=lambda v: f"{v:.3f}"),
             MenuItem("LowBatt Status", "info", value="OK"),
             MenuItem("---Actions---", "info", value=""),
             MenuItem("Clear Safety", "action"),
@@ -562,6 +568,10 @@ class MarsMenu:
             MenuItem("Obstacle Avoid", "option", value=1, options=["Off", "On"]),
             MenuItem("Cliff Detect", "option", value=1, options=["Off", "On"]),
             MenuItem("Caught Foot", "option", value=1, options=["Off", "On"]),
+            MenuItem("Wall Follow", "option", value=0, options=["Off", "On"]),
+            MenuItem("Wall Side", "option", value=0, options=["Left", "Right"]),
+            MenuItem("Wall Dist", "value", value=200, min_val=100, max_val=400, step=25,
+                     format_func=lambda v: f"{v}mm"),
             MenuItem("Patrol", "option", value=0, options=["Off", "On"]),
             # Obstacle avoidance thresholds
             MenuItem("Stop Dist", "value", value=150, min_val=50, max_val=500, step=25,
@@ -681,6 +691,26 @@ class MarsMenu:
         self._needs_render = True
         return self._visible
     
+    def set_audio_callback(self, callback):
+        """Set callback for menu audio feedback.
+        
+        Args:
+            callback: Function(event: str) where event is one of:
+                     'nav' - up/down navigation
+                     'tab' - tab change
+                     'adjust' - value adjustment
+                     'select' - item selection
+        """
+        self._audio_callback = callback
+    
+    def _play_audio(self, event: str):
+        """Play audio feedback for menu event."""
+        if self._audio_callback is not None:
+            try:
+                self._audio_callback(event)
+            except Exception:
+                pass  # Audio errors shouldn't break menu
+    
     # === Navigation ===
     
     def nav_up(self):
@@ -692,6 +722,7 @@ class MarsMenu:
             self._selected_item = (self._selected_item - 1) % len(items)
             self._ensure_visible()
             self._needs_render = True
+            self._play_audio('nav')
     
     def nav_down(self):
         """Move selection down."""
@@ -702,6 +733,7 @@ class MarsMenu:
             self._selected_item = (self._selected_item + 1) % len(items)
             self._ensure_visible()
             self._needs_render = True
+            self._play_audio('nav')
     
     def nav_left(self):
         """Adjust value left or switch to previous tab."""
@@ -713,6 +745,7 @@ class MarsMenu:
             if item.item_type in ("option", "value"):
                 item.adjust(-1)
                 self._needs_render = True
+                self._play_audio('adjust')
             else:
                 self.nav_tab_left()
     
@@ -726,6 +759,7 @@ class MarsMenu:
             if item.item_type in ("option", "value"):
                 item.adjust(1)
                 self._needs_render = True
+                self._play_audio('adjust')
             else:
                 self.nav_tab_right()
     
@@ -746,6 +780,7 @@ class MarsMenu:
         self._selected_item = 0
         self._scroll_offset = 0
         self._needs_render = True
+        self._play_audio('tab')
     
     def nav_tab_right(self):
         """Switch to next tab."""
@@ -764,6 +799,7 @@ class MarsMenu:
         self._selected_item = 0
         self._scroll_offset = 0
         self._needs_render = True
+        self._play_audio('tab')
     
     def select(self):
         """Select/activate the current item."""
@@ -773,11 +809,13 @@ class MarsMenu:
         if items and 0 <= self._selected_item < len(items):
             item = items[self._selected_item]
             if item.item_type == "action":
+                self._play_audio('select')
                 return item.select()
             elif item.item_type == "option":
                 # Cycle to next option on select
                 item.adjust(1)
                 self._needs_render = True
+                self._play_audio('select')
                 return True
         return False
     
@@ -1602,11 +1640,11 @@ class MarsMenu:
     def get_all_config(self) -> dict:
         """Export all menu items as a dictionary for web dashboard.
         
-        Returns a dict of {category_name: {item_label: value_or_display, ...}, ...}
-        Only includes value, option, and info items (not actions).
+        Returns a dict of {category_name: {item_label: item_data, ...}, ...}
+        Each item_data is a dict with: value, type, and optional min/max/step/options/unit.
         
         Returns:
-            dict: Configuration organized by category
+            dict: Configuration organized by category with full metadata
         """
         # Category ID to display name mapping
         category_names = {
@@ -1635,26 +1673,41 @@ class MarsMenu:
                 if item.item_type == "action":
                     continue
                 
+                # Build item data with metadata
+                item_data = {
+                    "type": item.item_type,
+                    "raw_value": item.value,
+                }
+                
                 # Get the display value for dashboard
                 if item.item_type == "option":
                     # For options, show the selected option text
                     if item.options and 0 <= item.value < len(item.options):
-                        display_val = item.options[item.value]
+                        item_data["display"] = item.options[item.value]
                     else:
-                        display_val = str(item.value)
+                        item_data["display"] = str(item.value)
+                    item_data["options"] = item.options
                 elif item.item_type == "value":
-                    # For numeric values, include unit
+                    # For numeric values, include unit and constraints
                     if item.format_func:
-                        display_val = item.format_func(item.value)
+                        item_data["display"] = item.format_func(item.value)
                     else:
-                        display_val = f"{item.value}{item.unit}" if item.unit else item.value
+                        item_data["display"] = f"{item.value}{item.unit}" if item.unit else str(item.value)
+                    if item.min_val is not None:
+                        item_data["min"] = item.min_val
+                    if item.max_val is not None:
+                        item_data["max"] = item.max_val
+                    if item.step is not None:
+                        item_data["step"] = item.step
+                    if item.unit:
+                        item_data["unit"] = item.unit
                 elif item.item_type == "info":
                     # Info items show their display value
-                    display_val = item.get_display_value()
+                    item_data["display"] = item.get_display_value()
                 else:
-                    display_val = str(item.value) if item.value is not None else "---"
+                    item_data["display"] = str(item.value) if item.value is not None else "---"
                 
-                category_config[item.label] = display_val
+                category_config[item.label] = item_data
             
             # Only include category if it has items
             if category_config:

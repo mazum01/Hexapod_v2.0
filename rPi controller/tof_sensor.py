@@ -75,6 +75,15 @@ class ToFConfig:
         resolution: Either 16 (4×4) or 64 (8×8).
         integration_time_ms: Sensor integration time (2-1000ms, lower = faster).
         sensors: List of individual sensor configurations.
+        
+        Filtering options:
+        filter_mode: Filter mode - 'off', 'light', or 'full'
+            - 'off': No filtering, raw sensor data (best for SLAM/motion)
+            - 'light': Only reject invalid/high-sigma, no EMA (fast, minimal lag)
+            - 'full': EMA smoothing + outlier rejection (smooth, for stationary)
+        filter_alpha: EMA alpha for 'full' mode (0.0-1.0). Higher = more responsive.
+        filter_sigma_threshold: Reject readings with sigma > this (mm).
+        filter_outlier_mm: Jump threshold for outlier attenuation in 'full' mode.
     """
     enabled: bool = True
     i2c_bus: int = 1
@@ -82,6 +91,12 @@ class ToFConfig:
     resolution: int = RESOLUTION_8X8
     integration_time_ms: int = 20
     sensors: List[ToFSensorConfig] = field(default_factory=lambda: [ToFSensorConfig()])
+    
+    # Filtering - mode: 'off', 'light', 'full'
+    filter_mode: str = 'light'      # 'off'=raw, 'light'=reject bad, 'full'=EMA
+    filter_alpha: float = 0.5       # EMA smoothing (higher = more responsive)
+    filter_sigma_threshold: int = 20  # Reject high-sigma readings (mm)
+    filter_outlier_mm: int = 100    # Jump threshold for outlier rejection
 
 
 @dataclass
@@ -407,8 +422,12 @@ class ToFThread(threading.Thread):
         # Sensor handles
         self._handles: Dict[str, ToFSensorHandle] = {}
         
-        # Latest frame (protected by lock)
+        # Latest frame (protected by lock) - holds filtered data
         self._frame = ToFFrame()
+        
+        # EMA filter state per sensor: Dict[sensor_name, List[float]]
+        # Each list holds the smoothed distance for each zone
+        self._ema_state: Dict[str, List[float]] = {}
         
         # Statistics
         self._read_count = 0
@@ -466,6 +485,121 @@ class ToFThread(threading.Thread):
             self._initialized = True
         
         return success_count
+    
+    def _apply_filter(self, sensor_name: str, raw_frame: ToFSensorFrame) -> ToFSensorFrame:
+        """Apply temporal EMA filter and outlier rejection to raw sensor data.
+        
+        Args:
+            sensor_name: Name of the sensor (for EMA state lookup)
+            raw_frame: Unfiltered sensor frame from hardware
+            
+        Returns:
+            Filtered frame with smoothed distance values
+        """
+        mode = self.config.filter_mode.lower()
+        
+        # Mode: 'off' - return raw data unchanged
+        if mode == 'off':
+            return raw_frame
+        
+        sigma_thresh = self.config.filter_sigma_threshold
+        resolution = raw_frame.resolution
+        
+        # Mode: 'light' - only reject invalid/high-sigma readings, no EMA
+        if mode == 'light':
+            filtered_distances = []
+            for i in range(resolution):
+                raw_dist = raw_frame.distance_mm[i]
+                raw_sigma = raw_frame.sigma_mm[i]
+                status = raw_frame.status[i]
+                
+                # Check if reading is valid
+                is_valid = (status in VALID_TARGET_STATUS and raw_dist > 0)
+                
+                # Reject high-sigma (noisy) readings
+                if is_valid and raw_sigma > sigma_thresh:
+                    is_valid = False
+                
+                if is_valid:
+                    filtered_distances.append(raw_dist)
+                else:
+                    filtered_distances.append(-1)  # Mark as invalid
+            
+            return ToFSensorFrame(
+                name=raw_frame.name,
+                i2c_address=raw_frame.i2c_address,
+                timestamp_ms=raw_frame.timestamp_ms,
+                valid=raw_frame.valid,
+                resolution=raw_frame.resolution,
+                temperature_c=raw_frame.temperature_c,
+                distance_mm=filtered_distances,
+                status=raw_frame.status[:],
+                reflectance=raw_frame.reflectance[:],
+                sigma_mm=raw_frame.sigma_mm[:],
+            )
+        
+        # Mode: 'full' - EMA smoothing with outlier rejection
+        alpha = self.config.filter_alpha
+        outlier_thresh = self.config.filter_outlier_mm
+        
+        # Initialize EMA state if needed
+        if sensor_name not in self._ema_state:
+            # Start with first valid readings
+            self._ema_state[sensor_name] = [float(d) if d > 0 else 0.0 
+                                            for d in raw_frame.distance_mm]
+        
+        ema = self._ema_state[sensor_name]
+        filtered_distances = []
+        
+        for i in range(resolution):
+            raw_dist = raw_frame.distance_mm[i]
+            raw_sigma = raw_frame.sigma_mm[i]
+            status = raw_frame.status[i]
+            current_ema = ema[i]
+            
+            # Check if reading is valid
+            is_valid = (status in VALID_TARGET_STATUS and raw_dist > 0)
+            
+            # Reject high-sigma (noisy) readings
+            if is_valid and raw_sigma > sigma_thresh:
+                is_valid = False
+            
+            if is_valid:
+                # Check for outlier (large jump from current EMA)
+                if current_ema > 0:
+                    jump = abs(raw_dist - current_ema)
+                    if jump > outlier_thresh:
+                        # Outlier detected - use reduced alpha for slower adaptation
+                        alpha_adj = alpha * 0.3
+                    else:
+                        alpha_adj = alpha
+                else:
+                    # No prior EMA - accept reading at full weight
+                    alpha_adj = 1.0
+                
+                # Update EMA: new = alpha * raw + (1 - alpha) * old
+                new_ema = alpha_adj * raw_dist + (1.0 - alpha_adj) * current_ema
+                ema[i] = new_ema
+                filtered_distances.append(int(round(new_ema)))
+            else:
+                # Invalid reading - hold previous value
+                filtered_distances.append(int(round(current_ema)) if current_ema > 0 else -1)
+        
+        # Create filtered frame
+        filtered_frame = ToFSensorFrame(
+            name=raw_frame.name,
+            i2c_address=raw_frame.i2c_address,
+            timestamp_ms=raw_frame.timestamp_ms,
+            valid=raw_frame.valid,
+            resolution=raw_frame.resolution,
+            temperature_c=raw_frame.temperature_c,
+            distance_mm=filtered_distances,
+            status=raw_frame.status[:],  # Keep original status
+            reflectance=raw_frame.reflectance[:],
+            sigma_mm=raw_frame.sigma_mm[:],
+        )
+        
+        return filtered_frame
     
     @property
     def connected(self) -> bool:
@@ -569,11 +703,13 @@ class ToFThread(threading.Thread):
             for name, handle in self._handles.items():
                 try:
                     if handle.data_ready():
-                        sensor_frame = handle.read_data()
-                        if sensor_frame is not None:
+                        raw_frame = handle.read_data()
+                        if raw_frame is not None:
+                            # Apply temporal filter to smooth noise
+                            filtered_frame = self._apply_filter(name, raw_frame)
                             with self._lock:
-                                self._frame.sensors[name] = sensor_frame
-                                self._frame.timestamp_ms = sensor_frame.timestamp_ms
+                                self._frame.sensors[name] = filtered_frame
+                                self._frame.timestamp_ms = filtered_frame.timestamp_ms
                                 self._read_count += 1
                         else:
                             with self._lock:
