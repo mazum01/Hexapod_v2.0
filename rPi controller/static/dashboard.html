@@ -1710,9 +1710,23 @@
         }
         
         function updateIMUGauge(axis, degrees) {
-            const clamped = Math.max(-45, Math.min(45, degrees));
-            document.getElementById(axis + '-value').textContent = degrees.toFixed(1) + '°';
-            document.getElementById(axis + '-needle').style.transform = `rotate(${clamped * 2}deg)`;
+            // For pitch/roll, use a wider range for visualization. 
+            // -45 to +45 deg input maps to -90 to +90 deg rotation on gauge
+            let clamped = Math.max(-45, Math.min(45, degrees));
+            let rotation = clamped * 2; 
+
+            // Handle Yaw (0-360) differently if needed, but assuming relative -45/+45 for now
+            if (axis === 'yaw') {
+                // Yaw is 0-360 usually, map to full circle? or just deviation?
+                // For now, treat same as pitch/roll drift
+                 rotation = clamped * 2;
+            }
+
+            const valEl = document.getElementById(axis + '-value');
+            const needleEl = document.getElementById(axis + '-needle');
+
+            if (valEl) valEl.textContent = degrees.toFixed(1) + '°';
+            if (needleEl) needleEl.style.transform = `rotate(${rotation}deg)`;
         }
         
         function updateStatus(id, isOn, onText, offText) {

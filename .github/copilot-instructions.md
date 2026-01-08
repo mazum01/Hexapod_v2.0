@@ -88,6 +88,22 @@ Startup splash
 - Always update: (1) main `.ino` header change log, (2) `CHANGELOG.md`, and (3) `docs/PROJECT_SPEC.md` if the behavior/contract changes.
  - After finishing a todo, bump `FW_VERSION` (SemVer patch by default) and verify splash/STATUS print the new version.
 
+## Python Coding Standards (Controller)
+- **Style**: Follow PEP 8 guidelines. Use 4-space indentation.
+- **Naming**: 
+  - Class names: `CapWords` (e.g., `Controller`).
+  - Method/Function names: `snake_case` (e.g., `send_cmd`).
+  - Variables: `snake_case` (e.g., `telemetry_data`).
+  - Constants: `UPPER_CASE` (e.g., `MAX_RETRIES`).
+  - **Avoid Hungarian notation** or global-style underscores for local variables (e.g., use `teensy_connected`, NOT `_teensyConnected`).
+  - Private class members can use a single leading underscore (e.g., `self._internal_state`).
+- **Error Handling**:
+  - **No bare excepts**: Never use `except:` or `except Exception: pass`. Always catch specific exceptions (e.g., `except serial.SerialException:`) or log the error if catching `Exception` is truly necessary.
+  - Use `try...finally` for resource cleanup (threads, sockets, serial ports).
+- **Structure**:
+  - Prefer class-based encapsulation over module-level globals.
+  - Use type hints (`def func(a: int) -> bool:`) where helpful for clarity.
+
 ## TODO management directive
 - Maintain a persistent project TODO list in `docs/TODO.md`.
   - Treat `docs/TODO.md` as the single source of truth for open tasks; keep it concise and actionable.

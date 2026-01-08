@@ -1,3 +1,51 @@
+## Python Controller 0.11.14 (b286) — 2026-01-08
+
+### M5: Code Hygiene & Standardization
+
+- **Exception Safety**: Replaced all bare `except: pass` blocks with proper logging to `mars_error.log` to expose silent failures.
+- **Naming Standardization**: Renamed legacy Hungarian/camelCase local variables (e.g. `_prevJoyState` -> `_prev_joy_state`) to PEP 8 snake_case.
+- **Logging**: Configured file-based logging to capture warnings without interfering with the Curses UI.
+
+## Python Controller 0.11.11 (b283) — 2026-01-08
+
+### M4 Phase 7: Autonomy State Migration
+
+- **State Encapsulation**: Migrated Autonomy and Behavior globals (`_autonomyEnabled`, `_behaviorArbiter`, etc.) to `Controller.autonomy_state` and `Controller.behavior_arbiter`.
+- **Refactoring**: Moved `_toggle_autonomy`, `_disable_autonomy_if_active`, and `_init_behavior_arbiter` logic into `Controller` class methods.
+- **Config Loader**: Updated `load_config()` to load behavior settings directly into `Controller`, with arbiter invalidation on change.
+- **Cleanup**: Removed ~20 global variables and associated helper functions from `controller.py`.
+
+## Python Controller 0.11.10 (b282) — 2026-01-08
+
+### M4 Phase 6: PID/IMP/EST State Migration
+
+- **State Encapsulation**: Migrated PID, Impedance, and Estimator state from global dictionaries (`_pid_ini`, `_imp_ini`, `_est_ini`) to `Controller` instance (`self.pid_state`, `imp_state`, `est_state`).
+- **Config Loader**: Updated `load_config()` to load PID/IMP/EST settings directly into `Controller`.
+- **Dashboard Handlers**: Rewrote PID/IMP/EST dashboard config handlers to use instance state and global `send_cmd()`.
+- **Cleanup**: Removed legacy globals and configuration unpacking logic.
+
+---
+## Python Controller 0.11.5 (b277) — 2026-01-06
+
+### M3.2: Menu Logic Extraction — SYSTEM Callbacks
+
+- **SYSTEM callbacks extracted**: `setup_system_callbacks()` and `sync_system_initial_values()` added to `menu_controller.py`.
+- Handles: Theme, Palette, Brightness, Auto-Disable, Verbose, Mirror, Save All, Shutdown.
+- **controller.py reduced**: ~50 lines moved to menu_controller.py.
+
+---
+
+## Python Controller 0.11.4 (b276) — 2026-01-06
+
+### M3.1: Menu Logic Extraction — EYES Callbacks
+
+- **New module**: Created `menu_controller.py` for extracted menu callback logic.
+- **EYES callbacks extracted**: `setup_eyes_callbacks()` and `sync_eyes_initial_values()` now handle all EYES menu functionality.
+- **Bridge pattern**: Uses `SimpleNamespace` context to pass globals safely without circular imports.
+- **controller.py reduced**: ~35 lines moved to new module.
+
+---
+
 ## Python Controller 0.10.17 (b271) — 2026-01-06
 
 ### Curses Terminal Compatibility

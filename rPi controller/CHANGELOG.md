@@ -6,6 +6,22 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2026-01-08  v0.11.13 b285: Refactor M4 (Final Phase): Completely removed legacy state synchronization (`sync_globals_to_ctrl` / `sync_ctrl_to_globals`). Controller class is now the sole source of truth for runtime state. Updated startup logic to direct-assign `ctrl.controller` and `ctrl.menuState`.
+
+2026-01-08  v0.11.12 b284: Refactor M4 Phase 9 (Logic Globals): Migrated Move State, Gait Transition, Display Mode, and IMU Thread logic to Controller instance. Updated runtime phases (`phase_gait_tick`, `poll_gamepad`, `handle_teensy_disconnect`) to use instance state instead of globals. Logic functions are now nearly global-free.
+2026-01-08  v0.11.11 b283: Refactor M4 (Phase 8): Migrated PointCloud and Dashboard state to Controller class. Refactored phase_pointcloud/dashboard to use instance state.
+2026-01-08  v0.11.10 b282: Refactor M4 (Phase 6): Migrated PID/Impedance/Estimator state to Controller class. Rewrote dashboard handlers to use new state structure. Removed legacy globals.
+2026-01-07  v0.11.9 b281: Refactor M4 (Phase 5): Migrated Safety, Low Battery, and Leveling state to Controller class. Removed related globals. Added load_config() method.
+2026-01-07  v0.11.8 b280: Refactor M4 (Gait State): Migrated _gaitEngine, _gaitActive, and feet tracking to Controller class. Deleted global helpers send_feet_cmd/_start_standing_gait.
+
+2026-01-06  v0.11.7 b279: Refactor M4 Phase 1: State Encapsulation started. `_setup_mars_menu()` now accepts `ctrl` instance; `phase_keyboard_input()` refactored to use `ctrl.verbose`/`ctrl.mirror` etc directly instead of module globals. Logic updated to make `Controller` instance the state authority for these flags.
+2026-01-06  v0.11.6 b278: Refactor M3 Complete: Extracted all menu callbacks from controller.py to menu_controller.py. Created setup functions for PID/IMP/EST, IMU/Leveling, ToF, GAIT, POSTURE/Pounce, AUTONOMY, SAFETY categories plus sync_*_initial_values() helpers. Uses SimpleNamespace context objects with lambda getters/setters to access globals without circular imports. controller.py reduced from 7413 to 6708 lines (~700 lines extracted).
+2026-01-06  v0.11.5 b277: Refactor M3.2: Extracted SYSTEM callbacks to menu_controller.py (setup_system_callbacks, sync_system_initial_values).
+2026-01-06  v0.11.4 b276: Refactor M3.1: Created menu_controller.py module for extracted menu callbacks. Added setup_eyes_callbacks() and sync_eyes_initial_values() - first extraction of ~80 lines from _setup_mars_menu().
+2026-01-06  v0.11.3 b275: Refactor M2 Complete: Added _unpack_config_to_globals() helper (~300 lines) that bridges ControllerConfig dataclass to legacy globals; removed ~350 lines of redundant ConfigParser parsing code; config loading now flows through typed dataclasses. File reduced from 7809 to 7483 lines.
+2026-01-06  v0.11.2 b274: Refactor M2: Added load_config() call in controller.py; ControllerConfig loaded on startup alongside legacy ConfigParser for gradual migration.
+2026-01-06  v0.11.1 b273: Refactor M2: Integrated load_config() from config_manager; ControllerConfig dataclass now available for dependency injection; updated __all__ exports with all config dataclasses.
+2026-01-06  v0.11.0 b272: Refactor: Configured entry point separation (M1) - main.py wrapper created to handle clean startup/shutdown; joy_controller now launches main.py. ConfigManager upgraded (M2) to handle all INI logic; controller.py prepared for dependency injection.
 2026-01-06  v0.10.17 b271: Curses: Fixed all print statements across controller, servers, and modules to use end="\r\n" for proper curses terminal output; suppressed pygame banner and I2C warnings during startup; fixed async server shutdown (pointcloud_server, telemetry_server) to exit gracefully without RuntimeError.
 2026-01-05  v0.10.16 b270: Help: Press '?' to print keyboard command reference to console. Lists all keyboard shortcuts by category.
 2026-01-05  v0.10.15 b269: Menu: Wall Follow behavior in AUTONOMY tab (enable/side/distance); LCD notification overlay when behaviors toggled (auto-dismisses after 2s).

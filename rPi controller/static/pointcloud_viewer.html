@@ -702,12 +702,34 @@
         }
         
         function handleMessage(data) {
-            // Server sends type='frame' with points as [[x,y,z], ...] arrays
+            // Server sends type='frame' with points and pose
             if (data.type === 'frame') {
-                updatePointCloud(data);
+                if (data.pose) updatePose(data.pose);
+                if (data.points) updatePointCloud(data);
             }
         }
         
+        // =================================================================
+        // Pose Updates
+        // =================================================================
+        
+        function updatePose(pose) {
+            if (!robotMarker || !pose.rotation) return;
+            
+            // pose.rotation is [roll, pitch, yaw] in radians
+            const [roll, pitch, yaw] = pose.rotation;
+            
+            // Map Robot Frame (Z-up) to Scene Frame (Y-up)
+            // Robot Yaw (Z)   -> Scene Y
+            // Robot Pitch (Y) -> Scene X
+            // Robot Roll (X)  -> Scene Z
+            
+            robotMarker.rotation.order = 'YXZ';
+            robotMarker.rotation.y = yaw;
+            robotMarker.rotation.x = pitch;
+            robotMarker.rotation.z = -roll;
+        }
+
         // =================================================================
         // Point Cloud Updates
         // =================================================================

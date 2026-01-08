@@ -66,6 +66,8 @@ class DisplayConfig:
     thread_enabled: bool = True
     thread_hz: float = 15.0
     blink_frame_divisor: int = 2
+    engineering_lcars: bool = True
+    startup_delay_s: float = 5.0
 
 
 @dataclass
@@ -85,6 +87,9 @@ class GaitConfig:
     send_divisor: int = 3
     turn_max_deg_s: float = 60.0
     cmd_throttle_ms: float = 50.0
+    layer2_divisor: int = 5
+    feet_tolerance_mm: float = 0.3
+    feet_max_skip_ms: float = 100.0
     # Saved width/lift
     width_mm: float = 100.0
     lift_mm: float = 60.0
@@ -98,6 +103,45 @@ class GaitConfig:
     bezier_p2_height: float = 1.5
     bezier_p3_height: float = 0.35
     bezier_p3_overshoot: float = 1.1
+
+
+@dataclass
+class ImuConfig:
+    enabled: bool = True
+    hz: float = 100.0
+    bus: int = 3
+    address: int = 0x4A
+    use_game_rotation: bool = False
+    enable_accel: bool = False
+    enable_gyro: bool = False
+    enable_mag: bool = False
+
+
+@dataclass
+class LevelingConfig:
+    enabled: bool = False
+    gain: float = 1.0
+    max_correction_mm: float = 30.0
+    filter_alpha: float = 0.15
+    pitch_offset: float = 0.0
+    roll_offset: float = 0.0
+    tilt_limit_deg: float = 25.0
+    lean_enabled: bool = False
+    lean_max_deg: float = 7.0
+    lean_filter_alpha: float = 0.1
+
+
+@dataclass
+class ToFConfig:
+    enabled: bool = True
+    hz: float = 15.0
+    bus: int = 1
+    resolution: int = 64
+    sensors: List[Tuple[str, int]] = field(default_factory=lambda: [("front", 0x29)])
+    filter_mode: str = 'light'
+    filter_alpha: float = 0.5
+    filter_sigma_threshold: int = 20
+    filter_outlier_mm: int = 100
 
 
 @dataclass
@@ -127,10 +171,11 @@ class EyeConfig:
     size_y: int = 45
     look_range_x: float = 20.0
     look_range_y: float = 10.0
-    human_spacing_pct: float = 0.25
-    human_size: int = 33
-    human_color_idx: int = 0
+    human_eye_spacing_pct: float = 0.25
+    human_eye_size: int = 33
+    human_eye_color: int = 0
     shape: int = 2  # ROUNDRECTANGLE default
+    crt_mode: bool = False
     # Eye colors (R,G,B tuples)
     color_ellipse: Tuple[int, int, int] = (255, 80, 20)
     color_rectangle: Tuple[int, int, int] = (255, 255, 255)
@@ -194,6 +239,75 @@ class SafetyDisplayConfig:
     # Temperature thresholds for display color gradient
     temp_min: float = 25.0     # Green (cool) threshold
     temp_max: float = 55.0     # Red (hot) threshold
+    # Display options
+    show_battery_icon: bool = True  # Show battery icon on display
+
+
+@dataclass
+class LowBatteryConfig:
+    enabled: bool = True
+    volt_critical: float = 10.0
+    volt_recovery: float = 11.5
+    filter_alpha: float = 0.1
+
+
+@dataclass
+class BehaviorConfig:
+    enabled: bool = False
+    obstacle_avoidance: bool = True
+    cliff_detection: bool = True
+    caught_foot_recovery: bool = True
+    patrol: bool = False
+    wall_follow: bool = False
+    wall_side: str = 'left'
+    wall_distance_mm: int = 200
+    stop_distance_mm: int = 150
+    slow_distance_mm: int = 300
+    cliff_threshold_mm: int = 100
+    snag_position_error_deg: float = 15.0
+    snag_timeout_ms: int = 500
+    recovery_lift_mm: float = 30.0
+    max_recovery_attempts: int = 3
+    patrol_duration_s: float = 60.0
+    turn_interval_s: float = 10.0
+
+
+@dataclass
+class PointCloudConfig:
+    enabled: bool = False
+    port: int = 8765
+    http_port: int = 8080
+    stream_hz: float = 10.0
+    accumulate: bool = True
+    max_points: int = 50000
+    voxel_mm: float = 20.0
+
+
+@dataclass
+class DashboardConfig:
+    enabled: bool = True
+    port: int = 8766
+    stream_hz: float = 4.0
+
+
+@dataclass
+class AudioConfig:
+    enabled: bool = True
+    volume: float = 1.0
+    device: str = "hw:2,0"
+    sounds_dir: str = "assets/sounds"
+
+
+@dataclass
+class TTSConfig:
+    enabled: bool = True
+    engine: str = "piper"
+    rate: int = 175
+    gain_db: int = 0
+    voice: str = "en_US-lessac-medium"
+    pitch: int = 50
+    piper_model: str = "~/piper/en_US-lessac-medium.onnx"
+    cooldown_sec: float = 2.0
 
 
 @dataclass
@@ -205,6 +319,9 @@ class ControllerConfig:
     timing: TimingConfig = field(default_factory=TimingConfig)
     display: DisplayConfig = field(default_factory=DisplayConfig)
     menu: MenuConfig = field(default_factory=MenuConfig)
+    imu: ImuConfig = field(default_factory=ImuConfig)
+    leveling: LevelingConfig = field(default_factory=LevelingConfig)
+    tof: ToFConfig = field(default_factory=ToFConfig)
     gait: GaitConfig = field(default_factory=GaitConfig)
     pounce: PounceConfig = field(default_factory=PounceConfig)
     eyes: EyeConfig = field(default_factory=EyeConfig)
@@ -212,6 +329,12 @@ class ControllerConfig:
     imp: IMPConfig = field(default_factory=IMPConfig)
     est: ESTConfig = field(default_factory=ESTConfig)
     safety_display: SafetyDisplayConfig = field(default_factory=SafetyDisplayConfig)
+    low_battery: LowBatteryConfig = field(default_factory=LowBatteryConfig)
+    behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
+    pointcloud: PointCloudConfig = field(default_factory=PointCloudConfig)
+    dashboard: DashboardConfig = field(default_factory=DashboardConfig)
+    audio: AudioConfig = field(default_factory=AudioConfig)
+    tts: TTSConfig = field(default_factory=TTSConfig)
 
 
 # -----------------------------------------------------------------------------
@@ -318,11 +441,70 @@ def load_config(config_path: Optional[str] = None) -> ControllerConfig:
                                                    fallback=cfg.display.thread_hz)
             cfg.display.blink_frame_divisor = _cfg.getint('display', 'blink_frame_divisor', 
                                                            fallback=cfg.display.blink_frame_divisor)
-        
+            cfg.display.engineering_lcars = _cfg.getboolean('display', 'engineering_lcars',
+                                                          fallback=True)
+            startup_delay = _cfg.getfloat('display', 'startup_delay_s', fallback=5.0)
+            cfg.display.startup_delay_s = max(0.0, min(30.0, round(startup_delay * 2) / 2))
+
         # Menu section
         if 'menu' in _cfg:
             cfg.menu.theme = _cfg.getint('menu', 'theme', fallback=cfg.menu.theme)
             cfg.menu.palette = _cfg.getint('menu', 'palette', fallback=cfg.menu.palette)
+        
+        # IMU section
+        if 'imu' in _cfg:
+            cfg.imu.enabled = _cfg.getboolean('imu', 'enabled', fallback=cfg.imu.enabled)
+            cfg.imu.hz = _cfg.getfloat('imu', 'hz', fallback=cfg.imu.hz)
+            cfg.imu.bus = _cfg.getint('imu', 'bus', fallback=cfg.imu.bus)
+            addr_str = _cfg.get('imu', 'address', fallback=None)
+            if addr_str:
+                try:
+                    cfg.imu.address = int(addr_str, 0)
+                except ValueError:
+                    pass
+            cfg.imu.use_game_rotation = _cfg.getboolean('imu', 'use_game_rotation', fallback=cfg.imu.use_game_rotation)
+            cfg.imu.enable_accel = _cfg.getboolean('imu', 'enable_accel', fallback=cfg.imu.enable_accel)
+            cfg.imu.enable_gyro = _cfg.getboolean('imu', 'enable_gyro', fallback=cfg.imu.enable_gyro)
+            cfg.imu.enable_mag = _cfg.getboolean('imu', 'enable_mag', fallback=cfg.imu.enable_mag)
+            
+        # Leveling section
+        if 'leveling' in _cfg:
+            cfg.leveling.enabled = _cfg.getboolean('leveling', 'enabled', fallback=cfg.leveling.enabled)
+            cfg.leveling.gain = _cfg.getfloat('leveling', 'gain', fallback=cfg.leveling.gain)
+            cfg.leveling.max_correction_mm = _cfg.getfloat('leveling', 'max_correction_mm', fallback=cfg.leveling.max_correction_mm)
+            cfg.leveling.filter_alpha = _cfg.getfloat('leveling', 'filter_alpha', fallback=cfg.leveling.filter_alpha)
+            cfg.leveling.pitch_offset = _cfg.getfloat('leveling', 'pitch_offset', fallback=cfg.leveling.pitch_offset)
+            cfg.leveling.roll_offset = _cfg.getfloat('leveling', 'roll_offset', fallback=cfg.leveling.roll_offset)
+            cfg.leveling.tilt_limit_deg = _cfg.getfloat('leveling', 'tilt_limit_deg', fallback=cfg.leveling.tilt_limit_deg)
+            cfg.leveling.lean_enabled = _cfg.getboolean('leveling', 'lean_enabled', fallback=cfg.leveling.lean_enabled)
+            cfg.leveling.lean_max_deg = _cfg.getfloat('leveling', 'lean_max_deg', fallback=cfg.leveling.lean_max_deg)
+            cfg.leveling.lean_filter_alpha = _cfg.getfloat('leveling', 'lean_filter_alpha', fallback=cfg.leveling.lean_filter_alpha)
+            
+        # ToF section
+        if 'tof' in _cfg:
+            cfg.tof.enabled = _cfg.getboolean('tof', 'enabled', fallback=cfg.tof.enabled)
+            cfg.tof.hz = _cfg.getfloat('tof', 'hz', fallback=cfg.tof.hz)
+            cfg.tof.bus = _cfg.getint('tof', 'bus', fallback=cfg.tof.bus)
+            res_cfg = _cfg.getint('tof', 'resolution', fallback=8)
+            cfg.tof.resolution = 64 if res_cfg >= 8 else 16
+            
+            sensors_str = _cfg.get('tof', 'sensors', fallback=None)
+            if sensors_str:
+                cfg.tof.sensors = []
+                for pair in sensors_str.split(','):
+                    pair = pair.strip()
+                    if '=' in pair:
+                        name, addr_str = pair.split('=', 1)
+                        try:
+                            addr = int(addr_str.strip(), 0)
+                            cfg.tof.sensors.append((name.strip(), addr))
+                        except ValueError:
+                            pass
+            
+            cfg.tof.filter_mode = _cfg.get('tof', 'filter_mode', fallback=cfg.tof.filter_mode)
+            cfg.tof.filter_alpha = _cfg.getfloat('tof', 'filter_alpha', fallback=cfg.tof.filter_alpha)
+            cfg.tof.filter_sigma_threshold = _cfg.getint('tof', 'filter_sigma_threshold', fallback=cfg.tof.filter_sigma_threshold)
+            cfg.tof.filter_outlier_mm = _cfg.getint('tof', 'filter_outlier_mm', fallback=cfg.tof.filter_outlier_mm)
         
         # Gait section
         if 'gait' in _cfg:
@@ -374,10 +556,11 @@ def load_config(config_path: Optional[str] = None) -> ControllerConfig:
             cfg.eyes.size_y = _cfg.getint('eyes', 'size_y', fallback=cfg.eyes.size_y)
             cfg.eyes.look_range_x = _cfg.getfloat('eyes', 'look_range_x', fallback=cfg.eyes.look_range_x)
             cfg.eyes.look_range_y = _cfg.getfloat('eyes', 'look_range_y', fallback=cfg.eyes.look_range_y)
-            cfg.eyes.human_spacing_pct = _cfg.getfloat('eyes', 'human_eye_spacing_pct', fallback=cfg.eyes.human_spacing_pct)
-            cfg.eyes.human_size = _cfg.getint('eyes', 'human_eye_size', fallback=cfg.eyes.human_size)
-            cfg.eyes.human_color_idx = _cfg.getint('eyes', 'human_eye_color', fallback=cfg.eyes.human_color_idx)
+            cfg.eyes.human_eye_spacing_pct = _cfg.getfloat('eyes', 'human_eye_spacing_pct', fallback=cfg.eyes.human_eye_spacing_pct)
+            cfg.eyes.human_eye_size = _cfg.getint('eyes', 'human_eye_size', fallback=cfg.eyes.human_eye_size)
+            cfg.eyes.human_eye_color = _cfg.getint('eyes', 'human_eye_color', fallback=cfg.eyes.human_eye_color)
             cfg.eyes.shape = _cfg.getint('eyes', 'shape', fallback=cfg.eyes.shape)
+            cfg.eyes.crt_mode = _cfg.getboolean('eyes', 'crt_mode', fallback=cfg.eyes.crt_mode)
             # Eye colors
             cfg.eyes.color_ellipse = _parse_rgb(_cfg.get('eyes', 'color_ellipse', fallback='255,80,20'), cfg.eyes.color_ellipse)
             cfg.eyes.color_rectangle = _parse_rgb(_cfg.get('eyes', 'color_rectangle', fallback='255,255,255'), cfg.eyes.color_rectangle)
@@ -395,6 +578,67 @@ def load_config(config_path: Optional[str] = None) -> ControllerConfig:
             cfg.eyes.human_color_brown = _parse_rgb(_cfg.get('eyes', 'human_color_brown', fallback='100,60,30'), cfg.eyes.human_color_brown)
             cfg.eyes.human_color_darkbrown = _parse_rgb(_cfg.get('eyes', 'human_color_darkbrown', fallback='50,30,20'), cfg.eyes.human_color_darkbrown)
         
+        # Low Battery section
+        if 'low_battery' in _cfg:
+            cfg.low_battery.enabled = _cfg.getboolean('low_battery', 'enabled', fallback=cfg.low_battery.enabled)
+            cfg.low_battery.volt_critical = _cfg.getfloat('low_battery', 'volt_critical', fallback=cfg.low_battery.volt_critical)
+            cfg.low_battery.volt_recovery = _cfg.getfloat('low_battery', 'volt_recovery', fallback=cfg.low_battery.volt_recovery)
+            cfg.low_battery.filter_alpha = _cfg.getfloat('low_battery', 'filter_alpha', fallback=cfg.low_battery.filter_alpha)
+
+        # Autonomy / Behavior
+        if 'behavior' in _cfg:
+            cfg.behavior.enabled = _cfg.getboolean('behavior', 'enabled', fallback=cfg.behavior.enabled)
+            cfg.behavior.obstacle_avoidance = _cfg.getboolean('behavior', 'obstacle_avoidance', fallback=cfg.behavior.obstacle_avoidance)
+            cfg.behavior.cliff_detection = _cfg.getboolean('behavior', 'cliff_detection', fallback=cfg.behavior.cliff_detection)
+            cfg.behavior.caught_foot_recovery = _cfg.getboolean('behavior', 'caught_foot_recovery', fallback=cfg.behavior.caught_foot_recovery)
+            cfg.behavior.patrol = _cfg.getboolean('behavior', 'patrol', fallback=cfg.behavior.patrol)
+            cfg.behavior.wall_follow = _cfg.getboolean('behavior', 'wall_follow', fallback=cfg.behavior.wall_follow)
+            cfg.behavior.wall_side = _cfg.get('behavior', 'wall_side', fallback=cfg.behavior.wall_side).lower().strip()
+            cfg.behavior.wall_distance_mm = _cfg.getint('behavior', 'wall_distance_mm', fallback=cfg.behavior.wall_distance_mm)
+            cfg.behavior.stop_distance_mm = _cfg.getint('behavior', 'stop_distance_mm', fallback=cfg.behavior.stop_distance_mm)
+            cfg.behavior.slow_distance_mm = _cfg.getint('behavior', 'slow_distance_mm', fallback=cfg.behavior.slow_distance_mm)
+            cfg.behavior.cliff_threshold_mm = _cfg.getint('behavior', 'cliff_threshold_mm', fallback=cfg.behavior.cliff_threshold_mm)
+            cfg.behavior.snag_position_error_deg = _cfg.getfloat('behavior', 'snag_position_error_deg', fallback=cfg.behavior.snag_position_error_deg)
+            cfg.behavior.snag_timeout_ms = _cfg.getint('behavior', 'snag_timeout_ms', fallback=cfg.behavior.snag_timeout_ms)
+            cfg.behavior.recovery_lift_mm = _cfg.getfloat('behavior', 'recovery_lift_mm', fallback=cfg.behavior.recovery_lift_mm)
+            cfg.behavior.max_recovery_attempts = _cfg.getint('behavior', 'max_recovery_attempts', fallback=cfg.behavior.max_recovery_attempts)
+            cfg.behavior.patrol_duration_s = _cfg.getfloat('behavior', 'patrol_duration_s', fallback=cfg.behavior.patrol_duration_s)
+            cfg.behavior.turn_interval_s = _cfg.getfloat('behavior', 'turn_interval_s', fallback=cfg.behavior.turn_interval_s)
+
+        # Point Cloud / SLAM
+        if 'pointcloud' in _cfg:
+            cfg.pointcloud.enabled = _cfg.getboolean('pointcloud', 'enabled', fallback=cfg.pointcloud.enabled)
+            cfg.pointcloud.port = _cfg.getint('pointcloud', 'port', fallback=cfg.pointcloud.port)
+            cfg.pointcloud.http_port = _cfg.getint('pointcloud', 'http_port', fallback=cfg.pointcloud.http_port)
+            cfg.pointcloud.stream_hz = _cfg.getfloat('pointcloud', 'stream_hz', fallback=cfg.pointcloud.stream_hz)
+            cfg.pointcloud.accumulate = _cfg.getboolean('pointcloud', 'accumulate', fallback=cfg.pointcloud.accumulate)
+            cfg.pointcloud.max_points = _cfg.getint('pointcloud', 'max_points', fallback=cfg.pointcloud.max_points)
+            cfg.pointcloud.voxel_mm = _cfg.getfloat('pointcloud', 'voxel_mm', fallback=cfg.pointcloud.voxel_mm)
+
+        # Dashboard
+        if 'dashboard' in _cfg:
+            cfg.dashboard.enabled = _cfg.getboolean('dashboard', 'enabled', fallback=cfg.dashboard.enabled)
+            cfg.dashboard.port = _cfg.getint('dashboard', 'port', fallback=cfg.dashboard.port)
+            cfg.dashboard.stream_hz = _cfg.getfloat('dashboard', 'stream_hz', fallback=cfg.dashboard.stream_hz)
+
+        # Audio
+        if 'audio' in _cfg:
+            cfg.audio.enabled = _cfg.getboolean('audio', 'enabled', fallback=cfg.audio.enabled)
+            cfg.audio.volume = _cfg.getfloat('audio', 'volume', fallback=cfg.audio.volume)
+            cfg.audio.device = _cfg.get('audio', 'device', fallback=cfg.audio.device)
+            cfg.audio.sounds_dir = _cfg.get('audio', 'sounds_dir', fallback=cfg.audio.sounds_dir)
+
+        # TTS
+        if 'tts' in _cfg:
+            cfg.tts.enabled = _cfg.getboolean('tts', 'enabled', fallback=cfg.tts.enabled)
+            cfg.tts.engine = _cfg.get('tts', 'engine', fallback=cfg.tts.engine).lower().strip()
+            cfg.tts.rate = _cfg.getint('tts', 'rate', fallback=cfg.tts.rate)
+            cfg.tts.gain_db = _cfg.getint('tts', 'gain_db', fallback=cfg.tts.gain_db)
+            cfg.tts.voice = _cfg.get('tts', 'voice', fallback=cfg.tts.voice)
+            cfg.tts.pitch = _cfg.getint('tts', 'pitch', fallback=cfg.tts.pitch)
+            cfg.tts.piper_model = os.path.expanduser(_cfg.get('tts', 'piper_model', fallback=cfg.tts.piper_model))
+            cfg.tts.cooldown_sec = _cfg.getfloat('tts', 'cooldown_sec', fallback=cfg.tts.cooldown_sec)
+
         # PID section
         if 'pid' in _cfg:
             cfg.pid.enabled = _cfg.getboolean('pid', 'enabled', fallback=None)
@@ -438,6 +682,8 @@ def load_config(config_path: Optional[str] = None) -> ControllerConfig:
                                                          fallback=cfg.safety_display.temp_min)
             cfg.safety_display.temp_max = _cfg.getfloat('safety_display', 'temp_max', 
                                                          fallback=cfg.safety_display.temp_max)
+            cfg.safety_display.show_battery_icon = _cfg.getboolean('safety_display', 'show_battery_icon',
+                                                                    fallback=cfg.safety_display.show_battery_icon)
     
     except (configparser.Error, ValueError, KeyError) as e:
         print(f"Config parse error (using defaults): {e}", end="\r\n")
@@ -857,14 +1103,19 @@ def save_low_battery_settings(low_batt_state: dict) -> bool:
 # Module exports
 # -----------------------------------------------------------------------------
 __all__ = [
+    # Config loading
+    'load_config', 'ControllerConfig',
     # Config state management
     'set_config_state',
     # Dataclasses
     'SerialConfig', 'TelemetryConfig', 'GaitConfig', 'EyeConfig',
     'DisplayConfig', 'PounceConfig', 'TimingConfig', 'SafetyDisplayConfig',
+    'ImuConfig', 'LevelingConfig', 'ToFConfig', 'LowBatteryConfig',
+    'BehaviorConfig', 'PointCloudConfig', 'DashboardConfig', 'AudioConfig', 'TTSConfig',
+    'MenuConfig', 'PIDConfig', 'IMPConfig', 'ESTConfig',
     # Save functions
     'save_gait_settings', 'save_pounce_settings',
-    'save_eye_shape', 'save_eye_color', 'save_eye_spacing', 'save_eye_vertical_offset',
+    'save_eye_shape', 'save_human_eye_settings', 'save_eye_vertical_offset',
     'save_eye_crt_mode', 'save_eye_center_offset',
     'save_menu_settings',
     'save_pid_settings', 'save_imp_settings', 'save_est_settings', 'save_tof_settings',

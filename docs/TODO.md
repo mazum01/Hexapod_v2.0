@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2026-01-06 (Curses print fixes, async shutdown fixes v0.10.17)
+Last updated: 2026-01-06 (Modularization plan for v0.11.x)
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -8,6 +8,59 @@ Conventions
 - Keep items short and actionable; mirror high-level plan in docs/PROJECT_SPEC.md when relevant.
 - Copilot will update this file when TODOs change, and reference it in commits.
 - Reminder: On any behavior change or TODO completion, also bump FW/Controller versions, update in-file change logs, update CHANGELOG.md, and keep docs/USER_MANUAL.md in sync with the new versions.
+
+---
+
+## Modularization & Refactoring — Phase 2 (Jan 2026)
+
+Goal: Reduce `controller.py` complexity (currently ~7.5k lines), eliminate module-level globals, and improve state management before Phase 2 Autonomy.
+
+### M1. Entry Point Separation ✅ COMPLETE
+- [x] Create `main.py` as the new entry point.
+- [x] Update `joy_controller.py` to launch `main.py` instead of `controller.py` (update `CONTROLLER_SCRIPT` and process killing logic).
+- [x] Move module-level initialization code — deferred. `main.py` wraps `controller.py` via import; full separation would require wrapping 7k lines in `main()` with low practical benefit.
+- [x] Protect `main.py` execution with `if __name__ == "__main__":`. Done in main.py; controller runs on import by design (legacy wrapper pattern).
+- [x] Ensure `controller.py` contains only `class Controller` — deferred. Current structure works; M4 will migrate globals into Controller naturally.
+
+### M2. Configuration Refactor ✅ COMPLETE
+- [x] Extend `config_manager.py` to handle all INI loading logic (was ~400 lines in `controller.py`).
+- [x] Create `RobotConfig` class to hold all config values. (Done: `ControllerConfig` master dataclass with 22 sub-configs)
+- [x] Add `_unpack_config_to_globals()` helper function to bridge typed config to legacy globals. (Done: v0.11.3 b275)
+- [x] Remove redundant ConfigParser parsing (~350 lines) from controller.py. (Done: v0.11.3 b275, file reduced to 7483 lines)
+- [x] Update `Controller.__init__` to accept a `RobotConfig` instance — deferred. Globals bridge works; M4 will clean this up as state migrates into Controller.
+
+### M3. Menu Logic Extraction ✓ Complete (v0.11.6 b278)
+- [x] Create `menu_controller.py`. (Done: v0.11.4 b276)
+- [x] Move `_setup_mars_menu()` callback functions out of `controller.py` — phased extraction:
+  - [x] M3.1: EYES callbacks (v0.11.4 b276)
+  - [x] M3.2: SYSTEM callbacks (v0.11.5 b277)
+  - [x] M3.3: PID/IMP/EST callbacks (v0.11.6 b278)
+  - [x] M3.4: IMU/Leveling callbacks (v0.11.6 b278)
+  - [x] M3.5: ToF callbacks (v0.11.6 b278)
+  - [x] M3.6: GAIT callbacks (v0.11.6 b278)
+  - [x] M3.7: POSTURE + Pounce callbacks (v0.11.6 b278)
+  - [x] M3.8: AUTONOMY callbacks (v0.11.6 b278)
+  - [x] M3.9: SAFETY callbacks (v0.11.6 b278)
+  - [x] M3.10: Initial value sync + final wiring (v0.11.6 b278)
+- [x] Refactor callbacks to use `Controller` instance methods (Done implicitly via M4 state migration).
+
+### M4. State Encapsulation [~] In Progress
+- [x] Phase 1: Fix `_setup_mars_menu` deferred binding (pass `ctrl`). (Done: v0.11.7 b279)
+- [x] Phase 2: Refactor `phase_keyboard_input` to use `ctrl` for `verbose`/`mirror`/`forceDisplayUpdate`. (Done: v0.11.7 b279)
+- [x] Phase 3: Update `sync_globals_to_ctrl` to stop overwriting authoritative `ctrl` state. (Done: v0.11.7 b279)
+- [x] Phase 4: Gait state migration (gait engine, feet tracking, active flags). (Done: v0.11.8 b280)
+- [x] Phase 5: Safety, Power, and Leveling state migration. (Done: v0.11.9)
+- [x] Phase 6: PID, Impedance, and Estimator state migration. (Done: v0.11.10)
+- [x] Phase 7: Autonomy state migration.
+- [x] Phase 8: PointCloud and Dashboard state migration.
+- [x] Final: Remove all `global` statements from `controller.py`.
+- [x] Phase 4: Migrate Gait state (`gaitEngine`, `gaitActive`, `send_feet_cmd`) to `Controller`. (Done: v0.11.8 b280)
+
+- [x] Remove `sync_globals_to_ctrl` entirely (once all incoming globals are migrated).
+
+### M5. Code Hygiene ✅ COMPLETE
+- [x] Audit and fix bare `try...except: pass` blocks (add logging). (Done: v0.11.14)
+- [x] Standardize variable naming (remove Hungarian/global style underscores where inappropriate). (Done: v0.11.14 - Fixed `_prevJoyState`, `_lastMode`, `_backGroundImage`, etc.)
 
 ---
 
