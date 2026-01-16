@@ -1,3 +1,89 @@
+## Python Controller 0.12.7 (b294) — 2026-01-13
+
+### Config Parity: Collision Overlay Toggle
+
+- **MarsMenu Integration**: Added "Col Overlay" toggle to System menu tab (Off/On).
+- **Web Dashboard**: Added "Col Overlay" to EDITABLE_CONFIG['System'] section for web-based control.
+- **Bidirectional Sync**: Changes from either menu or dashboard sync to display_thread.set_collision_overlay() and update the other UI.
+
+---
+
+## Python Controller 0.12.13 (b300) — 2026-01-16
+
+### Safety: Collision Step-to-Stand Recovery
+
+- **New response behavior**: When `[collision] enabled=true`, `warn_only=false`, and `stop_on_collision=true`, an unsafe pose now triggers a step-to-stand recovery gait (one leg at a time: lift → translate → place) instead of a straight-line posture jump or immediate torque disable.
+- **Recovery flow**: Stops any active gait, switches Teensy to `MODE IDLE`, then drives a `StepToStandGait` until completion and settles into `StandingGait`.
+
+---
+
+## Python Controller 0.12.11 (b298) — 2026-01-16
+
+### Diagnostics: Collision Pose Compare Logger Config Parity
+
+- **INI-driven controls**: Collision pose compare CSV logger now configured via `controller.ini` `[collision]` (`pose_log_enabled`, `pose_log_hz`) instead of environment variables.
+- **UI parity**: Logger controls exposed in both MarsMenu and the web dashboard.
+
+---
+
+## Python Controller 0.12.10 (b297) — 2026-01-16
+
+### Diagnostics: Collision Pose Compare Logger
+
+- **New CSV output**: Optional `/tmp/collision_pose_compare.csv` log comparing cmd FEET → IK/FK vs S6 joint telemetry → FK.
+- **Purpose**: Helps debug cases where collision detection appears mismatched with physical pose.
+
+---
+
+## Python Controller 0.12.6 (b293) — 2026-01-13
+
+### Engineering View Enhancements
+
+- **Accurate Body Outline**: Replaced simple hexagon body with 24-vertex `BODY_HULL_XZ` polygon from collision.py.
+- **Collision Overlay**: New visualization layer showing:
+  - Leg segment cylinders with `LEG_RADIUS` (15mm)
+  - Color coding: green (safe), orange (warning threshold), red (collision)
+  - Collision pair connection lines
+- **DisplayThread API**: Added `set_collision_overlay()`, `toggle_collision_overlay()`, `update_collision_state()` methods.
+
+---
+
+## Python Controller 0.12.5 (b292) — 2026-01-12
+
+### Bugfix: FK Geometry Correction for Collision Detection
+
+- **Root Cause**: Forward kinematics in `kinematics.fk_leg()` was computing geometrically impossible leg positions (ankle above knee for standing pose), causing collision detection to miss adjacent leg collisions during tight turns.
+- **Fix**: Rewrote `fk_leg()` to use proven FK implementation from display_thread.py with correct angle conventions:
+  - IK mode (default): Uses `MOUNT_ANGLE_RAD` for yaw, proper tibia sign convention
+  - Display mode (`absolute_angles=True`): Uses `LEG_BASE_ANGLES` for servo angle visualization
+- **Unified Codebase**: `display_thread.py` now imports `fk_leg_points()` from `kinematics.py` — single source of truth for FK calculations.
+- **Added**: `ik_to_servo_angles()` helper for converting IK output to absolute servo angles.
+- **Verification**: IK→FK round-trip error reduced from 170mm to 0.0000mm; collision detection correctly identifies adjacent leg collisions (e.g., RF-RM at 8.97mm triggers collision below 35mm threshold).
+
+---
+
+## Python Controller 0.12.4 (b291) — 2026-01-12
+
+### Bugfixes: Disable & Collision Warnings
+
+- **Autonomy Re-enable Fix**: Right stick disable now also disables autonomy mode, preventing WALK_FORWARD behavior from immediately re-enabling the robot.
+- **Collision Warning Detail**: Collision warnings now show which legs or body are involved (e.g., `[COLLISION] Unsafe pose detected! (LF-LM, BODY) BLOCKED`).
+
+---
+
+## Python Controller 0.12.3 (b290) — 2026-01-09
+
+### S2: Learned Collision Model Complete
+
+- **Training Complete**: 100k samples generated with STL-based body geometry (24-vertex convex hull from "Frame Assembly.STL").
+- **Model Performance**: 99.5% agreement with analytical check, 99.74% validation accuracy.
+- **Inference Speed**: 28µs per hybrid check (17.9× faster than analytical 492µs).
+- **Integration**: `send_feet_cmd()` now uses `validate_pose_safety_hybrid()` when `use_learned_model=True`.
+- **Config**: New `use_learned_model` option in `[collision]` section (default: True).
+- **Artifacts**: `assets/collision_model.onnx` (3,461 params), `assets/collision_model.json` (normalization metadata).
+
+---
+
 ## Python Controller 0.11.14 (b286) — 2026-01-08
 
 ### M5: Code Hygiene & Standardization

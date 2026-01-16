@@ -43,6 +43,21 @@
             --frame-gap: 6px;
             --cap-radius: 20px;
             --swept-radius: 40px;
+
+            /* Swept elbow geometry (match thick→thin transitions) */
+            --header-thick: 60px;
+            --header-thin: 40px;
+            --header-cutout-h: 20px; /* = thick - thin */
+            --header-cutout-w: 40px;
+
+            --footer-thick: 30px;
+            --footer-thin: 20px;
+            --footer-cutout-h: 10px; /* = thick - thin */
+            --footer-cutout-w: 40px;
+
+            --sidebar-elbow-h: 60px;
+            --sidebar-cutout-h: 30px;
+            --sidebar-cutout-w: 40px;
             
             /* Font sizes (only 3 as per manifesto) */
             --font-title: 28px;
@@ -71,7 +86,7 @@
         /* Top Frame Bar with Swept corners */
         .lcars-header {
             display: flex;
-            height: 60px;
+            height: var(--header-thick);
             gap: var(--frame-gap);
         }
         
@@ -79,7 +94,7 @@
            The swept creates an L-shaped elbow with inner curve cutout */
         .lcars-header-swept {
             width: 180px;
-            height: 60px;
+            height: var(--header-thick);
             background: var(--lcars-orange);
             border-bottom-right-radius: var(--swept-radius);
             flex-shrink: 0;
@@ -92,16 +107,16 @@
             position: absolute;
             right: 0;
             bottom: 0;
-            width: 40px;
-            height: 20px;
+            width: var(--header-cutout-w);
+            height: var(--header-cutout-h);
             background: var(--lcars-black);
-            border-top-left-radius: 20px;
+            border-top-left-radius: var(--header-cutout-h);
         }
         
         /* Top bar - extends across (thinner than elbow = thick→thin transition) */
         .lcars-header-bar {
             flex: 1;
-            height: 40px;
+            height: var(--header-thin);
             background: var(--lcars-orange);
             display: flex;
             align-items: center;
@@ -693,7 +708,7 @@
         
         .lcars-footer {
             display: flex;
-            height: 30px;
+            height: var(--footer-thick);
             gap: var(--frame-gap);
             margin-top: var(--frame-gap);
         }
@@ -711,15 +726,15 @@
             position: absolute;
             right: 0;
             top: 0;
-            width: 40px;
-            height: 10px;
+            width: var(--footer-cutout-w);
+            height: var(--footer-cutout-h);
             background: var(--lcars-black);
-            border-bottom-left-radius: 10px;
+            border-bottom-left-radius: var(--footer-cutout-h);
         }
         
         .lcars-footer-bar {
             flex: 1;
-            height: 20px;
+            height: var(--footer-thin);
             background: var(--lcars-tan);
             display: flex;
             align-items: center;
@@ -852,7 +867,28 @@
         }
         
         @media (max-width: 800px) {
+            .lcars-body {
+                flex-direction: column;
+            }
+            /* Keep navigation available on mobile: convert sidebar to horizontal bar */
             .lcars-sidebar {
+                width: 100%;
+                flex-direction: row;
+                align-items: center;
+                overflow-x: auto;
+                overflow-y: hidden;
+                padding: 0 12px;
+                gap: 8px;
+            }
+            .lcars-sidebar-btn {
+                height: 34px;
+                padding: 0 14px;
+                border-radius: var(--cap-radius);
+                white-space: nowrap;
+                flex: 0 0 auto;
+            }
+            .lcars-sidebar-spacer,
+            .lcars-sidebar-swept {
                 display: none;
             }
             .lcars-header-swept {
@@ -866,6 +902,64 @@
             }
             .lcars-panel.wide {
                 grid-column: span 1;
+            }
+            .lcars-content {
+                padding-right: 12px;
+                padding-left: 12px;
+                padding-bottom: 12px;
+            }
+        }
+
+        @media (max-width: 600px) {
+            :root {
+                --font-title: 22px;
+                --font-subhead: 14px;
+                --font-data: 13px;
+                --cap-radius: 16px;
+                --swept-radius: 28px;
+                --frame-gap: 5px;
+            }
+            .lcars-header {
+                height: auto;
+                flex-wrap: wrap;
+            }
+            .lcars-header-bar {
+                height: 40px;
+                justify-content: flex-start;
+                padding-left: 12px;
+            }
+            .lcars-header-title {
+                letter-spacing: 2px;
+            }
+            .lcars-header-caps {
+                height: 40px;
+                padding-right: 12px;
+            }
+            .lcars-banner {
+                font-size: 20px;
+                padding: 0 12px;
+                text-align: center;
+            }
+            .lcars-metric-row {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .lcars-metric-value {
+                font-size: 36px;
+            }
+            /* Make config rows readable on narrow screens */
+            .lcars-config-item {
+                flex-direction: column;
+                gap: 6px;
+                align-items: flex-start;
+            }
+            .lcars-config-input,
+            .lcars-config-select {
+                width: 100%;
+                min-width: 0;
+                text-align: left;
+                padding: 8px 10px;
+                font-size: var(--font-subhead);
             }
         }
         
@@ -1742,10 +1836,16 @@
         // Editable config items: section -> [keys that can be edited]
         const EDITABLE_CONFIG = {
             'Gait': ['Cycle Time', 'Step Length', 'Step Height', 'Turn Rate'],
-            'Safety': ['Low Batt Prot', 'Volt Critical', 'Volt Recovery', 'LowBatt Filter'],
+            'Safety': [
+                'Low Batt Prot', 'Volt Critical', 'Volt Recovery', 'LowBatt Filter',
+                'Col Enabled', 'Col Stop', 'Col WarnOnly',
+                'Leg Radius', 'Safety Margin', 'Body Keepout', 'Vel Horizon', 'Vel Margin Max',
+                'Pose Log', 'Pose Log Hz'
+            ],
             'PID': ['PID Enabled', 'Kp', 'Ki', 'Kd', 'Max Correction'],
             'Impedance': ['IMP Enabled', 'Kp', 'Kd', 'Max Force'],
             'Estimator': ['EST Alpha', 'Velocity Decay'],
+            'System': ['Col Overlay'],
         };
         
         function isEditable(section, key) {

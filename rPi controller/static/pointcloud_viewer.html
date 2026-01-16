@@ -36,6 +36,22 @@
             --frame-gap: 6px;
             --cap-radius: 20px;
             --swept-radius: 40px;
+
+            /* Swept elbow geometry (match thick→thin transitions) */
+            --header-thick: 60px;
+            --header-thin: 40px;
+            --header-cutout-h: 20px; /* = thick - thin */
+            --header-cutout-w: 40px;
+
+            --sidebar-elbow-h: 40px;
+            --sidebar-thin: 32px;
+            --sidebar-cutout-h: 8px; /* = elbow - thin */
+            --sidebar-cutout-w: 24px;
+
+            --footer-thick: 24px;
+            --footer-thin: 18px;
+            --footer-cutout-h: 6px; /* = thick - thin */
+            --footer-cutout-w: 24px;
             
             /* Font sizes (only 3) */
             --font-title: 28px;
@@ -64,14 +80,14 @@
         /* Top header bar with swept */
         .lcars-header {
             display: flex;
-            height: 60px;
+            height: var(--header-thick);
             gap: var(--frame-gap);
             flex-shrink: 0;
         }
         
         .lcars-header-swept {
             width: 120px;
-            height: 60px;
+            height: var(--header-thick);
             background: var(--lcars-orange);
             border-bottom-right-radius: var(--swept-radius);
             flex-shrink: 0;
@@ -83,15 +99,15 @@
             position: absolute;
             right: 0;
             bottom: 0;
-            width: 40px;
-            height: 20px;
+            width: var(--header-cutout-w);
+            height: var(--header-cutout-h);
             background: var(--lcars-black);
-            border-top-left-radius: var(--swept-radius);
+            border-top-left-radius: var(--header-cutout-h);
         }
         
         .lcars-header-bar {
             flex: 1;
-            height: 40px;
+            height: var(--header-thin);
             background: var(--lcars-orange);
             display: flex;
             align-items: center;
@@ -198,7 +214,7 @@
         }
         
         .lcars-sidebar-swept {
-            height: 40px;
+            height: var(--sidebar-elbow-h);
             background: var(--lcars-tan);
             border-top-right-radius: var(--swept-radius);
             position: relative;
@@ -209,10 +225,10 @@
             position: absolute;
             right: 0;
             top: 0;
-            width: 30px;
-            height: 15px;
+            width: var(--sidebar-cutout-w);
+            height: var(--sidebar-cutout-h);
             background: var(--lcars-black);
-            border-bottom-left-radius: var(--swept-radius);
+            border-bottom-left-radius: var(--sidebar-cutout-h);
         }
         
         /* ================================================================
@@ -306,7 +322,7 @@
         
         .lcars-footer {
             display: flex;
-            height: 24px;
+            height: var(--footer-thick);
             gap: var(--frame-gap);
             margin-top: var(--frame-gap);
             flex-shrink: 0;
@@ -324,15 +340,15 @@
             position: absolute;
             right: 0;
             top: 0;
-            width: 30px;
-            height: 8px;
+            width: var(--footer-cutout-w);
+            height: var(--footer-cutout-h);
             background: var(--lcars-black);
-            border-bottom-left-radius: var(--swept-radius);
+            border-bottom-left-radius: var(--footer-cutout-h);
         }
         
         .lcars-footer-bar {
             flex: 1;
-            height: 18px;
+            height: var(--footer-thin);
             background: var(--lcars-tan);
             display: flex;
             align-items: center;
@@ -449,6 +465,92 @@
         
         .lcars-dialog-btn:hover {
             background: var(--lcars-orange);
+        }
+
+        /* ================================================================
+           Responsive (W5 parity with dashboard)
+           ================================================================ */
+
+        @media (max-width: 800px) {
+            .lcars-body {
+                flex-direction: column;
+            }
+            /* Keep controls accessible on mobile: sidebar becomes a horizontal bar */
+            .lcars-sidebar {
+                width: 100%;
+                flex-direction: row;
+                align-items: center;
+                overflow-x: auto;
+                overflow-y: hidden;
+                padding: 0 12px;
+                gap: 8px;
+            }
+            .lcars-sidebar-btn {
+                height: 34px;
+                padding: 0 14px;
+                border-radius: var(--cap-radius);
+                white-space: nowrap;
+                flex: 0 0 auto;
+            }
+            .lcars-sidebar-spacer,
+            .lcars-sidebar-swept {
+                display: none;
+            }
+            .lcars-viewer {
+                margin-right: 12px;
+                margin-left: 12px;
+            }
+            .lcars-header-swept {
+                width: 60px;
+            }
+            .lcars-footer-swept {
+                width: 60px;
+            }
+        }
+
+        @media (max-width: 600px) {
+            :root {
+                --font-title: 22px;
+                --font-subhead: 14px;
+                --font-data: 13px;
+                --cap-radius: 16px;
+                --swept-radius: 28px;
+                --frame-gap: 5px;
+            }
+            .lcars-header {
+                height: auto;
+            }
+            .lcars-header-bar {
+                height: auto;
+                flex-wrap: wrap;
+                gap: 10px;
+                padding: 10px 12px;
+            }
+            .lcars-header-title {
+                letter-spacing: 2px;
+            }
+            /* Allow caps to scroll rather than overflow */
+            .lcars-header-caps {
+                width: 100%;
+                margin-left: 0;
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 4px;
+            }
+            .lcars-cap {
+                flex: 0 0 auto;
+                padding: 0 14px;
+            }
+            /* Connection dialog should fit phones */
+            .lcars-dialog-box {
+                min-width: 0;
+                width: calc(100% - 24px);
+            }
+            .lcars-overlay {
+                right: 10px;
+                bottom: 10px;
+            }
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>

@@ -6,6 +6,36 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2026-01-16  v0.12.13 b300: Safety: Collision response now starts a step-to-stand recovery gait (one-leg lift→translate→place) instead of immediate disable, when an unsafe pose is detected and `warn_only` is off.
+
+2026-01-16  v0.12.12 b299: Safety: Collision `stop_on_collision` now enforces an emergency stop (stop gait + idle + LEG ALL DISABLE + DISABLE) when an unsafe pose is detected and `warn_only` is off.
+
+2026-01-16  v0.12.11 b298: Diagnostics: Collision pose compare CSV logger now configured via controller.ini `[collision]` (`pose_log_enabled`, `pose_log_hz`) and exposed in the SAFETY menu + web dashboard.
+
+2026-01-16  v0.12.10 b297: Diagnostics: Added optional collision pose compare CSV log (cmd FEET → IK/FK vs S6 joint telemetry → FK) to debug collision non-triggers. Enable with `MARS_COLLISION_POSE_LOG=1`.
+
+2026-01-15  v0.12.9 b296: Collision tuning: Increased max collision leg radius from 40mm to 100mm across menu/dashboard/config.
+
+2026-01-14  v0.12.8 b295: Collision tuning: Increased max collision safety margin (leg) from 40mm to 100mm across menu/dashboard/config.
+
+2026-01-13  v0.12.6 b293: Engineering view: Accurate body outline using BODY_HULL_XZ polygon (24-vertex convex hull from STL) instead of hexagon approximation. Added collision visualization overlay showing leg segment collision cylinders and collision pair highlights. New DisplayThread methods: set_collision_overlay(), toggle_collision_overlay(), update_collision_state().
+
+2026-01-10  v0.12.6 b293: Feature S2 (Complete): Trained and validated learned collision model. 100k training samples, 3,461 parameter MLP (18→64→32→5), 99.5% agreement with analytical check. Inference: 36.3µs single (14.5× faster than analytical), 1.69M samples/sec batch. Model exported to assets/collision_model.onnx.
+
+2026-01-10  v0.12.5 b292: Feature S2 (Body Geometry): Replaced naive 50mm cylinder body model with accurate convex hull from STL mesh (Frame Assembly.STL). New body model: 24-vertex polygon in XZ plane (206×216mm footprint), height-aware Y bounds (±60mm from hip plane), quick-rejection using bounding/inscribed radii (129.8/103.4mm). Added `_point_in_polygon_xz()`, `check_body_collision_detailed()`. Training data regenerated with accurate geometry.
+
+2026-01-10  v0.12.4 b291: Feature S2 (Started): Created collision_model.py - learned collision prediction module. Includes training data generator (random joint sampling + FK/collision oracle), PyTorch MLP training pipeline (18→64→32→5 architecture), ONNX export for fast inference, CollisionPredictor runtime wrapper. Added validate_pose_safety_learned() and validate_pose_safety_hybrid() hooks in collision.py for integration.
+
+2026-01-09  v0.12.3 b290: Bugfix: Ensure `Controller` always has `self.config` (fixes runtime AttributeError when collision checks/UI sync access config). Fix collision flag update to use `safety_state['collision']`. Remove undefined `audio_pounce()` call.
+
+2026-01-09  v0.12.2 b289: Config parity (Collision): Exposed collision model tuning via MarsMenu SAFETY and web dashboard; added `[collision]` numeric parameters (leg_radius_mm, safety_margin_mm, body_keepout_radius_mm, time_horizon_s, max_velocity_margin_mm) persisted in controller.ini; collision thresholds now read from config.
+
+2026-01-09  v0.12.1 b288: Feature S1 (Complete): Added phase-aware collision risk zones (`LegPhase`, `get_leg_phases_tripod`, `get_risk_pairs`) and velocity-aware safety margins (`compute_velocity_margin`, `TIME_HORIZON_S=50ms`, `MAX_VELOCITY_MARGIN_MM=20mm`). Threshold scales from 35mm (static) to 55mm (at 400mm/s). Updated `validate_pose_safety()` with optional `gait_phase` and `velocity_mm_s` parameters. Comprehensive test suite in `test_collision.py`.
+
+2026-01-08  v0.12.0 b287: Feature S1 (Collision Safety): Implemented analytical pre-IK collision detection. Added `kinematics.py` (Python IK model) and `collision.py` (Capsule-Capsule intersection). Integrated safety check in `send_feet_cmd` to block unsafe commands before transmission. Added `[collision]` section to controller.ini.
+
+2026-01-08  v0.11.14 b286: Refactor M5 (Code Hygiene): Audit and fix bare except blocks with logging; standardize legacy variable names.
+
 2026-01-08  v0.11.13 b285: Refactor M4 (Final Phase): Completely removed legacy state synchronization (`sync_globals_to_ctrl` / `sync_ctrl_to_globals`). Controller class is now the sole source of truth for runtime state. Updated startup logic to direct-assign `ctrl.controller` and `ctrl.menuState`.
 
 2026-01-08  v0.11.12 b284: Refactor M4 Phase 9 (Logic Globals): Migrated Move State, Gait Transition, Display Mode, and IMU Thread logic to Controller instance. Updated runtime phases (`phase_gait_tick`, `poll_gamepad`, `handle_teensy_disconnect`) to use instance state instead of globals. Logic functions are now nearly global-free.

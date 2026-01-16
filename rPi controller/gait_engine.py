@@ -897,6 +897,142 @@ class StandingGait(GaitEngine):
 
 
 #----------------------------------------------------------------------------------------------------------------------
+# Step-to-Stand Recovery Gait (collision recovery)
+#----------------------------------------------------------------------------------------------------------------------
+
+class StepToStandGait(GaitEngine):
+    """Step from current foot targets to neutral standing pose.
+
+    Moves one leg at a time using a 3-phase step trajectory:
+      1) lift (y + lift_mm)
+      2) translate (x/z to target while lifted)
+      3) place (y back to target)
+
+    This is intended for collision recovery where a straight-line STAND move
+    could worsen an inter-leg collision.
+    """
+
+    def __init__(
+        self,
+        params: Optional[GaitParams] = None,
+        start_feet: Optional[List[List[float]]] = None,
+        lift_mm: float = 60.0,
+        lift_ms: int = 120,
+        move_ms: int = 360,
+        place_ms: int = 120,
+        leg_order: Optional[List[int]] = None,
+    ):
+        super().__init__(params)
+        self.lift_mm = float(lift_mm)
+        self.lift_ms = int(lift_ms)
+        self.move_ms = int(move_ms)
+        self.place_ms = int(place_ms)
+        self._seg_ms: int = 0
+        self._complete: bool = False
+
+        # Choose a stable, simple stepping order: alternate left/right by row.
+        # Indices are LF, LM, LR, RF, RM, RR.
+        self._order: List[int] = list(leg_order) if leg_order is not None else [0, 3, 1, 4, 2, 5]
+        self._order = [int(i) for i in self._order if 0 <= int(i) < NUM_LEGS]
+        if not self._order:
+            self._order = list(range(NUM_LEGS))
+
+        # Initialize start feet
+        if start_feet and len(start_feet) == NUM_LEGS:
+            self._feet = [FootTarget(x=float(p[0]), y=float(p[1]), z=float(p[2])) for p in start_feet]
+        else:
+            self._feet = [FootTarget(x=self.params.base_x_mm, y=self.params.base_y_mm, z=0.0) for _ in range(NUM_LEGS)]
+
+        # Hold positions evolve as legs are placed
+        self._hold: List[FootTarget] = [FootTarget(x=f.x, y=f.y, z=f.z) for f in self._feet]
+
+        # Neutral stand target for all legs
+        self._target: List[FootTarget] = [
+            FootTarget(x=self.params.base_x_mm, y=self.params.base_y_mm, z=0.0)
+            for _ in range(NUM_LEGS)
+        ]
+
+        self._active_idx: int = 0
+        self._active_leg: int = self._order[0]
+        self._active_start: FootTarget = FootTarget(x=self._hold[self._active_leg].x, y=self._hold[self._active_leg].y, z=self._hold[self._active_leg].z)
+
+    def is_complete(self) -> bool:
+        return self._complete
+
+    @staticmethod
+    def _smoothstep(t: float) -> float:
+        t = 0.0 if t < 0.0 else 1.0 if t > 1.0 else t
+        return t * t * (3.0 - 2.0 * t)
+
+    def _begin_leg(self, idx: int) -> None:
+        self._active_idx = idx
+        if self._active_idx >= len(self._order):
+            self._complete = True
+            self.state = GaitState.STOPPED
+            return
+        self._active_leg = self._order[self._active_idx]
+        h = self._hold[self._active_leg]
+        self._active_start = FootTarget(x=h.x, y=h.y, z=h.z)
+        self._seg_ms = 0
+
+    def tick(self, dt_seconds: float = None) -> List[List[float]]:
+        if self.state != GaitState.RUNNING or self._complete:
+            return [foot.as_list() for foot in self._feet]
+
+        # Update segment time
+        if dt_seconds is not None:
+            dt_ms = int(max(0.0, float(dt_seconds)) * 1000.0)
+        else:
+            dt_ms = 6  # ~166Hz fallback
+        self._seg_ms += dt_ms
+
+        seg_total = max(1, self.lift_ms + self.move_ms + self.place_ms)
+
+        # Advance through completed legs if we overshoot
+        while not self._complete and self._seg_ms >= seg_total:
+            # Finish current leg at target
+            leg = self._active_leg
+            tgt = self._target[leg]
+            self._hold[leg] = FootTarget(x=tgt.x, y=tgt.y, z=tgt.z)
+            self._seg_ms -= seg_total
+            self._begin_leg(self._active_idx + 1)
+
+        # Default: hold all legs
+        for i in range(NUM_LEGS):
+            h = self._hold[i]
+            self._feet[i] = FootTarget(x=h.x, y=h.y, z=h.z)
+
+        if self._complete:
+            return [foot.as_list() for foot in self._feet]
+
+        # Compute active leg stepped trajectory
+        leg = self._active_leg
+        start = self._active_start
+        tgt = self._target[leg]
+        lift_y = start.y + self.lift_mm
+
+        t_ms = self._seg_ms
+        if t_ms < self.lift_ms:
+            u = self._smoothstep(t_ms / max(1, self.lift_ms))
+            x = start.x
+            z = start.z
+            y = start.y + (lift_y - start.y) * u
+        elif t_ms < (self.lift_ms + self.move_ms):
+            u = self._smoothstep((t_ms - self.lift_ms) / max(1, self.move_ms))
+            x = start.x + (tgt.x - start.x) * u
+            z = start.z + (tgt.z - start.z) * u
+            y = lift_y
+        else:
+            u = self._smoothstep((t_ms - self.lift_ms - self.move_ms) / max(1, self.place_ms))
+            x = tgt.x
+            z = tgt.z
+            y = lift_y + (tgt.y - lift_y) * u
+
+        self._feet[leg] = FootTarget(x=float(x), y=float(y), z=float(z))
+        return [foot.as_list() for foot in self._feet]
+
+
+#----------------------------------------------------------------------------------------------------------------------
 # Stationary Test Pattern
 #----------------------------------------------------------------------------------------------------------------------
 

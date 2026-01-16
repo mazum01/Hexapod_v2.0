@@ -1,0 +1,276 @@
+def _setup_mars_menu():
+    """Configure MARS menu callbacks and sync with current state."""
+    global _marsMenu, _eyes, _displayBrightness, _verbose, _mirrorDisplay
+    
+    # === EYES callbacks (delegated to menu_controller.py) ===
+    from types import SimpleNamespace
+    _eyes_ctx = SimpleNamespace(
+        eyes=_eyes,
+        eye_colors=_eyeColors,
+        get_display_thread=lambda: globals().get('_displayThread'),
+        eye_vertical_offset=_eyeVerticalOffset,
+        set_force_display_update=lambda: globals().__setitem__('_forceDisplayUpdate', True),
+        set_eye_crt_mode=lambda v: globals().__setitem__('_eyeCrtMode', v),
+        set_eye_vertical_offset=lambda v: globals().__setitem__('_eyeVerticalOffset', v),
+    )
+    setup_eyes_callbacks(_marsMenu, _eyes_ctx)
+    
+    # === SYSTEM callbacks (delegated to menu_controller.py) ===
+    _system_ctx = SimpleNamespace(
+        disp=_disp,
+        menu=_marsMenu,
+        eyes=_eyes,
+        get_display_thread=lambda: globals().get('_displayThread'),
+        menu_theme=_menuTheme,
+        menu_palette=_menuPalette,
+        display_brightness=_displayBrightness,
+        auto_disable_s=_autoDisableS,
+        get_verbose=lambda: _verbose,
+        set_verbose=lambda v: globals().__setitem__('_verbose', v),
+        get_mirror=lambda: _mirrorDisplay,
+        set_mirror=lambda v: globals().__setitem__('_mirrorDisplay', v),
+        set_brightness=lambda v: globals().__setitem__('_displayBrightness', v),
+        set_auto_disable_s=lambda v: globals().__setitem__('_autoDisableS', v),
+        set_force_display_update=lambda: globals().__setitem__('_forceDisplayUpdate', True),
+        set_run=lambda v: globals().__setitem__('_run', v),
+    )
+    setup_system_callbacks(_marsMenu, _system_ctx)
+
+    # === PID/IMP/EST callbacks (delegated to menu_controller.py - M3.3) ===
+    def _kick_list_poll(which: str):
+        global _pid_list_next_at, _imp_list_next_at, _est_list_next_at
+        now = time.time()
+        if which == 'PID':
+            _pid_list_next_at = min(_pid_list_next_at if _pid_list_next_at > 0.0 else now, now + 0.05)
+        elif which == 'IMP':
+            _imp_list_next_at = min(_imp_list_next_at if _imp_list_next_at > 0.0 else now, now + 0.05)
+        elif which == 'EST':
+            _est_list_next_at = min(_est_list_next_at if _est_list_next_at > 0.0 else now, now + 0.05)
+
+    _pid_imp_est_ctx = SimpleNamespace(
+        pid_state=_pid_state,
+        imp_state=_imp_state,
+        est_state=_est_state,
+        get_send_cmd=lambda: globals().get('send_cmd'),
+        get_verbose=lambda: _verbose,
+        kick_list_poll=_kick_list_poll,
+    )
+    setup_pid_imp_est_callbacks(_marsMenu, _pid_imp_est_ctx)
+
+    # === IMU/Leveling callbacks (delegated to menu_controller.py - M3.4) ===
+    _imu_ctx = SimpleNamespace(
+        get_display_thread=lambda: globals().get('_displayThread'),
+        get_leveling_state=lambda: globals().get('_levelingState'),
+        get_verbose=lambda: _verbose,
+        set_leveling_enabled=lambda v: globals().__setitem__('_levelingEnabled', v),
+        set_leveling_gain=lambda v: globals().__setitem__('_levelingGain', v),
+        set_leveling_max_corr_mm=lambda v: globals().__setitem__('_levelingMaxCorrMm', v),
+        set_leveling_tilt_limit_deg=lambda v: globals().__setitem__('_levelingTiltLimitDeg', v),
+        set_lean_enabled=lambda v: globals().__setitem__('_leanEnabled', v),
+        set_lean_max_deg=lambda v: globals().__setitem__('_leanMaxDeg', v),
+    )
+    setup_imu_callbacks(_marsMenu, _imu_ctx)
+
+    # === ToF callbacks (delegated to menu_controller.py - M3.5) ===
+    _tof_ctx = SimpleNamespace(
+        get_tof_enabled=lambda: _tofEnabled,
+        set_tof_enabled=lambda v: globals().__setitem__('_tofEnabled', v),
+        get_tof_resolution=lambda: _tofResolution,
+        set_tof_resolution=lambda v: globals().__setitem__('_tofResolution', v),
+        get_tof_hz=lambda: _tofHz,
+        set_tof_hz=lambda v: globals().__setitem__('_tofHz', v),
+        get_tof_bus=lambda: _tofBus,
+        set_tof_bus=lambda v: globals().__setitem__('_tofBus', v),
+        get_tof_sensors=lambda: _tofSensors,
+        set_tof_sensors=lambda v: globals().__setitem__('_tofSensors', v),
+        get_tof_thread=lambda: _tofThread,
+        set_tof_thread=lambda v: globals().__setitem__('_tofThread', v),
+        get_verbose=lambda: _verbose,
+    )
+    setup_tof_callbacks(_marsMenu, _tof_ctx)
+
+    # === Autonomy callbacks (delegated to menu_controller.py - M3.8) ===
+    _autonomy_ctx = SimpleNamespace(
+        get_verbose=lambda: _verbose,
+        get_display_thread=lambda: globals().get('_displayThread'),
+        get_behavior_arbiter=lambda: _behaviorArbiter,
+        set_behavior_arbiter=lambda v: globals().__setitem__('_behaviorArbiter', v),
+        get_init_behavior_arbiter=lambda: globals().get('_init_behavior_arbiter'),
+        # Autonomy state accessors
+        get_autonomy_enabled=lambda: _autonomyEnabled,
+        set_autonomy_enabled=lambda v: globals().__setitem__('_autonomyEnabled', v),
+        get_obstacle_avoidance=lambda: _autonomyObstacleAvoidance,
+        set_obstacle_avoidance=lambda v: globals().__setitem__('_autonomyObstacleAvoidance', v),
+        get_cliff_detection=lambda: _autonomyCliffDetection,
+        set_cliff_detection=lambda v: globals().__setitem__('_autonomyCliffDetection', v),
+        get_caught_foot_recovery=lambda: _autonomyCaughtFootRecovery,
+        set_caught_foot_recovery=lambda v: globals().__setitem__('_autonomyCaughtFootRecovery', v),
+        get_patrol=lambda: _autonomyPatrol,
+        set_patrol=lambda v: globals().__setitem__('_autonomyPatrol', v),
+        get_wall_follow=lambda: _autonomyWallFollow,
+        set_wall_follow=lambda v: globals().__setitem__('_autonomyWallFollow', v),
+        get_wall_side=lambda: _autonomyWallSide,
+        set_wall_side=lambda v: globals().__setitem__('_autonomyWallSide', v),
+        get_wall_dist_mm=lambda: _autonomyWallDistMm,
+        set_wall_dist_mm=lambda v: globals().__setitem__('_autonomyWallDistMm', v),
+        get_stop_dist_mm=lambda: _autonomyStopDistMm,
+        set_stop_dist_mm=lambda v: globals().__setitem__('_autonomyStopDistMm', v),
+        get_slow_dist_mm=lambda: _autonomySlowDistMm,
+        set_slow_dist_mm=lambda v: globals().__setitem__('_autonomySlowDistMm', v),
+        get_cliff_threshold_mm=lambda: _autonomyCliffThresholdMm,
+        set_cliff_threshold_mm=lambda v: globals().__setitem__('_autonomyCliffThresholdMm', v),
+        get_snag_error_deg=lambda: _autonomySnagErrorDeg,
+        set_snag_error_deg=lambda v: globals().__setitem__('_autonomySnagErrorDeg', v),
+        get_snag_timeout_ms=lambda: _autonomySnagTimeoutMs,
+        set_snag_timeout_ms=lambda v: globals().__setitem__('_autonomySnagTimeoutMs', v),
+        get_recovery_lift_mm=lambda: _autonomyRecoveryLiftMm,
+        set_recovery_lift_mm=lambda v: globals().__setitem__('_autonomyRecoveryLiftMm', v),
+        get_patrol_duration_s=lambda: _autonomyPatrolDurationS,
+        set_patrol_duration_s=lambda v: globals().__setitem__('_autonomyPatrolDurationS', v),
+        get_turn_interval_s=lambda: _autonomyTurnIntervalS,
+        set_turn_interval_s=lambda v: globals().__setitem__('_autonomyTurnIntervalS', v),
+    )
+    setup_autonomy_callbacks(_marsMenu, _autonomy_ctx)
+
+    # === GAIT callbacks (delegated to menu_controller.py - M3.6) ===
+    def _start_gait_wrapper():
+        global _gaitActive, _gaitEngine, _autoDisableAt
+        if not _gaitActive:
+            ensure_enabled()
+            if _gaitEngine is None:
+                from gait_engine import TripodGait, GaitParams
+                params = GaitParams()
+                params.base_x_mm = _savedGaitWidthMm
+                params.lift_mm = _savedGaitLiftMm
+                params.cycle_ms = _gaitCycleMs
+                _gaitEngine = TripodGait(params)
+            _gaitEngine.start()
+            _gaitActive = True
+            _autoDisableAt = None
+
+    def _stop_gait_wrapper():
+        global _gaitActive, _gaitEngine, _autoDisableAt
+        if _gaitActive:
+            if _gaitEngine is not None:
+                _gaitEngine.stop()
+            _gaitActive = False
+            _autoDisableAt = time.time() + _autoDisableS
+
+    _gait_ctx = SimpleNamespace(
+        get_verbose=lambda: _verbose,
+        get_gait_engine=lambda: _gaitEngine,
+        set_gait_lift_mm=lambda v: globals().__setitem__('_savedGaitLiftMm', v),
+        get_gait_lift_mm=lambda: _savedGaitLiftMm,
+        set_gait_cycle_ms=lambda v: globals().__setitem__('_gaitCycleMs', v),
+        get_gait_cycle_ms=lambda: _gaitCycleMs,
+        set_gait_turn_max_deg_s=lambda v: globals().__setitem__('_gaitTurnMaxDegS', v),
+        get_gait_turn_max_deg_s=lambda: _gaitTurnMaxDegS,
+        get_gait_width_mm=lambda: _savedGaitWidthMm,
+        start_gait=_start_gait_wrapper,
+        stop_gait=_stop_gait_wrapper,
+    )
+    setup_gait_callbacks(_marsMenu, _gait_ctx)
+
+    # === POSTURE callbacks (delegated to menu_controller.py - M3.7) ===
+    def _on_stand_wrapper():
+        global _enabledLocal
+        if _teensy is not None and not _enabledLocal:
+            send_cmd(b'ENABLE', force=True)
+            _enabledLocal = True
+        _start_standing_gait()
+
+    def _on_tuck_wrapper():
+        apply_posture(b'TUCK', auto_disable_s=_autoDisableS)
+
+    def _on_home_wrapper():
+        apply_posture(b'HOME', auto_disable_s=_autoDisableS)
+
+    def _on_pounce_wrapper():
+        start_pounce_move(source="menu")
+
+    def _persist_pounce():
+        return save_pounce_settings(
+            _pouncePrepMs, _pounceRearMs, _pounceLungeMs, _pounceRecoverMs,
+            _pounceBack1Z, _pounceBack2Z, _pouncePushZ, _pounceStrikeZ,
+            _pounceCrouchDy, _pounceLiftDy, _pounceFrontZ,
+        )
+
+    _posture_ctx = SimpleNamespace(
+        on_stand=_on_stand_wrapper,
+        on_tuck=_on_tuck_wrapper,
+        on_home=_on_home_wrapper,
+        on_pounce=_on_pounce_wrapper,
+        hide_menu=_marsMenu.hide,
+        persist_pounce=_persist_pounce,
+        # Pounce setters
+        set_pounce_prep_ms=lambda v: globals().__setitem__('_pouncePrepMs', v),
+        set_pounce_rear_ms=lambda v: globals().__setitem__('_pounceRearMs', v),
+        set_pounce_lunge_ms=lambda v: globals().__setitem__('_pounceLungeMs', v),
+        set_pounce_recover_ms=lambda v: globals().__setitem__('_pounceRecoverMs', v),
+        set_pounce_back1_z=lambda v: globals().__setitem__('_pounceBack1Z', v),
+        set_pounce_back2_z=lambda v: globals().__setitem__('_pounceBack2Z', v),
+        set_pounce_push_z=lambda v: globals().__setitem__('_pouncePushZ', v),
+        set_pounce_strike_z=lambda v: globals().__setitem__('_pounceStrikeZ', v),
+        set_pounce_crouch_dy=lambda v: globals().__setitem__('_pounceCrouchDy', v),
+        set_pounce_lift_dy=lambda v: globals().__setitem__('_pounceLiftDy', v),
+        set_pounce_front_z=lambda v: globals().__setitem__('_pounceFrontZ', v),
+        # Pounce getters (for sync)
+        get_pounce_prep_ms=lambda: _pouncePrepMs,
+        get_pounce_rear_ms=lambda: _pounceRearMs,
+        get_pounce_lunge_ms=lambda: _pounceLungeMs,
+        get_pounce_recover_ms=lambda: _pounceRecoverMs,
+        get_pounce_back1_z=lambda: _pounceBack1Z,
+        get_pounce_back2_z=lambda: _pounceBack2Z,
+        get_pounce_push_z=lambda: _pouncePushZ,
+        get_pounce_strike_z=lambda: _pounceStrikeZ,
+        get_pounce_crouch_dy=lambda: _pounceCrouchDy,
+        get_pounce_lift_dy=lambda: _pounceLiftDy,
+        get_pounce_front_z=lambda: _pounceFrontZ,
+    )
+    setup_posture_callbacks(_marsMenu, _posture_ctx)
+
+    # === SAFETY callbacks (delegated to menu_controller.py - M3.9) ===
+    _safety_ctx = SimpleNamespace(
+        get_send_cmd=lambda: globals().get('send_cmd'),
+        get_verbose=lambda: _verbose,
+        get_display_thread=lambda: globals().get('_displayThread'),
+        # Safety display thresholds
+        get_safety_volt_min=lambda: _safetyDisplayVoltMin,
+        set_safety_volt_min=lambda v: globals().__setitem__('_safetyDisplayVoltMin', v),
+        get_safety_volt_warn=lambda: _safetyDisplayVoltWarn,
+        set_safety_volt_warn=lambda v: globals().__setitem__('_safetyDisplayVoltWarn', v),
+        get_safety_volt_max=lambda: _safetyDisplayVoltMax,
+        set_safety_volt_max=lambda v: globals().__setitem__('_safetyDisplayVoltMax', v),
+        get_safety_temp_min=lambda: _safetyDisplayTempMin,
+        set_safety_temp_min=lambda v: globals().__setitem__('_safetyDisplayTempMin', v),
+        get_safety_temp_max=lambda: _safetyDisplayTempMax,
+        set_safety_temp_max=lambda v: globals().__setitem__('_safetyDisplayTempMax', v),
+        # Low battery settings
+        get_low_battery_enabled=lambda: _lowBatteryEnabled,
+        set_low_battery_enabled=lambda v: globals().__setitem__('_lowBatteryEnabled', v),
+        get_low_battery_volt_critical=lambda: _lowBatteryVoltCritical,
+        set_low_battery_volt_critical=lambda v: globals().__setitem__('_lowBatteryVoltCritical', v),
+        get_low_battery_recovery_volt=lambda: _lowBatteryRecoveryVolt,
+        set_low_battery_recovery_volt=lambda v: globals().__setitem__('_lowBatteryRecoveryVolt', v),
+        get_low_battery_filter_alpha=lambda: _lowBatteryFilterAlpha,
+        set_low_battery_filter_alpha=lambda v: globals().__setitem__('_lowBatteryFilterAlpha', v),
+    )
+    setup_safety_callbacks(_marsMenu, _safety_ctx)
+
+    # === Sync initial values (delegated to menu_controller.py - M3.10) ===
+    sync_eyes_initial_values(_marsMenu, _eyes_ctx)
+    sync_system_initial_values(_marsMenu, _system_ctx)
+    sync_posture_initial_values(_marsMenu, _posture_ctx)
+    sync_gait_initial_values(_marsMenu, _gait_ctx)
+    sync_safety_initial_values(_marsMenu, _safety_ctx)
+    
+    _marsMenu.set_value(MenuCategory.INFO, "Ctrl Version", f"{CONTROLLER_VERSION} b{CONTROLLER_BUILD}")
+
+    # Apply saved theme/palette
+    _marsMenu.theme = _menuTheme
+    _marsMenu.lcars_palette = _menuPalette
+
+_setup_mars_menu()
+
+def update_menu_info(ctrl: Controller | None = None):
+    """Update INFO menu items from current telemetry data.
