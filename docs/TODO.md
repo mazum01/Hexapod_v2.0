@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2026-01-06 (Modularization plan for v0.11.x)
+Last updated: 2026-01-10
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -54,8 +54,6 @@ Goal: Reduce `controller.py` complexity (currently ~7.5k lines), eliminate modul
 - [x] Phase 7: Autonomy state migration.
 - [x] Phase 8: PointCloud and Dashboard state migration.
 - [x] Final: Remove all `global` statements from `controller.py`.
-- [x] Phase 4: Migrate Gait state (`gaitEngine`, `gaitActive`, `send_feet_cmd`) to `Controller`. (Done: v0.11.8 b280)
-
 - [x] Remove `sync_globals_to_ctrl` entirely (once all incoming globals are migrated).
 
 ### M5. Code Hygiene ✅ COMPLETE
@@ -379,24 +377,56 @@ Pi 5 USB → Sabrent DAC → 3.5mm → PAM8403 L/R inputs → Speakers
 ### Current State (Firmware)
 The firmware has geometric keep-out zone collision detection that triggers STAND+DISABLE when a foot position violates predefined body/leg clearances. This is reactive (catches violations after IK) rather than preventive.
 
-### S1. Analytical Pre-IK Collision Check (No AI, Recommended First)
-- [ ] Implement swept-volume collision test before sending foot targets
+### S1. Analytical Pre-IK Collision Check ✅ COMPLETE (v0.12.1)
+- [x] Implement swept-volume collision test before sending foot targets
   - Model each leg segment as capsule (cylinder + hemispheres)
   - For each leg pair that could collide (LF↔LM, LM↔LR, etc.), test capsule-capsule intersection
   - Run at gait planning time (before IK) to reject or clamp dangerous trajectories
-- [ ] Precompute collision risk zones per leg phase
-  - During swing: leg is most vulnerable to hitting neighbors
-  - During stance: stationary, minimal risk unless body tilts
-- [ ] Add velocity-aware margin (faster motion → larger keep-out buffer)
+- [x] Precompute collision risk zones per leg phase
+  - Added `LegPhase` enum (SWING/STANCE) and tripod group definitions
+  - `get_leg_phases_tripod(phase)` returns phase state for all 6 legs
+  - `get_risk_pairs(phases)` returns only pairs where at least one leg swings
+  - `validate_pose_safety()` now accepts optional `gait_phase` for targeted checking
+  - `validate_pose_safety_detailed()` returns distances and diagnostic info
+- [x] Add velocity-aware margin (faster motion → larger keep-out buffer)
+  - `compute_velocity_margin(velocity_mm_s)` computes look-ahead buffer
+  - `TIME_HORIZON_S = 0.05` (50ms look-ahead, ~8 ticks at 166Hz)
+  - `MAX_VELOCITY_MARGIN_MM = 20.0` caps margin at high speeds
+  - Threshold scales from 35mm (static) to 55mm (at 400 mm/s)
+- [x] Config parity: Collision model parameters adjustable from both UIs
+  - MarsMenu SAFETY exposes collision knobs (radius/margin/body keepout/velocity horizon/max margin)
+  - Web dashboard exposes the same keys and persists them to controller.ini `[collision]`
+- [x] **Bugfix (v0.12.5)**: Fixed `kinematics.fk_leg()` geometry — was computing wrong joint positions (ankle above knee for standing pose). Unified FK code in `kinematics.py` as single source of truth; `display_thread.py` now imports `fk_leg_points()` from it.
+- [x] Diagnostics: Add pose compare logger (cmd FEET → IK/FK vs S6 telemetry joint → FK) to debug collision mismatch — **DONE v0.12.10**
+- [x] Diagnostics: Move pose compare logger controls from env vars to controller.ini + menu/dashboard — **DONE v0.12.11**
+- [x] Safety: Collision response now steps to stand (one-leg lift→translate→place) when `warn_only=false` and `stop_on_collision=true` — **DONE v0.12.13**
 
-### S2. Learned Collision Model (AI-Enhanced)
-- [ ] Train lightweight neural network on collision data
-  - Input: 18 joint angles (or 6×3 foot positions)
-  - Output: collision probability (0.0–1.0) for each leg pair
-  - Training data: exhaustive FK simulation sampling valid vs colliding configs
-- [ ] Deploy on Pi 5 CPU (~1ms inference for small MLP)
-  - No accelerator needed for 18-input → 6-output regression
-  - Run every gait tick to gate trajectory before sending to firmware
+### S2. Learned Collision Model (AI-Enhanced) ✅ COMPLETE
+- [x] Create `collision_model.py` module with training pipeline:
+  - `generate_training_data()` — Sample random joint configs, run FK, check collision
+  - `CollisionDataset` / `CollisionMLP` — PyTorch training infrastructure
+  - `train_model()` / `export_to_onnx()` — Training and model export
+  - `CollisionPredictor` — ONNX Runtime inference wrapper
+- [x] Integration hooks in `collision.py`:
+  - `validate_pose_safety_learned()` — Pure neural network check
+  - `validate_pose_safety_hybrid()` — NN pre-filter + analytical confirmation
+- [x] Generate training dataset (~100k samples)
+  - 100k samples generated with accurate body geometry from STL
+  - 1.87% leg collision rate, 0% body collision (legs can't physically reach body)
+- [x] Train model and validate accuracy (target: >95% agreement with analytical)
+  - Achieved: **99.5% agreement** with analytical check on 1000 test samples
+  - Model: 3,461 parameters (18→64→32→5 architecture)
+  - Validation accuracy: 99.74%
+- [x] Benchmark inference latency (target: <100µs per check on Pi 5)
+  - Achieved: **36.3µs single inference** (27.5k inferences/sec)
+  - Batch (100): 0.06ms (1.69M samples/sec)
+  - **14.5× faster than analytical check** (36µs vs 525µs)
+- [x] Integration testing with live controller
+  - **17.9× speedup** in hybrid mode (28µs vs 492µs per check)
+  - Model correctly skips analytical check when confident (learned_max_prob ≈ 0)
+  - Config option: `use_learned_model` in `[collision]` section (default: True)
+  - Integration in `send_feet_cmd()` uses `validate_pose_safety_hybrid()` when enabled
+
 
 ### S3. Reinforcement Learning Gait Optimization (Advanced)
 - [ ] Train RL policy that maximizes task reward while avoiding collisions
@@ -413,6 +443,122 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
   - Useful for detecting entanglement, debris, mechanical failure
 - [ ] Requires camera + AI accelerator for real-time pose estimation
   - Could use lightweight pose model (MediaPipe, MoveNet)
+
+---
+
+## Free Gait — Adaptive Event-Driven Locomotion
+
+Goal: Replace fixed-phase cyclic gaits with an event-driven free gait that adapts leg timing to terrain and stability conditions. Enables terrain adaptation, obstacle negotiation, and robust recovery.
+
+### Architecture Overview
+```
+┌─────────────────────────────────────────────────────────────┐
+│  FreeGaitCoordinator                                        │
+│  • Computes support polygon from stance feet                │
+│  • Checks CoG stability margin                              │
+│  • Grants swing permission to ready legs                    │
+└─────────────────────────────────────────────────────────────┘
+                            ↓ permission
+┌─────────────────────────────────────────────────────────────┐
+│  Per-Leg State Machines (×6)                                │
+│  • STANCE → LIFT_PENDING → SWING → PLACING → STANCE         │
+│  • Transitions driven by coordinator + contact events       │
+└─────────────────────────────────────────────────────────────┘
+                            ↓ foot targets
+┌─────────────────────────────────────────────────────────────┐
+│  Foot Placement Planner                                     │
+│  • Computes target position based on heading/speed          │
+│  • Pre-checks collision before committing                   │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│  Existing: IK + Collision Check + Impedance                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### FG1. Per-Leg State Machine
+- [ ] Create `LegState` enum: `STANCE`, `LIFT_PENDING`, `SWING`, `PLACING`
+- [ ] Create `Leg` class with: state, foot_target, swing_progress, contact_sensed, contact_estimated
+- [ ] State transition logic:
+  - `STANCE` → `LIFT_PENDING`: coordinator grants swing permission
+  - `LIFT_PENDING` → `SWING`: lift trajectory complete
+  - `SWING` → `PLACING`: horizontal motion complete, begin descent
+  - `PLACING` → `STANCE`: contact detected or target Y reached
+- [ ] Track per-leg timing: time_in_state, last_transition_time
+
+### FG2. Support Polygon Computation
+- [ ] Implement `compute_support_polygon(stance_feet)` → list of (x, z) vertices in body frame
+- [ ] Use existing FK to get current foot positions
+- [ ] Handle degenerate cases: < 3 stance feet returns None (unstable)
+- [ ] Add to `kinematics.py` or create new `stability.py` module
+
+### FG3. Center of Gravity Estimation
+- [ ] Implement `estimate_cog()` → (x, y, z) in body frame
+- [ ] Initial implementation: return body center (0, 0, 0) — sufficient for quasi-static walking
+- [ ] Optional enhancement: weighted average including leg positions (leg mass ~3% each)
+- [ ] Integrate with IMU pitch/roll to project CoG onto ground plane
+
+### FG4. Stability Margin Computation
+- [ ] Implement `compute_stability_margin(cog_xz, support_polygon)` → float (mm)
+- [ ] Algorithm: distance from CoG projection to nearest polygon edge
+- [ ] Positive = stable (inside polygon), negative = unstable (outside)
+- [ ] Configurable minimum margin threshold (default: 30mm)
+
+### FG5. Free Gait Coordinator
+- [ ] Create `FreeGaitCoordinator` class
+- [ ] Each tick:
+  1. Identify stance legs, compute support polygon
+  2. Compute stability margin with current CoG
+  3. Evaluate which legs are ready to swing (longest in stance, task-aligned)
+  4. Grant permission if: margin > threshold after removing candidate leg
+- [ ] Configuration: max_simultaneous_swings (1-3), min_stability_margin_mm
+- [ ] Emergency hold: if margin drops below critical, cancel all pending lifts
+- [ ] Leg selection heuristics: alternating sides, direction-aligned, longest-waiting
+
+### FG6. Foot Placement Planner
+- [ ] Implement `plan_foot_placement(leg_idx, heading_deg, speed_scale)` → (x, y, z) target
+- [ ] Default positions: neutral standing pose (like StandingGait)
+- [ ] Walking offset: stride based on heading and speed
+- [ ] Pre-check candidate against collision model before committing
+- [ ] Future: terrain-aware placement using contact height history or ToF sensing
+
+### FG7. Contact Estimation (Pre-Switch Fallback)
+- [ ] Implement `estimate_contact(leg_idx)` → bool
+- [ ] Primary: use S4 foot switch telemetry when available
+- [ ] Fallback: position-based (foot reached target Y within tolerance)
+- [ ] Fallback: time-based (swing duration exceeded expected time)
+- [ ] Flag contact source: `SENSED` vs `ESTIMATED` for diagnostics
+
+### FG8. FreeGait Engine Class
+- [ ] Create `FreeGait(GaitEngine)` in `gait_engine.py`
+- [ ] Owns: 6 `Leg` instances, `FreeGaitCoordinator`, foot placement planner
+- [ ] `tick(dt)`: update coordinator, advance leg state machines, compute foot targets
+- [ ] `get_feet_bytes()`: format current foot positions as FEET command
+- [ ] `start()` / `stop()`: initialize legs to stance, clean shutdown
+- [ ] Integrate with existing `GaitTransition` system for smooth switching
+
+### FG9. Integration & Tuning
+- [ ] Add `FreeGait` to gait cycle (LB/RB toggle includes it)
+- [ ] Configuration in `[gait]` section:
+  - `free_gait_margin_mm` (default: 30)
+  - `free_gait_max_swing` (default: 3)
+  - `free_gait_swing_ms` (default: 400)
+  - `free_gait_lift_mm` (default: 50)
+- [ ] Menu/dashboard exposure for key tuning parameters
+- [ ] Stability fallback: if margin critical, auto-transition to StandingGait
+- [ ] Logging: stability margin, active swings, state transitions per tick
+
+### FG10. Foot Switch Integration (Firmware + Telemetry)
+- [ ] **Firmware**: Wire 6 foot contact switches to Teensy digital inputs
+- [ ] **Firmware**: Implement S4 telemetry frame (already stubbed):
+  - Format: 6 contact states packed as single byte (1 bit per leg)
+  - Debounce logic: 2-3ms to reject mechanical noise
+- [ ] **Controller**: Parse S4 frame in telemetry handler
+- [ ] **Controller**: Populate `Leg.contact_sensed` from S4 data
+- [ ] **Controller**: Contact events trigger state transitions:
+  - Early contact (during PLACING): stop descent, transition to STANCE
+  - Late/no contact: extend further or trigger recovery
+  - Unexpected loss (during STANCE): slip detection → hold or recovery
 
 ---
 
@@ -439,10 +585,10 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
 - [x] Collapsible sections for better organization
 
 ### W2b. LCARS Styling Polish
-- [ ] Fix dashboard swept elbow curves (header/sidebar/footer)
+- [x] Fix dashboard swept elbow curves (header/sidebar/footer)
   - Inner curve sizing and radius proportions per LCARS Manifesto
   - Reference: http://www.lcars-terminal.de/tutorial/guideline.htm
-- [ ] Apply same fixes to pointcloud_viewer.html swept elbows
+- [x] Apply same fixes to pointcloud_viewer.html swept elbows
 
 ### W3. Phase 3: Configuration Editing ✅ COMPLETE (v0.8.6)
 - [x] Add set_config WebSocket command support
@@ -466,13 +612,19 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
 - [ ] Link to point cloud viewer (already available at /pointcloud)
 - [ ] Embed point cloud in dashboard (iframe or integrated Three.js)
 - [ ] Add camera feed view (when camera module added)
-- [ ] Mobile-responsive layout
+- [x] Mobile-responsive layout
 
 ---
 
 ## Open Tasks (Firmware)
 
 ### Phase 2 Backlog
+
+- [ ] Dual-rail power monitoring (V+I)
+  - Add current + voltage sensing for both rails: electronics (5V/reg) and mechanicals (servo bus)
+  - Recommended: 2x I2C high-side monitor (INA226/INA228-class) + appropriately-sized shunt(s)
+  - Telemetry: extend/repurpose S1 fields to report both rails (e.g., elec_v/elec_a + mech_v/mech_a)
+  - Safety hooks: brownout warning thresholds + overcurrent event logging; avoid impacting 166 Hz loop
 
 - [ ] Foot 3D workspace bounds
   - Define body-frame foot workspace box (x/y/z mm) as sanity check on IK targets
@@ -545,9 +697,7 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
 
 ### Xbox Controller
 
-- [ ] startup.sh update
-  - Remove controller.py auto-start (now managed by joy_controller)
-  - Deferred from v0.7.1 release
+- [x] startup.sh update — Removed; joy_controller now manages controller lifecycle.
 
 ### View Settings
 

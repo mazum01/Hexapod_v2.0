@@ -5,6 +5,11 @@ Extracted from controller.py as part of Phase 5 modularization (2025-06-18).
 Contains DisplayThread class, UpdateDisplay function, and display helpers.
 
 Change log:
+  2026-01-13: Engineering view accuracy + collision overlay.
+              - Body outline now uses accurate BODY_HULL_XZ polygon from collision.py
+              - Added draw_collision_overlay(): leg segment cylinders with LEG_RADIUS
+              - New toggle: show_collision_overlay, collision_active, collision_pairs state
+              - DisplayThread methods: set_collision_overlay(), toggle_collision_overlay(), update_collision_state()
   2025-12-27: LCARS engineering view enhancements.
               - Uses config palette (Classic/Nemesis/LowerDecks/PADD) from menu.palette setting
               - Larger fonts (10pt/12pt), black text for better readability
@@ -46,6 +51,17 @@ from PIL import Image, ImageDraw, ImageFont
 # Import telemetry for structured data access
 from telemetry import IDX_GAIT, getGait, get_safety_overlay_text
 
+# Import FK from kinematics (single source of truth)
+from kinematics import fk_leg_points, COXA_LENGTH_MM, FEMUR_LENGTH_MM, TIBIA_LENGTH_MM
+
+# Import collision geometry for accurate body outline and visualization
+from collision import (
+    BODY_HULL_XZ,
+    BODY_BOUNDING_RADIUS_MM,
+    LEG_RADIUS,
+    MIN_DIST_LEG_LEG,
+)
+
 
 # -----------------------------------------------------------------------------
 # Mirror Display Buffer (for main-thread cv2.imshow)
@@ -56,7 +72,6 @@ _mirror_lock = threading.Lock()
 _mirror_image = None      # numpy array (BGR) ready for cv2.imshow, or None
 _mirror_active = False    # True when mirror should be displayed
 _mirror_menu = None       # Reference to MarsMenu for keyboard handling
-
 
 # -----------------------------------------------------------------------------
 # Display Mode Enum
@@ -121,15 +136,12 @@ def getColor(min_val: float, max_val: float, value: float,
 
 
 # -----------------------------------------------------------------------------
-# Robot Geometry Constants (from firmware robot_config.h)
+# Robot Geometry Constants (imported from kinematics.py)
 # -----------------------------------------------------------------------------
+# COXA_LENGTH_MM, FEMUR_LENGTH_MM, TIBIA_LENGTH_MM imported at top
+# fk_leg_points() imported from kinematics.py
 
-# Link lengths in mm
-COXA_LENGTH_MM = 41.70
-FEMUR_LENGTH_MM = 80.00
-TIBIA_LENGTH_MM = 133.78
-
-# Home position in centidegrees (servo center = 120°)
+# Home position in centidegrees (servo center = 120°) — for local reference only
 HOME_CD = 12000  # 120.00 degrees
 
 # Coxa origin offsets in body frame (X, Z) for each leg
@@ -142,114 +154,6 @@ COXA_OFFSET = [
     ( 86.00,   0.00),   # RM
     ( 65.60, -88.16),   # RR
 ]
-
-# Leg base angles (degrees, used as yaw offset from +Z axis)
-# These define the direction each leg points outward from the body
-# Note: In FK, cos(yaw) -> Z, sin(yaw) -> X, so 0° = forward, 90° = right
-LEG_BASE_ANGLES = [315.0, 270.0, 225.0, 45.0, 90.0, 135.0]  # LF, LM, LR, RF, RM, RR
-
-
-# -----------------------------------------------------------------------------
-# Forward Kinematics (matches firmware fk_leg_body())
-# -----------------------------------------------------------------------------
-
-def fk_leg_points(
-    leg_index: int,
-    coxa_deg: float,
-    femur_deg: float,
-    tibia_deg: float,
-) -> List[Tuple[float, float, float]]:
-    """Compute 3D positions of leg joints using forward kinematics.
-    
-    This matches the firmware's fk_leg_body() function. The input angles are
-    absolute servo positions in degrees. We convert to relative angles from
-    the home position (120°) before computing FK.
-    
-    Coordinate system (body frame):
-    - X: Right (+) / Left (-)
-    - Y: Up (+) / Down (-)  
-    - Z: Forward (+) / Backward (-)
-    
-    Args:
-        leg_index: Leg index 0-5 (LF, LM, LR, RF, RM, RR)
-        coxa_deg: Coxa joint angle in degrees (absolute servo position)
-        femur_deg: Femur joint angle in degrees (absolute servo position)
-        tibia_deg: Tibia joint angle in degrees (absolute servo position)
-    
-    Returns:
-        List of 4 (x, y, z) tuples: [coxa_origin, femur_origin, tibia_origin, foot]
-    """
-    # Convert absolute degrees to centidegrees, then to relative from home
-    home_deg = HOME_CD / 100.0  # 120.0 degrees
-    coxa_rel = coxa_deg - home_deg
-    femur_rel = femur_deg - home_deg
-    tibia_rel = tibia_deg - home_deg
-    
-    # Left-side legs (0,1,2) have mirrored servo mounting - flip femur and tibia direction
-    is_left = leg_index < 3
-    if is_left:
-        femur_rel = -femur_rel
-        tibia_rel = -tibia_rel
-    
-    # Convert to radians
-    # Coxa yaw: coxa_rel=0 means pointing in leg's base direction
-    # LEG_BASE_ANGLES defines where each leg points (e.g., RF=45° from +Z toward +X)
-    # We need to convert from body frame where +Z=forward to screen coords
-    leg_base_rad = math.radians(LEG_BASE_ANGLES[leg_index])
-    yaw = leg_base_rad + math.radians(coxa_rel)  # total yaw from +Z axis
-    
-    # Femur has 90° offset: at home (rel=0), femur points horizontal (outward)
-    # So we add 90° to convert from "home=horizontal" to trig convention
-    alpha = math.radians(femur_rel + 90.0)   # femur pitch (with 90° offset)
-    # Tibia rotation is reversed relative to femur
-    beta = math.radians(-tibia_rel)    # tibia relative pitch (negated)
-    
-    # Coxa origin in body frame
-    coxa_origin_x, coxa_origin_z = COXA_OFFSET[leg_index]
-    coxa_origin = (coxa_origin_x, 0.0, coxa_origin_z)
-    
-    # Link lengths
-    a = FEMUR_LENGTH_MM
-    b = TIBIA_LENGTH_MM
-    
-    # Planar projection in leg's sagittal plane
-    # alpha=90° at home means: sin(90)=1 (horizontal), cos(90)=0 (no vertical)
-    # Y is vertical: up is +Y, robot foot down → negative
-    y_foot = -(a * math.cos(alpha) + b * math.cos(alpha + beta))
-    # R is horizontal (sagittal plane) radius from femur base
-    R = a * math.sin(alpha) + b * math.sin(alpha + beta)
-    
-    # Add coxa standoff
-    rproj = COXA_LENGTH_MM + R
-    
-    # Rotate by yaw to get local X,Z from coxa origin
-    x_local = rproj * math.sin(yaw)
-    z_local = rproj * math.cos(yaw)
-    
-    # Foot position in body frame
-    foot_x = coxa_origin_x + x_local
-    foot_y = y_foot
-    foot_z = coxa_origin_z + z_local
-    foot = (foot_x, foot_y, foot_z)
-    
-    # Now compute intermediate joint positions for visualization
-    # Femur origin: end of coxa (coxa length from coxa origin in yaw direction)
-    femur_x = coxa_origin_x + COXA_LENGTH_MM * math.sin(yaw)
-    femur_z = coxa_origin_z + COXA_LENGTH_MM * math.cos(yaw)
-    femur_y = 0.0  # Coxa is horizontal
-    femur_origin = (femur_x, femur_y, femur_z)
-    
-    # Tibia origin: end of femur
-    # Femur extends from femur_origin: horizontal component in yaw direction, vertical by alpha
-    femur_y_contrib = -(a * math.cos(alpha))  # vertical (negative = down)
-    femur_r_contrib = a * math.sin(alpha)     # horizontal extension
-    
-    tibia_x = femur_x + femur_r_contrib * math.sin(yaw)
-    tibia_z = femur_z + femur_r_contrib * math.cos(yaw)
-    tibia_y = femur_y + femur_y_contrib
-    tibia_origin = (tibia_x, tibia_y, tibia_z)
-    
-    return [coxa_origin, femur_origin, tibia_origin, foot]
 
 
 # -----------------------------------------------------------------------------
@@ -714,6 +618,9 @@ def draw_hexapod_wireframe_3d(
     temp_min: float = 25.0,
     temp_max: float = 55.0,
     color_palette: List[Tuple[int, int, int]] = None,
+    show_collision_overlay: bool = False,
+    collision_active: bool = False,
+    collision_pairs: List[Tuple[int, int]] = None,
 ) -> Tuple[float, float, float, str]:
     """Draw a 3D wireframe visualization of the hexapod using FK.
     
@@ -730,6 +637,9 @@ def draw_hexapod_wireframe_3d(
         body_roll_deg: Body roll from IMU (positive = right side down)
         temp_min, temp_max: Temperature range for color mapping
         color_palette: Temperature color palette
+        show_collision_overlay: If True, draw collision detection geometry
+        collision_active: If True, show warning state (e.g., close to collision)
+        collision_pairs: List of (leg_i, leg_j) tuples currently in collision
     
     Returns:
         Tuple of (avg_temp, avg_voltage, max_temp, hottest_label) for compatibility
@@ -820,10 +730,9 @@ def draw_hexapod_wireframe_3d(
     # Sort legs by depth (back to front for proper occlusion)
     all_leg_data.sort(key=lambda x: x[4], reverse=True)
     
-    # Draw body hexagon first (always behind legs in top-down-ish view)
-    # Trace perimeter: LF(0)->RF(3)->RM(4)->RR(5)->LR(2)->LM(1)->back to LF
-    body_order = [0, 3, 4, 5, 2, 1]
-    body_points_3d = [(COXA_OFFSET[i][0], 0.0, COXA_OFFSET[i][1]) for i in body_order]
+    # Draw body using accurate BODY_HULL_XZ polygon from collision.py
+    # BODY_HULL_XZ is (X, Z) pairs in mm; we need (X, Y=0, Z) for 3D projection
+    body_points_3d = [(float(pt[0]), 0.0, float(pt[1])) for pt in BODY_HULL_XZ]
     body_points_3d = apply_body_rotation(body_points_3d)
     body_points_2d = project_3d_to_2d(
         body_points_3d, azimuth_deg, elevation_deg, center_x, center_y, scale
@@ -872,6 +781,27 @@ def draw_hexapod_wireframe_3d(
             fill=(150, 150, 150)
         )
     
+    # Draw collision overlay if enabled
+    if show_collision_overlay:
+        # Build leg points indexed by leg number (not sorted by depth)
+        leg_points_by_idx = [None] * 6
+        for leg_idx, _, pts_2d, _, _ in all_leg_data:
+            leg_points_by_idx[leg_idx] = pts_2d
+        
+        draw_collision_overlay(
+            draw=draw,
+            center_x=center_x,
+            center_y=center_y,
+            scale=scale,
+            azimuth_deg=azimuth_deg,
+            elevation_deg=elevation_deg,
+            leg_points_2d=leg_points_by_idx,
+            body_pitch_deg=body_pitch_deg,
+            body_roll_deg=body_roll_deg,
+            collision_active=collision_active,
+            collision_pairs=collision_pairs,
+        )
+    
     # Calculate summary stats
     avg_temp = sum(temps) / len(temps) if temps else 0.0
     # Calculate average voltage from servo_voltages (more stable than min)
@@ -882,6 +812,132 @@ def draw_hexapod_wireframe_3d(
         avg_voltage = 0.0
     
     return (avg_temp, avg_voltage, max_temp, hottest_label)
+
+
+# -----------------------------------------------------------------------------
+# Collision Visualization Overlay
+# -----------------------------------------------------------------------------
+
+def draw_collision_overlay(
+    draw: ImageDraw.Draw,
+    center_x: int,
+    center_y: int,
+    scale: float,
+    azimuth_deg: float,
+    elevation_deg: float,
+    leg_points_2d: List[List[Tuple[float, float, float]]],
+    body_pitch_deg: float = 0.0,
+    body_roll_deg: float = 0.0,
+    collision_active: bool = False,
+    collision_pairs: List[Tuple[int, int]] = None,
+) -> None:
+    """Draw collision model visualization overlay.
+    
+    Shows:
+    - Leg segment collision cylinders (as circles/ellipses around segments)
+    - Body keep-out zone
+    - Highlighted collision pairs (if any)
+    
+    Args:
+        draw: PIL ImageDraw object
+        center_x, center_y: Center position for drawing
+        scale: Scale factor (mm to pixels)
+        azimuth_deg, elevation_deg: Camera angles
+        leg_points_2d: List of 6 legs, each with 4 projected 2D points [(x, y, depth), ...]
+        body_pitch_deg, body_roll_deg: Body rotation from IMU
+        collision_active: If True, show warning colors
+        collision_pairs: List of (leg_i, leg_j) pairs that are in collision
+    """
+    if collision_pairs is None:
+        collision_pairs = []
+    
+    # Colors for collision visualization
+    safe_color = (0, 100, 50)       # Dark green (safe)
+    warning_color = (200, 100, 0)   # Orange (warning)
+    collision_color = (200, 50, 50) # Red (collision)
+    body_color = (80, 60, 40)       # Brown/amber for body zone
+    
+    # Calculate leg radius in pixels at current scale
+    leg_radius_px = max(2, int(LEG_RADIUS * scale))
+    
+    # Draw body keep-out zone (using BODY_HULL_XZ expanded by safety margin)
+    # This is a simplified version - just draw the bounding circle
+    # Could be enhanced to show the actual convex hull
+    body_radius_px = int(BODY_BOUNDING_RADIUS_MM * scale)
+    
+    # Create colliding leg set for quick lookup
+    colliding_legs = set()
+    for i, j in collision_pairs:
+        colliding_legs.add(i)
+        colliding_legs.add(j)
+    
+    # Draw collision "aura" around each leg segment
+    for leg_idx, points_2d in enumerate(leg_points_2d):
+        if len(points_2d) < 4:
+            continue
+            
+        # Determine color for this leg
+        if leg_idx in colliding_legs:
+            seg_color = collision_color
+        elif collision_active:
+            seg_color = warning_color
+        else:
+            seg_color = safe_color
+        
+        # Draw collision radius around each segment (coxa, femur, tibia)
+        for seg_idx in range(3):
+            p1 = points_2d[seg_idx]
+            p2 = points_2d[seg_idx + 1]
+            
+            x1, y1 = int(p1[0]), int(p1[1])
+            x2, y2 = int(p2[0]), int(p2[1])
+            
+            # Draw segment collision cylinder as thick semi-transparent line
+            # PIL doesn't support transparency, so we use dashed/dotted effect
+            # Draw collision radius circles at endpoints
+            draw.ellipse(
+                (x1 - leg_radius_px, y1 - leg_radius_px,
+                 x1 + leg_radius_px, y1 + leg_radius_px),
+                outline=seg_color, width=1
+            )
+            
+            # Draw the minimum distance threshold line around segment
+            # Use a simple approach: draw parallel lines offset by radius
+            seg_len = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+            if seg_len > 1:
+                # Calculate perpendicular offset
+                dx = (x2 - x1) / seg_len
+                dy = (y2 - y1) / seg_len
+                px, py = -dy * leg_radius_px, dx * leg_radius_px
+                
+                # Draw outline of collision cylinder (two parallel lines)
+                draw.line(
+                    [(x1 + px, y1 + py), (x2 + px, y2 + py)],
+                    fill=seg_color, width=1
+                )
+                draw.line(
+                    [(x1 - px, y1 - py), (x2 - px, y2 - py)],
+                    fill=seg_color, width=1
+                )
+    
+    # Draw collision pair connection lines (for debugging)
+    if collision_pairs and len(leg_points_2d) >= 6:
+        for leg_i, leg_j in collision_pairs:
+            if leg_i < len(leg_points_2d) and leg_j < len(leg_points_2d):
+                # Connect the foot positions of colliding legs
+                pts_i = leg_points_2d[leg_i]
+                pts_j = leg_points_2d[leg_j]
+                if len(pts_i) >= 4 and len(pts_j) >= 4:
+                    # Use tibia midpoint for collision indicator
+                    mid_i = ((pts_i[2][0] + pts_i[3][0]) / 2, 
+                             (pts_i[2][1] + pts_i[3][1]) / 2)
+                    mid_j = ((pts_j[2][0] + pts_j[3][0]) / 2,
+                             (pts_j[2][1] + pts_j[3][1]) / 2)
+                    draw.line(
+                        [(int(mid_i[0]), int(mid_i[1])), 
+                         (int(mid_j[0]), int(mid_j[1]))],
+                        fill=collision_color, width=2
+                    )
 
 
 # -----------------------------------------------------------------------------
@@ -1521,6 +1577,9 @@ def draw_lcars_engineering_view(
     view_azimuth: float = 0.0,
     view_elevation: float = 30.0,
     lcars_palette: int = 0,
+    show_collision_overlay: bool = False,
+    collision_active: bool = False,
+    collision_pairs: List[Tuple[int, int]] = None,
 ) -> Image.Image:
     """Draw LCARS-themed engineering view.
     
@@ -1663,6 +1722,9 @@ def draw_lcars_engineering_view(
             elevation_deg=view_elevation,
             body_pitch_deg=imu_pitch if imu_connected else 0.0,
             body_roll_deg=imu_roll if imu_connected else 0.0,
+            show_collision_overlay=show_collision_overlay,
+            collision_active=collision_active,
+            collision_pairs=collision_pairs,
         )
     else:
         avg_temp, avg_voltage, max_temp, hottest_label = draw_hexapod_heatmap(
@@ -2434,6 +2496,11 @@ class DisplayThread(threading.Thread):
         self._eng_lcars_theme = True    # Use LCARS theme for engineering view
         self._lcars_palette = 0         # LCARS palette index (0=Classic, 1=Nemesis, 2=LowerDecks, 3=PADD)
         
+        # Collision visualization overlay (engineering display)
+        self._show_collision_overlay = False  # Toggle collision geometry display
+        self._collision_active = False        # True when collision warning/error active
+        self._collision_pairs = []            # List of (leg_i, leg_j) pairs in collision
+        
         # Display mode (EYES, ENGINEERING, MENU)
         self._display_mode = DisplayMode.EYES
         
@@ -2518,6 +2585,30 @@ class DisplayThread(threading.Thread):
         """
         with self._lock:
             self._lcars_palette = max(0, min(3, palette))
+
+    def set_collision_overlay(self, enabled: bool) -> None:
+        """Enable or disable collision visualization overlay in engineering view."""
+        with self._lock:
+            self._show_collision_overlay = enabled
+
+    def toggle_collision_overlay(self) -> bool:
+        """Toggle collision overlay and return new state."""
+        with self._lock:
+            self._show_collision_overlay = not self._show_collision_overlay
+            return self._show_collision_overlay
+
+    def update_collision_state(self, active: bool = False, 
+                               pairs: List[Tuple[int, int]] = None) -> None:
+        """Update collision detection state for visualization.
+        
+        Args:
+            active: True if collision warning/error is active
+            pairs: List of (leg_i, leg_j) tuples currently in collision
+        """
+        with self._lock:
+            self._collision_active = active
+            if pairs is not None:
+                self._collision_pairs = pairs
 
     def set_base_vertical_offset(self, offset: float) -> None:
         """Update the baseline vertical eye offset used for joystick look."""
@@ -2686,6 +2777,10 @@ class DisplayThread(threading.Thread):
                     view_elevation = self._eng_view_elevation
                     eng_lcars_theme = self._eng_lcars_theme
                     lcars_palette = self._lcars_palette
+                    # Collision overlay state
+                    show_collision_overlay = self._show_collision_overlay
+                    collision_active = self._collision_active
+                    collision_pairs = self._collision_pairs[:]
                     # Notification state
                     notification_text = self._notification_text
                     notification_expire = self._notification_expire
@@ -2802,6 +2897,9 @@ class DisplayThread(threading.Thread):
                                 view_azimuth=view_azimuth,
                                 view_elevation=view_elevation,
                                 lcars_palette=lcars_palette,
+                                show_collision_overlay=show_collision_overlay,
+                                collision_active=collision_active,
+                                collision_pairs=collision_pairs,
                             )
                         else:
                             display_image = draw_engineering_view(

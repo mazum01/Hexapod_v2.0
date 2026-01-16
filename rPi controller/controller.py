@@ -4,6 +4,13 @@
 # CHANGE LOG (Python Controller)
 # Format: YYYY-MM-DD  Summary
 # REMINDER: Update CONTROLLER_VERSION below with every behavioral change, feature addition, or bug fix!
+# 2026-01-16  v0.12.10 b297: Diagnostics: Added optional collision pose compare CSV log (cmd FEET → IK/FK vs S6 joint telemetry → FK) to debug collision non-triggers.
+# 2026-01-12  v0.12.5 b292: Bugfix: Fixed FK in kinematics.py to use correct geometry (was producing wrong joint positions). Collision detection now correctly identifies adjacent leg collisions during tight turns. Unified FK code - display_thread.py now imports from kinematics.py.
+# 2026-01-12  v0.12.4 b291: Bugfix: Right stick disable now also disables autonomy (prevents re-enable). Collision warnings now show which legs/body are involved.
+# 2026-01-09  v0.12.3 b290: Bugfix: Ensure Controller always has self.config (prevents AttributeError during collision checks/UI sync). Fix collision flag update to use safety_state dict. Remove undefined audio_pounce().
+# 2026-01-09  v0.12.2 b289: Config parity: Exposed collision model tuning via on-screen MarsMenu + web dashboard; persisted `[collision]` numeric params in controller.ini; collision thresholds now read from config.
+# 2026-01-09  v0.12.1 b288: Feature S1 (Complete): Phase-aware collision risk zones + velocity-aware margins (35-55mm threshold). Updated kinematics.py docs, collision.py, test_collision.py.
+# 2026-01-08  v0.12.0 b287: Feature S1 (Collision Safety): Implemented analytical pre-IK collision detection using kinematics.py/collision.py; integrated check into send_feet_cmd.
 # 2026-01-08  v0.11.14 b286: Refactor M5 (Code Hygiene): Audit and fix bare except blocks with logging; standardize legacy variable names.
 # 2026-01-08  v0.11.13 b285: Refactor M4 (Final Phase): Completely removed legacy state synchronization (sync_globals_to_ctrl/sync_ctrl_to_globals). Controller class is now the sole source of truth.
 # 2026-01-08  v0.11.12 b284: Refactor M4 Phase 9 (Logic Globals): Migrated Move State, Gait Transition, Display Mode, and IMU Thread logic to Controller instance. Updated logic functions to be global-free.
@@ -286,11 +293,18 @@
 # 2026-01-06  v0.11.1 b273: Refactor M2: Integrated load_config() from config_manager; ControllerConfig dataclass now available for dependency injection.
 # 2026-01-06  v0.11.0 b272: Refactor: Configured entry point separation (M1) - main.py wrapper created to handle clean startup/shutdown; joy_controller now launches main.py. ConfigManager upgraded (M2) to handle all INI logic; controller.py prepared for dependency injection.
 # 2026-01-06  v0.10.17 b271: Curses: Fixed all print() to use end="\r\n"; suppressed pygame/I2C warnings; fixed async server shutdown.
+# 2026-01-13  v0.12.6 b293: Engineering view enhancements: Accurate body outline using BODY_HULL_XZ polygon from collision.py; collision visualization overlay (leg cylinders, collision pairs). New toggle: set_collision_overlay(), toggle_collision_overlay().
+# 2026-01-13  v0.12.7 b294: Config parity: Collision overlay toggle exposed in MarsMenu (System > Col Overlay) and web dashboard (System section).
+# 2026-01-14  v0.12.8 b295: Collision tuning: Increased max collision safety margin (leg) from 40mm to 100mm across menu/dashboard/config.
+# 2026-01-15  v0.12.9 b296: Collision tuning: Increased max collision leg radius from 40mm to 100mm across menu/dashboard/config.
+# 2026-01-16  v0.12.11 b298: Diagnostics: Collision pose compare logger config moved from env vars to controller.ini; controls exposed in menu + dashboard.
+# 2026-01-16  v0.12.12 b299: Safety: Collision stop_on_collision now enforces an emergency stop (gait stop + idle + disable) instead of warning-only.
+# 2026-01-16  v0.12.13 b300: Safety: Collision response now steps (lift+place) to stand pose instead of a straight-line stop/disable.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.11.14"
+CONTROLLER_VERSION = "0.12.13"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 286
+CONTROLLER_BUILD = 300
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -348,8 +362,8 @@ from MarsMenu import MarsMenu, MenuCategory, MenuItem
 from SteeringMode import SteeringMode
 
 # import the gait engine
-from gait_engine import (GaitEngine, TripodGait, WaveGait, RippleGait, 
-                         StationaryPattern, StandingGait, GaitParams, GaitTransition)
+from gait_engine import (GaitEngine, TripodGait, WaveGait, RippleGait,
+                         StationaryPattern, StandingGait, StepToStandGait, GaitParams, GaitTransition)
 
 # import telemetry module (Phase 1 modularization)
 from telemetry import (
@@ -374,6 +388,7 @@ from config_manager import (
     save_human_eye_settings, save_eye_center_offset, save_eye_vertical_offset,
     save_eye_crt_mode, save_menu_settings, save_pid_settings, save_imp_settings, save_est_settings,
     save_tof_settings, save_safety_display_settings, save_low_battery_settings,
+    save_collision_settings,
 )
 
 # import menu_controller module (Phase 3 modularization - M3)
@@ -462,6 +477,13 @@ except ImportError as e:
     TELEMETRY_SERVER_AVAILABLE = False
     print(f"TelemetryServer not available: {e}")
 
+# import kinematics and collision for S1/S2 safety check
+import kinematics
+from kinematics import LegPose
+import collision
+from collision import validate_pose_safety_hybrid  # S2: learned collision model
+import numpy as np
+
 # Gait type cycling order (RB button) - Standing first for leveling tests
 GAIT_TYPES = [StandingGait, TripodGait, WaveGait, RippleGait, StationaryPattern]
 GAIT_NAMES = ["Standing", "Tripod", "Wave", "Ripple", "Stationary"]
@@ -518,6 +540,11 @@ class Controller:
         self.debug_send_all = False
         self.debug_telemetry = False  # Log raw telemetry frames
         self.cmdThrottleMs = 50.0  # Default, overwritten by config
+
+        # Optional diagnostics: collision pose comparison logger (controller.ini [collision])
+        # pose_log_enabled=true enables CSV output to /tmp by default.
+        self._collision_pose_log_last_s = 0.0
+        self._collision_pose_log_initialized = False
         # Telemetry state
         self.lastTelemetryTime = None
         self.telemetryGraceDeadline = None
@@ -695,6 +722,10 @@ class Controller:
         self.safety_telem = SafetyTelemetry()
         self.joint_telem = JointTelemetry()  # S6: 18 joint positions in degrees
 
+        # Typed config (M2+): always present so features can safely reference it.
+        # This is populated on startup via ctrl.load_config(_loaded_cfg).
+        self.config = ControllerConfig()
+
     @property
     def is_robot_enabled(self) -> bool:
         """Check if robot is currently enabled (replaces magic index 9 checks).
@@ -730,6 +761,8 @@ class Controller:
 
     def load_config(self, cfg_obj):
         """Load configuration from Config object."""
+        # Keep the typed config available to runtime features (collision, dashboard sync, etc.).
+        self.config = cfg_obj
         # Safety Display
         if hasattr(cfg_obj, 'safety_display'):
             self.safety_display_volt_min = cfg_obj.safety_display.volt_min
@@ -1605,7 +1638,8 @@ class Controller:
                  self.gaitActive = False
             
             # Sound/Speech
-            audio_pounce()
+            if _audio is not None:
+                _audio.play('menu_select')
             if source == "kbd":
                 speak("Pounce sequence initiated", force=True)
             elif source == "pad":
@@ -1633,6 +1667,159 @@ class Controller:
             self.lastFeetPositions = list(new_positions)
             return True
         return False
+
+    def _maybe_log_collision_pose_compare(
+        self,
+        positions: list,
+        poses: list,
+        is_safe: bool,
+        use_learned: bool,
+        learned_details: dict | None,
+    ) -> None:
+        """Optional diagnostics: write pose compare info to CSV.
+
+        Compares:
+          - commanded FEET targets (body frame, mm)
+          - IK-produced poses and FK foot positions (body frame, mm)
+          - telemetry joint angles (S6, absolute deg) and FK foot positions
+
+                Enabled via controller.ini [collision]:
+                    - pose_log_enabled = true
+                    - pose_log_hz = 10
+
+                Output path is currently fixed to: /tmp/collision_pose_compare.csv
+        """
+        try:
+            enabled = bool(getattr(self.config.collision, 'pose_log_enabled', False))
+            if not enabled:
+                return
+
+            if not positions or len(positions) != 18 or not poses or len(poses) != 6:
+                return
+
+            # Rate limit (but always log unsafe poses)
+            try:
+                hz = float(getattr(self.config.collision, 'pose_log_hz', 10.0))
+            except (TypeError, ValueError):
+                hz = 10.0
+            hz = max(0.1, min(200.0, hz))
+            min_dt = 1.0 / hz
+
+            now_s = time.monotonic()
+            if is_safe and (now_s - self._collision_pose_log_last_s) < min_dt:
+                return
+            self._collision_pose_log_last_s = now_s
+
+            path = '/tmp/collision_pose_compare.csv'
+
+            # Analytical details (distances/threshold) for context
+            min_pair = ""
+            min_dist = float('nan')
+            threshold = float('nan')
+            inter_leg_collision = False
+            body_collision = False
+            try:
+                _, detailed = collision.validate_pose_safety_detailed(poses, collision_cfg=self.config.collision)
+                distances = detailed.get('distances') or {}
+                threshold = float(detailed.get('threshold_mm', float('nan')))
+                inter_leg_collision = bool(detailed.get('inter_leg_collision', False))
+                body_collision = bool(detailed.get('body_collision', False))
+                if distances:
+                    (a, b), d = min(distances.items(), key=lambda kv: kv[1])
+                    leg_names = ['LF', 'LM', 'LR', 'RF', 'RM', 'RR']
+                    min_pair = f"{leg_names[int(a)]}-{leg_names[int(b)]}"
+                    min_dist = float(d)
+            except Exception:
+                pass
+
+            learned_max_prob = float('nan')
+            if use_learned and learned_details:
+                try:
+                    learned_max_prob = float(learned_details.get('learned_max_prob', float('nan')))
+                except (TypeError, ValueError):
+                    learned_max_prob = float('nan')
+
+            # FK from IK poses
+            fk_cmd_feet = []
+            for leg_idx in range(6):
+                pose = poses[leg_idx]
+                chain = kinematics.fk_leg(leg_idx, pose.coxa, pose.femur, pose.tibia)
+                fk_cmd_feet.append(chain.foot)
+
+            # FK from telemetry (absolute angles)
+            telem_valid = bool(self.joint_telem is not None and self.joint_telem.valid and self.joint_telem.angles_deg and len(self.joint_telem.angles_deg) == 18)
+            fk_telem_feet = [None] * 6
+            if telem_valid:
+                angles = self.joint_telem.angles_deg
+                for leg_idx in range(6):
+                    coxa_deg = float(angles[leg_idx * 3 + 0])
+                    femur_deg = float(angles[leg_idx * 3 + 1])
+                    tibia_deg = float(angles[leg_idx * 3 + 2])
+                    chain = kinematics.fk_leg(leg_idx, coxa_deg, femur_deg, tibia_deg, absolute_angles=True)
+                    fk_telem_feet[leg_idx] = chain.foot
+
+            # Write CSV (one row per leg)
+            if not self._collision_pose_log_initialized:
+                try:
+                    with open(path, 'w') as f:
+                        f.write(
+                            'time_ms,leg,cmd_x,cmd_y,cmd_z,ik_fk_x,ik_fk_y,ik_fk_z,ik_fk_err_mm,'
+                            'telem_fk_x,telem_fk_y,telem_fk_z,cmd_telem_dx,cmd_telem_dy,cmd_telem_dz,cmd_telem_err_mm,'
+                            'is_safe,inter_leg_collision,body_collision,min_pair,min_dist_mm,threshold_mm,'
+                            'leg_radius_mm,safety_margin_mm,use_learned,learned_max_prob,telem_valid\n'
+                        )
+                    self._collision_pose_log_initialized = True
+                except OSError:
+                    return
+
+            leg_names = ['LF', 'LM', 'LR', 'RF', 'RM', 'RR']
+            t_ms = int(time.time() * 1000.0)
+            leg_radius_mm = float(getattr(self.config.collision, 'leg_radius_mm', float('nan')))
+            safety_margin_mm = float(getattr(self.config.collision, 'safety_margin_mm', float('nan')))
+
+            with open(path, 'a') as f:
+                for leg_idx in range(6):
+                    cmd_x = float(positions[leg_idx * 3 + 0])
+                    cmd_y = float(positions[leg_idx * 3 + 1])
+                    cmd_z = float(positions[leg_idx * 3 + 2])
+
+                    ik_fk = fk_cmd_feet[leg_idx]
+                    ik_fk_x = float(ik_fk[0])
+                    ik_fk_y = float(ik_fk[1])
+                    ik_fk_z = float(ik_fk[2])
+                    ik_fk_err = float(np.linalg.norm(np.array([cmd_x - ik_fk_x, cmd_y - ik_fk_y, cmd_z - ik_fk_z])))
+
+                    telem_fk = fk_telem_feet[leg_idx]
+                    if telem_fk is None:
+                        telem_fk_x = float('nan')
+                        telem_fk_y = float('nan')
+                        telem_fk_z = float('nan')
+                        dx = float('nan')
+                        dy = float('nan')
+                        dz = float('nan')
+                        cmd_telem_err = float('nan')
+                    else:
+                        telem_fk_x = float(telem_fk[0])
+                        telem_fk_y = float(telem_fk[1])
+                        telem_fk_z = float(telem_fk[2])
+                        dx = float(cmd_x - telem_fk_x)
+                        dy = float(cmd_y - telem_fk_y)
+                        dz = float(cmd_z - telem_fk_z)
+                        cmd_telem_err = float(np.linalg.norm(np.array([dx, dy, dz])))
+
+                    f.write(
+                        f"{t_ms},{leg_names[leg_idx]},"
+                        f"{cmd_x:.3f},{cmd_y:.3f},{cmd_z:.3f},"
+                        f"{ik_fk_x:.3f},{ik_fk_y:.3f},{ik_fk_z:.3f},{ik_fk_err:.3f},"
+                        f"{telem_fk_x:.3f},{telem_fk_y:.3f},{telem_fk_z:.3f},"
+                        f"{dx:.3f},{dy:.3f},{dz:.3f},{cmd_telem_err:.3f},"
+                        f"{1 if is_safe else 0},{1 if inter_leg_collision else 0},{1 if body_collision else 0},"
+                        f"{min_pair},{min_dist:.3f},{threshold:.3f},"
+                        f"{leg_radius_mm:.3f},{safety_margin_mm:.3f},{1 if use_learned else 0},{learned_max_prob:.4f},{1 if telem_valid else 0}\n"
+                    )
+        except Exception:
+            # Diagnostics must never affect runtime control loop.
+            return
 
     def send_feet_cmd(self, feet_cmd: bytes, force: bool = False) -> bool:
         """Send FEET command with optional tolerance filtering and body leveling."""
@@ -1682,6 +1869,7 @@ class Controller:
                     max_corr = max(abs(c) for c in corrections)
                     print(f"[LEAN] P:{lean_p:+.1f}° R:{lean_r:+.1f}° max:{max_corr:.1f}mm", end="\r\n")
         
+        positions = None
         if not force and time_since_last < self.feetMaxSkipMs:
             positions = _parse_feet_positions(cmd_to_send)
             if positions and not self.check_feet_changed(positions):
@@ -1689,6 +1877,128 @@ class Controller:
                     print(f"[send_feet_cmd] FILTERED (delta < {self.feetToleranceMm}mm, {time_since_last:.1f}ms ago)", end="\r\n")
                 return False
         
+        # S1/S2 Collision Check
+        if hasattr(self.config, 'collision') and self.config.collision.enabled:
+            if positions is None:
+                positions = _parse_feet_positions(cmd_to_send)
+            
+            if positions and len(positions) == 18:
+                try:
+                    poses = []
+                    for i in range(6):
+                        pt = np.array(positions[i*3:i*3+3])
+                        poses.append(kinematics.compute_ik(i, pt))
+                    
+                    # S2: Use hybrid model (learned pre-filter + analytical confirm)
+                    # if use_learned_model is enabled, otherwise pure analytical
+                    use_learned = getattr(self.config.collision, 'use_learned_model', False)
+                    details = None
+                    
+                    if use_learned:
+                        is_safe, details = validate_pose_safety_hybrid(
+                            poses, collision_cfg=self.config.collision
+                        )
+                    else:
+                        is_safe = collision.validate_pose_safety(
+                            poses, collision_cfg=self.config.collision
+                        )
+
+                    # Optional diagnostics: log cmd IK/FK vs S6 telemetry FK
+                    self._maybe_log_collision_pose_compare(
+                        positions=positions,
+                        poses=poses,
+                        is_safe=is_safe,
+                        use_learned=use_learned,
+                        learned_details=details,
+                    )
+
+                    recovery_running = self.gaitActive and isinstance(self.gaitEngine, StepToStandGait)
+                    
+                    if not is_safe:
+                        # Build detail string for legs/body involved
+                        leg_names = ['LF', 'LM', 'LR', 'RF', 'RM', 'RR']
+                        detail_parts = []
+                        if use_learned and details:
+                            # Hybrid/learned details
+                            analytical = details.get('analytical', {})
+                            if analytical.get('body_collision'):
+                                detail_parts.append('BODY')
+                            if analytical.get('inter_leg_collision') and analytical.get('distances'):
+                                # Find pairs that are below threshold
+                                thresh = analytical.get('threshold_mm', 35.0)
+                                for (a, b), dist in analytical.get('distances', {}).items():
+                                    if dist < thresh:
+                                        detail_parts.append(f"{leg_names[a]}-{leg_names[b]}")
+                        msg = "[COLLISION] Unsafe pose detected!"
+                        if detail_parts:
+                            msg += f" ({', '.join(detail_parts)})"
+                        if self.config.collision.warn_only:
+                            if self.verbose: print(f"{msg} (WARN)", end="\r\n")
+                        elif recovery_running:
+                            # During collision recovery we allow motion commands to flow so the
+                            # step-to-stand gait can actively move away from the unsafe region.
+                            if self.verbose:
+                                print(f"{msg} (RECOVERY)", end="\r\n")
+                            self.safety_state["collision"] = True
+                        else:
+                            print(f"{msg} BLOCKED", end="\r\n")
+                            self.safety_state["collision"] = True
+
+                            # If configured, start a step-to-stand recovery gait (stepping motion)
+                            # instead of a straight-line STAND or immediate torque disable.
+                            if bool(getattr(self.config.collision, 'stop_on_collision', True)):
+                                # Seed recovery from last sent feet (current pose proxy).
+                                # If unavailable, fall back to the attempted command positions.
+                                seed = None
+                                if isinstance(self.lastFeetPositions, list) and len(self.lastFeetPositions) == 18:
+                                    seed = self.lastFeetPositions
+                                elif isinstance(positions, list) and len(positions) == 18:
+                                    seed = positions
+
+                                if seed is not None:
+                                    try:
+                                        # Stop any gait/transition currently running.
+                                        if self.gait_transition is not None:
+                                            self.gait_transition.reset()
+                                        if self.gaitActive and self.gaitEngine is not None:
+                                            self.gaitEngine.stop()
+                                    except Exception:
+                                        pass
+
+                                    # Ensure Teensy is in IDLE mode so FEET commands are applied.
+                                    try:
+                                        self.send_cmd(b'MODE IDLE', force=True)
+                                    except Exception:
+                                        pass
+
+                                    start_feet = [
+                                        [float(seed[i * 3 + 0]), float(seed[i * 3 + 1]), float(seed[i * 3 + 2])]
+                                        for i in range(6)
+                                    ]
+
+                                    params = GaitParams(
+                                        base_x_mm=self._gaitWidthMm,
+                                        base_y_mm=_gaitBaseYMm,
+                                        lift_mm=self._gaitLiftMm,
+                                    )
+                                    lift_mm = max(20.0, float(self._gaitLiftMm), 50.0)
+                                    self.gaitEngine = StepToStandGait(
+                                        params=params,
+                                        start_feet=start_feet,
+                                        lift_mm=lift_mm,
+                                    )
+                                    self.gaitEngine.start()
+                                    self.gaitActive = True
+                                    self.gait_tick_count = 0
+                                    if self.verbose:
+                                        print("[COLLISION] Starting step-to-stand recovery", end="\r\n")
+
+                            return False
+                    else:
+                        self.safety_state["collision"] = False
+                except Exception as e:
+                    if self.verbose: print(f"[COLLISION] Check error: {e}", end="\r\n")
+
         if self.send_cmd(cmd_to_send, force=force):
             self.lastFeetSendTime = time.monotonic()
             return True
@@ -1833,6 +2143,12 @@ class Controller:
                         if self.verbose:
                             print("\r\nRight joystick pressed (Disable)", end="\r\n")
                         if self.teensy is not None:
+                            # Stop any active gait first
+                            if self.gaitActive and self.gaitEngine is not None:
+                                self.gaitEngine.stop()
+                                self.gaitActive = False
+                            # Disable autonomy to prevent re-enable
+                            self.disable_autonomy_if_active(verbose=self.verbose)
                             self.send_cmd(b'DISABLE', force=True)
                     elif event.code == 317:  # left joystick press - gait width adjustment mode
                         if event.value == 1:  # Button pressed
@@ -2439,6 +2755,8 @@ class Controller:
                 if self.gaitActive and self.gaitEngine is not None:
                     self.gaitEngine.stop()
                     self.gaitActive = False
+                # Disable autonomy to prevent re-enable
+                self.disable_autonomy_if_active(verbose=self.verbose)
                 self.send_cmd(b'DISABLE', force=True)
         
         # D-pad
@@ -3692,6 +4010,28 @@ def _setup_mars_menu(ctrl):
         set_low_battery_recovery_volt=lambda v: setattr(ctrl, 'low_battery_recovery_volt', v),
         get_low_battery_filter_alpha=lambda: ctrl.low_battery_filter_alpha,
         set_low_battery_filter_alpha=lambda v: setattr(ctrl, 'low_battery_filter_alpha', v),
+        # Collision settings (Pi-side pre-IK collision check)
+        get_collision_enabled=lambda: bool(getattr(ctrl.config.collision, 'enabled', True)),
+        set_collision_enabled=lambda v: setattr(ctrl.config.collision, 'enabled', bool(v)),
+        get_collision_stop_on_collision=lambda: bool(getattr(ctrl.config.collision, 'stop_on_collision', True)),
+        set_collision_stop_on_collision=lambda v: setattr(ctrl.config.collision, 'stop_on_collision', bool(v)),
+        get_collision_warn_only=lambda: bool(getattr(ctrl.config.collision, 'warn_only', False)),
+        set_collision_warn_only=lambda v: setattr(ctrl.config.collision, 'warn_only', bool(v)),
+        get_collision_leg_radius_mm=lambda: float(getattr(ctrl.config.collision, 'leg_radius_mm', 15.0)),
+        set_collision_leg_radius_mm=lambda v: setattr(ctrl.config.collision, 'leg_radius_mm', float(v)),
+        get_collision_safety_margin_mm=lambda: float(getattr(ctrl.config.collision, 'safety_margin_mm', 5.0)),
+        set_collision_safety_margin_mm=lambda v: setattr(ctrl.config.collision, 'safety_margin_mm', float(v)),
+        get_collision_body_keepout_radius_mm=lambda: float(getattr(ctrl.config.collision, 'body_keepout_radius_mm', 50.0)),
+        set_collision_body_keepout_radius_mm=lambda v: setattr(ctrl.config.collision, 'body_keepout_radius_mm', float(v)),
+        get_collision_time_horizon_s=lambda: float(getattr(ctrl.config.collision, 'time_horizon_s', 0.05)),
+        set_collision_time_horizon_s=lambda v: setattr(ctrl.config.collision, 'time_horizon_s', float(v)),
+        get_collision_max_velocity_margin_mm=lambda: float(getattr(ctrl.config.collision, 'max_velocity_margin_mm', 20.0)),
+        set_collision_max_velocity_margin_mm=lambda v: setattr(ctrl.config.collision, 'max_velocity_margin_mm', float(v)),
+
+        get_collision_pose_log_enabled=lambda: bool(getattr(ctrl.config.collision, 'pose_log_enabled', False)),
+        set_collision_pose_log_enabled=lambda v: setattr(ctrl.config.collision, 'pose_log_enabled', bool(v)),
+        get_collision_pose_log_hz=lambda: float(getattr(ctrl.config.collision, 'pose_log_hz', 10.0)),
+        set_collision_pose_log_hz=lambda v: setattr(ctrl.config.collision, 'pose_log_hz', float(v)),
     )
     setup_safety_callbacks(_marsMenu, _safety_ctx)
 
@@ -4210,6 +4550,16 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
         'volt critical': 'volt_critical', 'volt_critical': 'volt_critical',
         'volt recovery': 'volt_recovery', 'volt_recovery': 'volt_recovery',
         'lowbatt filter': 'filter_alpha', 'filter_alpha': 'filter_alpha',
+
+        # Safety (collision)
+        'col enabled': 'col_enabled',
+        'col stop': 'col_stop',
+        'col warnonly': 'col_warnonly',
+        'leg radius': 'leg_radius',
+        'safety margin': 'safety_margin',
+        'body keepout': 'body_keepout',
+        'vel horizon': 'vel_horizon',
+        'vel margin max': 'vel_margin_max',
         # PID
         'pid enabled': 'enabled', 'enabled': 'enabled',
         'kp': 'kp', 'ki': 'ki', 'kd': 'kd',
@@ -4220,6 +4570,12 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
         # Estimator
         'est alpha': 'alpha', 'alpha': 'alpha',
         'velocity decay': 'vel_decay', 'vel_decay': 'vel_decay',
+        # System (display)
+        'col overlay': 'col_overlay', 'col_overlay': 'col_overlay',
+
+        # Collision diagnostics
+        'pose log': 'pose_log_enabled', 'pose_log_enabled': 'pose_log_enabled',
+        'pose log hz': 'pose_log_hz', 'pose_log_hz': 'pose_log_hz',
     }
     
     # Normalize key
@@ -4309,6 +4665,109 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
                 if _verbose:
                     print(f"[Dashboard] Safety filter_alpha -> {ctrl.low_battery_filter_alpha}", end="\r\n")
                 return True
+
+            # Collision settings (Pi-side pre-IK collision check)
+            elif normalized_key == 'col_enabled':
+                enabled = bool(value) if not isinstance(value, int) else value != 0
+                ctrl.config.collision.enabled = enabled
+                save_collision_settings({'enabled': enabled})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Col Enabled", 1 if enabled else 0)
+                if _verbose:
+                    print(f"[Dashboard] Collision enabled -> {enabled}", end="\r\n")
+                return True
+
+            elif normalized_key == 'col_stop':
+                stop_on_collision = bool(value) if not isinstance(value, int) else value != 0
+                ctrl.config.collision.stop_on_collision = stop_on_collision
+                save_collision_settings({'stop_on_collision': stop_on_collision})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Col Stop", 1 if stop_on_collision else 0)
+                if _verbose:
+                    print(f"[Dashboard] Collision stop_on_collision -> {stop_on_collision}", end="\r\n")
+                return True
+
+            elif normalized_key == 'col_warnonly':
+                warn_only = bool(value) if not isinstance(value, int) else value != 0
+                ctrl.config.collision.warn_only = warn_only
+                save_collision_settings({'warn_only': warn_only})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Col WarnOnly", 1 if warn_only else 0)
+                if _verbose:
+                    print(f"[Dashboard] Collision warn_only -> {warn_only}", end="\r\n")
+                return True
+
+            elif normalized_key == 'leg_radius':
+                v = max(0.0, min(100.0, float(value)))
+                ctrl.config.collision.leg_radius_mm = v
+                save_collision_settings({'leg_radius_mm': v})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Leg Radius", v)
+                if _verbose:
+                    print(f"[Dashboard] Collision leg_radius_mm -> {v}", end="\r\n")
+                return True
+
+            elif normalized_key == 'safety_margin':
+                v = max(0.0, min(100.0, float(value)))
+                ctrl.config.collision.safety_margin_mm = v
+                save_collision_settings({'safety_margin_mm': v})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Safety Margin", v)
+                if _verbose:
+                    print(f"[Dashboard] Collision safety_margin_mm -> {v}", end="\r\n")
+                return True
+
+            elif normalized_key == 'body_keepout':
+                v = max(0.0, float(value))
+                ctrl.config.collision.body_keepout_radius_mm = v
+                save_collision_settings({'body_keepout_radius_mm': v})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Body Keepout", v)
+                if _verbose:
+                    print(f"[Dashboard] Collision body_keepout_radius_mm -> {v}", end="\r\n")
+                return True
+
+            elif normalized_key == 'vel_horizon':
+                ms = max(0.0, float(value))
+                ms = min(ms, 250.0)
+                sec = ms / 1000.0
+                ctrl.config.collision.time_horizon_s = sec
+                save_collision_settings({'time_horizon_s': sec})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Vel Horizon", int(round(ms)))
+                if _verbose:
+                    print(f"[Dashboard] Collision time_horizon_s -> {sec}", end="\r\n")
+                return True
+
+            elif normalized_key == 'vel_margin_max':
+                v = max(0.0, float(value))
+                ctrl.config.collision.max_velocity_margin_mm = v
+                save_collision_settings({'max_velocity_margin_mm': v})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Vel Margin Max", v)
+                if _verbose:
+                    print(f"[Dashboard] Collision max_velocity_margin_mm -> {v}", end="\r\n")
+                return True
+
+            elif normalized_key == 'pose_log_enabled':
+                enabled = bool(value) if not isinstance(value, int) else value != 0
+                ctrl.config.collision.pose_log_enabled = enabled
+                save_collision_settings({'pose_log_enabled': enabled})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Pose Log", 1 if enabled else 0)
+                if _verbose:
+                    print(f"[Dashboard] Collision pose_log_enabled -> {enabled}", end="\r\n")
+                return True
+
+            elif normalized_key == 'pose_log_hz':
+                hz = max(0.1, min(200.0, float(value)))
+                ctrl.config.collision.pose_log_hz = hz
+                save_collision_settings({'pose_log_hz': hz})
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SAFETY, "Pose Log Hz", hz)
+                if _verbose:
+                    print(f"[Dashboard] Collision pose_log_hz -> {hz}", end="\r\n")
+                return True
         
         # PID settings
         elif section_lower == 'pid':
@@ -4322,6 +4781,18 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
         # EST (Estimator) settings
         elif section_lower in ('est', 'estimator'):
             return _handle_est_config_change(normalized_key, value)
+        
+        # System (display) settings
+        elif section_lower == 'system':
+            if normalized_key == 'col_overlay':
+                enabled = bool(value) if not isinstance(value, int) else value != 0
+                if _displayThread is not None:
+                    _displayThread.set_collision_overlay(enabled)
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.SYSTEM, "Col Overlay", 1 if enabled else 0)
+                if _verbose:
+                    print(f"[Dashboard] Collision overlay -> {'On' if enabled else 'Off'}", end="\r\n")
+                return True
         
         if _verbose:
             print(f"[Dashboard] Unknown config: {section}.{key} = {value}", end="\r\n")
@@ -6032,6 +6503,21 @@ def phase_gait_tick(ctrl):
     else:
         # Normal gait operation - tick the single gait engine
         ctrl.gaitEngine.tick(dt_seconds)
+
+        # Collision recovery: when step-to-stand completes, settle into StandingGait.
+        if isinstance(ctrl.gaitEngine, StepToStandGait) and hasattr(ctrl.gaitEngine, 'is_complete'):
+            try:
+                if ctrl.gaitEngine.is_complete():
+                    params = getattr(ctrl.gaitEngine, 'params', None)
+                    ctrl.gaitEngine = StandingGait(params)
+                    ctrl.gaitEngine.start()
+                    ctrl.gaitActive = True
+                    ctrl.gait_tick_count = 0
+                    ctrl.safety_state["collision"] = False
+                    if ctrl.verbose:
+                        print("[COLLISION] Recovery complete: standing", end="\r\n")
+            except Exception:
+                pass
         
         # Send FEET command every N ticks to reduce serial load
         ctrl.gait_tick_count += 1

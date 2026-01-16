@@ -252,6 +252,25 @@ class LowBatteryConfig:
 
 
 @dataclass
+class CollisionConfig:
+    enabled: bool = True
+    stop_on_collision: bool = True
+    warn_only: bool = False
+    # Collision model tuning (mm/s)
+    leg_radius_mm: float = 15.0
+    safety_margin_mm: float = 5.0
+    body_keepout_radius_mm: float = 50.0
+    time_horizon_s: float = 0.05
+    max_velocity_margin_mm: float = 20.0
+    # S2: Learned collision model (faster, uses neural network pre-filter)
+    use_learned_model: bool = True  # Use hybrid (learned + analytical) when True
+
+    # Diagnostics: log pose compare CSV (cmd FEET → IK/FK vs S6 telemetry FK)
+    pose_log_enabled: bool = True
+    pose_log_hz: float = 10.0
+
+
+@dataclass
 class BehaviorConfig:
     enabled: bool = False
     obstacle_avoidance: bool = True
@@ -330,6 +349,7 @@ class ControllerConfig:
     est: ESTConfig = field(default_factory=ESTConfig)
     safety_display: SafetyDisplayConfig = field(default_factory=SafetyDisplayConfig)
     low_battery: LowBatteryConfig = field(default_factory=LowBatteryConfig)
+    collision: CollisionConfig = field(default_factory=CollisionConfig)
     behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
     pointcloud: PointCloudConfig = field(default_factory=PointCloudConfig)
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
@@ -684,6 +704,25 @@ def load_config(config_path: Optional[str] = None) -> ControllerConfig:
                                                          fallback=cfg.safety_display.temp_max)
             cfg.safety_display.show_battery_icon = _cfg.getboolean('safety_display', 'show_battery_icon',
                                                                     fallback=cfg.safety_display.show_battery_icon)
+        
+        # Collision section
+        if 'collision' in _cfg:
+            cfg.collision.enabled = _cfg.getboolean('collision', 'enabled', fallback=cfg.collision.enabled)
+            cfg.collision.stop_on_collision = _cfg.getboolean('collision', 'stop_on_collision', fallback=cfg.collision.stop_on_collision)
+            cfg.collision.warn_only = _cfg.getboolean('collision', 'warn_only', fallback=cfg.collision.warn_only)
+            cfg.collision.leg_radius_mm = _cfg.getfloat('collision', 'leg_radius_mm', fallback=cfg.collision.leg_radius_mm)
+            cfg.collision.leg_radius_mm = max(0.0, min(100.0, float(cfg.collision.leg_radius_mm)))
+            cfg.collision.safety_margin_mm = _cfg.getfloat('collision', 'safety_margin_mm', fallback=cfg.collision.safety_margin_mm)
+            cfg.collision.safety_margin_mm = max(0.0, min(100.0, float(cfg.collision.safety_margin_mm)))
+            cfg.collision.body_keepout_radius_mm = _cfg.getfloat('collision', 'body_keepout_radius_mm', fallback=cfg.collision.body_keepout_radius_mm)
+            cfg.collision.time_horizon_s = _cfg.getfloat('collision', 'time_horizon_s', fallback=cfg.collision.time_horizon_s)
+            cfg.collision.max_velocity_margin_mm = _cfg.getfloat('collision', 'max_velocity_margin_mm', fallback=cfg.collision.max_velocity_margin_mm)
+            cfg.collision.use_learned_model = _cfg.getboolean('collision', 'use_learned_model', fallback=cfg.collision.use_learned_model)
+
+            # Diagnostics (optional)
+            cfg.collision.pose_log_enabled = _cfg.getboolean('collision', 'pose_log_enabled', fallback=cfg.collision.pose_log_enabled)
+            cfg.collision.pose_log_hz = _cfg.getfloat('collision', 'pose_log_hz', fallback=cfg.collision.pose_log_hz)
+            cfg.collision.pose_log_hz = max(0.1, min(200.0, float(cfg.collision.pose_log_hz)))
     
     except (configparser.Error, ValueError, KeyError) as e:
         print(f"Config parse error (using defaults): {e}", end="\r\n")
@@ -1099,6 +1138,54 @@ def save_low_battery_settings(low_batt_state: dict) -> bool:
         return False
 
 
+def save_collision_settings(collision_state: dict) -> bool:
+    """Persist collision settings to controller.ini [collision].
+
+    Args:
+        collision_state: Dictionary with keys:
+            - enabled (bool)
+            - stop_on_collision (bool)
+            - warn_only (bool)
+            - leg_radius_mm (float)
+            - safety_margin_mm (float)
+            - body_keepout_radius_mm (float)
+            - time_horizon_s (float)
+            - max_velocity_margin_mm (float)
+            - pose_log_enabled (bool)
+            - pose_log_hz (float)
+
+    Returns:
+        True on success, False on error.
+    """
+    global _cfg, _cfg_path
+    if _cfg is None or _cfg_path is None:
+        return False
+    try:
+        if 'collision' not in _cfg:
+            _cfg.add_section('collision')
+
+        for key in ('enabled', 'stop_on_collision', 'warn_only', 'pose_log_enabled'):
+            if key in collision_state:
+                _cfg.set('collision', key, 'true' if bool(collision_state[key]) else 'false')
+
+        for key in (
+            'leg_radius_mm',
+            'safety_margin_mm',
+            'body_keepout_radius_mm',
+            'time_horizon_s',
+            'max_velocity_margin_mm',
+            'pose_log_hz',
+        ):
+            if key in collision_state:
+                _cfg.set('collision', key, f"{float(collision_state[key]):.4f}".rstrip('0').rstrip('.'))
+
+        with open(_cfg_path, 'w') as f:
+            _cfg.write(f)
+        return True
+    except (IOError, OSError, configparser.Error, ValueError, TypeError):
+        return False
+
+
 # -----------------------------------------------------------------------------
 # Module exports
 # -----------------------------------------------------------------------------
@@ -1120,4 +1207,5 @@ __all__ = [
     'save_menu_settings',
     'save_pid_settings', 'save_imp_settings', 'save_est_settings', 'save_tof_settings',
     'save_safety_display_settings', 'save_behavior_settings', 'save_low_battery_settings',
+    'save_collision_settings',
 ]

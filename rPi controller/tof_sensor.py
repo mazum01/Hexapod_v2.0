@@ -15,6 +15,8 @@ Created: 2025-12-21
 from __future__ import annotations
 import time
 import threading
+import signal
+import contextlib
 from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Dict
 
@@ -260,6 +262,39 @@ class ToFSensorHandle:
         if not VL53L5CX_AVAILABLE:
             self._last_error = "vl53l5cx-ctypes library not installed"
             return False
+
+        @contextlib.contextmanager
+        def _defer_sigint_if_main_thread():
+            """Temporarily defer SIGINT (Ctrl+C) during long C/ctypes calls.
+
+            The vl53l5cx-ctypes library uses a ctypes callback that calls
+            time.sleep(). If SIGINT arrives during that sleep, Python raises
+            KeyboardInterrupt *inside the callback*, which prints:
+            "Exception ignored on calling ctypes callback function".
+
+            Deferring SIGINT prevents that warning; if Ctrl+C occurs, we
+            re-raise KeyboardInterrupt immediately after the critical section.
+            """
+            interrupted = {"hit": False}
+
+            if threading.current_thread() is not threading.main_thread():
+                yield lambda: False
+                return
+
+            old_handler = signal.getsignal(signal.SIGINT)
+
+            def _handler(signum, frame):
+                interrupted["hit"] = True
+
+            try:
+                signal.signal(signal.SIGINT, _handler)
+                yield lambda: interrupted["hit"]
+            finally:
+                try:
+                    signal.signal(signal.SIGINT, old_handler)
+                except Exception:
+                    # Best effort: never fail init because SIGINT restore failed
+                    pass
         
         try:
             # First, probe the I2C bus to verify the sensor is present
@@ -277,16 +312,32 @@ class ToFSensorHandle:
                 return False
             
             print(f"[ToF] I2C probe OK at 0x{self.config.i2c_address:02X}, starting firmware upload...", end="\r\n")
-            
-            self._sensor = vl53l5cx.VL53L5CX(
-                i2c_addr=self.config.i2c_address,
-                i2c_dev=i2c_dev
-            )
-            
-            # Configure sensor
-            self._sensor.set_resolution(resolution)
-            self._sensor.set_ranging_frequency_hz(frequency_hz)
-            self._sensor.set_integration_time_ms(integration_time_ms)
+
+            with _defer_sigint_if_main_thread() as was_interrupted:
+                sensor = vl53l5cx.VL53L5CX(
+                    i2c_addr=self.config.i2c_address,
+                    i2c_dev=i2c_dev
+                )
+
+                # Configure sensor
+                sensor.set_resolution(resolution)
+                sensor.set_ranging_frequency_hz(frequency_hz)
+                sensor.set_integration_time_ms(integration_time_ms)
+
+            # If Ctrl+C happened during firmware upload/config, raise cleanly
+            # (without triggering the ctypes callback warning)
+            if was_interrupted():
+                try:
+                    i2c_dev.close()
+                except Exception:
+                    pass
+                self._sensor = None
+                self._connected = False
+                self._initialized = False
+                self._last_error = "Init interrupted (Ctrl+C)"
+                raise KeyboardInterrupt
+
+            self._sensor = sensor
             
             self._connected = True
             self._initialized = True

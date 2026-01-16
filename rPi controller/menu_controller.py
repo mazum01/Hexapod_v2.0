@@ -21,6 +21,7 @@ from config_manager import (
     save_est_settings, save_tof_settings,
     save_gait_settings, save_pounce_settings, save_behavior_settings,
     save_safety_display_settings, save_low_battery_settings,
+    save_collision_settings,
 )
 
 
@@ -113,6 +114,14 @@ def setup_system_callbacks(menu: MarsMenu, ctx: SimpleNamespace) -> None:
         ctx.set_mirror(val == 1)
         ctx.set_force_display_update()
     
+    def on_collision_overlay_change(val):
+        enabled = (val == 1)
+        dt = ctx.get_display_thread()
+        if dt is not None:
+            dt.set_collision_overlay(enabled)
+        if ctx.get_verbose():
+            print(f"Collision overlay -> {'On' if enabled else 'Off'}", end="\r\n")
+    
     def on_theme_change(val):
         ctx.menu.theme = val
         save_menu_settings(theme=val)
@@ -145,6 +154,7 @@ def setup_system_callbacks(menu: MarsMenu, ctx: SimpleNamespace) -> None:
     menu.set_callback(MenuCategory.SYSTEM, "Auto-Disable", "on_change", on_auto_disable_change)
     menu.set_callback(MenuCategory.SYSTEM, "Verbose", "on_change", on_verbose_change)
     menu.set_callback(MenuCategory.SYSTEM, "Mirror Display", "on_change", on_mirror_change)
+    menu.set_callback(MenuCategory.SYSTEM, "Col Overlay", "on_change", on_collision_overlay_change)
     menu.set_callback(MenuCategory.SYSTEM, "Save All", "on_select", on_save_all)
     menu.set_callback(MenuCategory.SYSTEM, "Shutdown", "on_select", on_shutdown)
 
@@ -1017,6 +1027,10 @@ def setup_safety_callbacks(menu: MarsMenu, ctx: SimpleNamespace) -> None:
         - display_thread: DisplayThread or None
         - get/set for safety display thresholds (volt_min, volt_warn, volt_max, temp_min, temp_max)
         - get/set for low battery settings (enabled, volt_critical, volt_recovery, filter_alpha)
+                - get/set for collision settings (enabled, stop_on_collision, warn_only,
+                    leg_radius_mm, safety_margin_mm, body_keepout_radius_mm,
+                    time_horizon_s, max_velocity_margin_mm,
+                    pose_log_enabled, pose_log_hz)
     """
 
     def on_clear_safety():
@@ -1091,6 +1105,59 @@ def setup_safety_callbacks(menu: MarsMenu, ctx: SimpleNamespace) -> None:
         ctx.set_low_battery_filter_alpha(alpha)
         save_low_battery_settings({'filter_alpha': alpha})
 
+    # Collision model tuning callbacks
+    def on_col_enabled_change(value):
+        enabled = (value == 1)
+        ctx.set_collision_enabled(enabled)
+        save_collision_settings({'enabled': enabled})
+
+    def on_col_stop_change(value):
+        stop_on_collision = (value == 1)
+        ctx.set_collision_stop_on_collision(stop_on_collision)
+        save_collision_settings({'stop_on_collision': stop_on_collision})
+
+    def on_col_warn_only_change(value):
+        warn_only = (value == 1)
+        ctx.set_collision_warn_only(warn_only)
+        save_collision_settings({'warn_only': warn_only})
+
+    def on_leg_radius_change(value):
+        v = max(0.0, min(100.0, float(value)))
+        ctx.set_collision_leg_radius_mm(v)
+        save_collision_settings({'leg_radius_mm': v})
+
+    def on_safety_margin_change(value):
+        v = max(0.0, min(100.0, float(value)))
+        ctx.set_collision_safety_margin_mm(v)
+        save_collision_settings({'safety_margin_mm': v})
+
+    def on_body_keepout_change(value):
+        v = max(0.0, float(value))
+        ctx.set_collision_body_keepout_radius_mm(v)
+        save_collision_settings({'body_keepout_radius_mm': v})
+
+    def on_vel_horizon_ms_change(value):
+        ms = max(0.0, float(value))
+        sec = ms / 1000.0
+        ctx.set_collision_time_horizon_s(sec)
+        save_collision_settings({'time_horizon_s': sec})
+
+    def on_vel_margin_max_change(value):
+        v = max(0.0, float(value))
+        ctx.set_collision_max_velocity_margin_mm(v)
+        save_collision_settings({'max_velocity_margin_mm': v})
+
+    # Collision diagnostics callbacks
+    def on_pose_log_change(value):
+        enabled = (value == 1)
+        ctx.set_collision_pose_log_enabled(enabled)
+        save_collision_settings({'pose_log_enabled': enabled})
+
+    def on_pose_log_hz_change(value):
+        hz = max(0.1, min(200.0, float(value)))
+        ctx.set_collision_pose_log_hz(hz)
+        save_collision_settings({'pose_log_hz': hz})
+
     # Register callbacks
     menu.set_callback(MenuCategory.SAFETY, "Clear Safety", "on_select", on_clear_safety)
     menu.set_callback(MenuCategory.SAFETY, "Override ALL", "on_select", on_override_all)
@@ -1106,6 +1173,17 @@ def setup_safety_callbacks(menu: MarsMenu, ctx: SimpleNamespace) -> None:
     menu.set_callback(MenuCategory.SAFETY, "Volt Critical", "on_change", on_volt_critical_change)
     menu.set_callback(MenuCategory.SAFETY, "Volt Recovery", "on_change", on_volt_recovery_change)
     menu.set_callback(MenuCategory.SAFETY, "LowBatt Filter", "on_change", on_lowbatt_filter_change)
+
+    menu.set_callback(MenuCategory.SAFETY, "Col Enabled", "on_change", on_col_enabled_change)
+    menu.set_callback(MenuCategory.SAFETY, "Col Stop", "on_change", on_col_stop_change)
+    menu.set_callback(MenuCategory.SAFETY, "Col WarnOnly", "on_change", on_col_warn_only_change)
+    menu.set_callback(MenuCategory.SAFETY, "Leg Radius", "on_change", on_leg_radius_change)
+    menu.set_callback(MenuCategory.SAFETY, "Safety Margin", "on_change", on_safety_margin_change)
+    menu.set_callback(MenuCategory.SAFETY, "Body Keepout", "on_change", on_body_keepout_change)
+    menu.set_callback(MenuCategory.SAFETY, "Vel Horizon", "on_change", on_vel_horizon_ms_change)
+    menu.set_callback(MenuCategory.SAFETY, "Vel Margin Max", "on_change", on_vel_margin_max_change)
+    menu.set_callback(MenuCategory.SAFETY, "Pose Log", "on_change", on_pose_log_change)
+    menu.set_callback(MenuCategory.SAFETY, "Pose Log Hz", "on_change", on_pose_log_hz_change)
 
 
 # ===========================================================================
@@ -1155,3 +1233,15 @@ def sync_safety_initial_values(menu: MarsMenu, ctx: SimpleNamespace) -> None:
     menu.set_value(MenuCategory.SAFETY, "Volt Recovery", ctx.get_low_battery_recovery_volt())
     menu.set_value(MenuCategory.SAFETY, "LowBatt Filter", ctx.get_low_battery_filter_alpha())
     menu.set_value(MenuCategory.SAFETY, "LowBatt Status", "OK")
+
+    menu.set_value(MenuCategory.SAFETY, "Col Enabled", 1 if ctx.get_collision_enabled() else 0)
+    menu.set_value(MenuCategory.SAFETY, "Col Stop", 1 if ctx.get_collision_stop_on_collision() else 0)
+    menu.set_value(MenuCategory.SAFETY, "Col WarnOnly", 1 if ctx.get_collision_warn_only() else 0)
+    menu.set_value(MenuCategory.SAFETY, "Leg Radius", float(ctx.get_collision_leg_radius_mm()))
+    menu.set_value(MenuCategory.SAFETY, "Safety Margin", float(ctx.get_collision_safety_margin_mm()))
+    menu.set_value(MenuCategory.SAFETY, "Body Keepout", float(ctx.get_collision_body_keepout_radius_mm()))
+    menu.set_value(MenuCategory.SAFETY, "Vel Horizon", int(round(float(ctx.get_collision_time_horizon_s()) * 1000.0)))
+    menu.set_value(MenuCategory.SAFETY, "Vel Margin Max", float(ctx.get_collision_max_velocity_margin_mm()))
+
+    menu.set_value(MenuCategory.SAFETY, "Pose Log", 1 if ctx.get_collision_pose_log_enabled() else 0)
+    menu.set_value(MenuCategory.SAFETY, "Pose Log Hz", float(ctx.get_collision_pose_log_hz()))
