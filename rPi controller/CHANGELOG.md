@@ -6,6 +6,30 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2026-02-03  v0.12.29 b316: FreeGait: Fixed left-side corner legs stepping 90° off. Stride direction now uses heading only (not leg base rotation, which is already encoded in neutral position). Forward walking now correctly moves all legs in +Z direction.
+
+2026-02-02  v0.12.28 b315: Fixed I2C Remote I/O error (errno 121) from touch controller (cst816d.py). Added OSError/IOError handling to all I2C read/write operations. Also added traceback printing to main loop exception handler for easier debugging of future unhandled exceptions.
+
+2026-02-02  v0.12.27 b314: FreeGait: (1) Fixed gait transition - FreeGait and StandingGait now transition immediately instead of waiting forever for non-existent phase boundary. (2) Aligned lift height with TripodGait via `lift_attenuation=0.69` in PlacementConfig (FreeGait effective lift now 41.4mm, matching TripodGait's Bezier-attenuated height).
+
+2026-01-25  v0.12.26 b313: FreeGait: Added stance leg translation - stance legs now push backward proportional to speed/heading (matching TripodGait walking mechanics). Added IMU state passing to FreeGait for stability margin calculations (CoG projection with body tilt). Strafe and turn verified working.
+
+2026-01-25  v0.12.25 b312: FreeGait critical fix: (1) Support polygon now computed in body-frame coordinates using `_foot_to_body_frame()` - previously all feet had Z=0 causing degenerate polygon and infinite negative margin. (2) Swing targets now set when leg enters LIFT_PENDING state, not just for STANCE legs. These fixes enable FreeGait to actually move legs in an alternating tripod pattern.
+
+2026-01-20  v0.12.24 b311: Display: Added gait indicator overlay on eyes display. Small single-letter abbreviation (T/W/R/S/F) in top-left corner with color-coding per gait type. Updated via set_gait_name() when gait transitions complete. draw_gait_indicator() in display_thread.py.
+
+2026-01-20  v0.12.23 b310: Fixed FreeGait coordinate system mismatch. create_legs() and FootPlacementPlanner now use TripodGait's X-positive convention (X = base_x * cos(angle), Z = 0 at neutral). Fixes "legs all over the place" issue during FreeGait testing.
+
+2026-01-20  v0.12.22 b309: Free Gait FG9: Integration & Tuning. Added FreeGait to GAIT_TYPES/GAIT_NAMES (RB cycles through Standing→Tripod→Wave→Ripple→Stationary→Free). Config params in [gait] section: free_gait_min_margin_mm, free_gait_max_swings, free_gait_swing_speed_mm_s. MarsMenu items: "FG Margin", "FG Max Swing", "FG Speed". Dashboard EDITABLE_CONFIG updated. Menu callbacks and initial value sync in menu_controller.py. Dashboard config change handlers for live tuning.
+
+2026-01-20  v0.12.21 b308: Free Gait FG8: Implemented FreeGait(GaitEngine) class in gait_engine.py. Integrates FreeGaitCoordinator, FootPlacementPlanner, and ContactEstimator for event-driven adaptive locomotion. Features: per-leg state machines (STANCE/LIFT_PENDING/SWING/PLACING), stability-aware swing coordination, tripod pattern emerges naturally, IMU state input for CoG projection, emergency plant on stop. All tests passing.
+
+2026-01-20  v0.12.20 b307: Free Gait FG7: Implemented ContactEstimator class for foot contact detection. Priority-based estimation: (1) SENSED via S4 telemetry foot switches, (2) POSITION-based when foot Y reaches target within tolerance, (3) TIMEOUT fallback when swing/placing exceeds expected duration. Includes ContactConfig, ContactResult, ContactMethod enum, batch estimation, leg state updates, and diagnostic statistics.
+
+2026-01-17  v0.12.19 b306: Free Gait FG6: Added `middle_leg_offset_z_mm` config parameter to FootPlacementPlanner implementing the "offset model" from Mostafa, Her & Wu (2012). Shifts LM forward and RM backward to increase stability margin during tripod gait. Default 0 (disabled).
+
+2026-01-16  v0.12.14 b301: Free Gait FG1+FG2: New `free_gait.py` module with per-leg state machine (`LegState`, `Leg` class, transition methods) and support polygon computation (convex hull, point-in-polygon, stability margin).
+
 2026-01-16  v0.12.13 b300: Safety: Collision response now starts a step-to-stand recovery gait (one-leg lift→translate→place) instead of immediate disable, when an unsafe pose is detected and `warn_only` is off.
 
 2026-01-16  v0.12.12 b299: Safety: Collision `stop_on_collision` now enforces an emergency stop (stop gait + idle + LEG ALL DISABLE + DISABLE) when an unsafe pose is detected and `warn_only` is off.

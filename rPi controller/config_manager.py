@@ -103,6 +103,10 @@ class GaitConfig:
     bezier_p2_height: float = 1.5
     bezier_p3_height: float = 0.35
     bezier_p3_overshoot: float = 1.1
+    # Free Gait (FG9) parameters
+    free_gait_min_margin_mm: float = 30.0
+    free_gait_max_swings: int = 3
+    free_gait_swing_speed_mm_s: float = 200.0
 
 
 @dataclass
@@ -549,6 +553,10 @@ def load_config(config_path: Optional[str] = None) -> ControllerConfig:
             cfg.gait.bezier_p2_height = _cfg.getfloat('gait', 'bezier_p2_height', fallback=cfg.gait.bezier_p2_height)
             cfg.gait.bezier_p3_height = _cfg.getfloat('gait', 'bezier_p3_height', fallback=cfg.gait.bezier_p3_height)
             cfg.gait.bezier_p3_overshoot = _cfg.getfloat('gait', 'bezier_p3_overshoot', fallback=cfg.gait.bezier_p3_overshoot)
+            # Free Gait (FG9)
+            cfg.gait.free_gait_min_margin_mm = _cfg.getfloat('gait', 'free_gait_min_margin_mm', fallback=cfg.gait.free_gait_min_margin_mm)
+            cfg.gait.free_gait_max_swings = _cfg.getint('gait', 'free_gait_max_swings', fallback=cfg.gait.free_gait_max_swings)
+            cfg.gait.free_gait_swing_speed_mm_s = _cfg.getfloat('gait', 'free_gait_swing_speed_mm_s', fallback=cfg.gait.free_gait_swing_speed_mm_s)
         
         # Pounce section
         if 'pounce' in _cfg:

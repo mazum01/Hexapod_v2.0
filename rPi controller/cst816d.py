@@ -2,6 +2,10 @@
 cst816d.py — Touch controller driver for CST816D (Pi 5 compatible).
 
 Uses gpiozero instead of RPi.GPIO for Pi 5 RP1 chip compatibility.
+
+Change log:
+  2025-01-21: Added I2C error handling (OSError/IOError) to prevent
+              Remote I/O errors (errno 121) from crashing the main loop.
 """
 
 import time
@@ -27,6 +31,7 @@ class cst816d():
         
         self.coordinates = [{"x": 0, "y": 0} for _ in range(CST816D_LCD_TOUCH_MAX_POINTS)]
         self.point_count = 0
+        self._error_count = 0  # Track consecutive I2C errors
         self.touch_rst()
     
     def Int_Callback(self):
@@ -38,22 +43,38 @@ class cst816d():
         time.sleep(0.001)       # 1 ms
         self.GPIO_TP_RST.on()   # High
         time.sleep(0.050)       # 50 ms
+        self._error_count = 0   # Reset error count after reset
         
     def write_cmd(self, data):
-        self.I2C.write_byte(CST816D_ADDRESS, data)
+        try:
+            self.I2C.write_byte(CST816D_ADDRESS, data)
+            self._error_count = 0
+        except (OSError, IOError):
+            self._error_count += 1
 
     def read_bytes(self, reg_addr, length):
-        # Send register address and read multiple bytes
-        data = self.I2C.read_i2c_block_data(CST816D_ADDRESS, reg_addr, length)
-        return data
+        """Read bytes from I2C with error handling."""
+        try:
+            data = self.I2C.read_i2c_block_data(CST816D_ADDRESS, reg_addr, length)
+            self._error_count = 0
+            return data
+        except (OSError, IOError):
+            self._error_count += 1
+            return None
     
     def read_touch_data(self):
+        """Read touch data from sensor. Silently handles I2C errors."""
         TOUCH_NUM_REG = 0x02
         TOUCH_XY_REG = 0x03
         
         buf = self.read_bytes(TOUCH_NUM_REG, 1)
         
-        if buf and buf[0] != 0:
+        # Handle I2C read failure
+        if buf is None:
+            self.point_count = 0
+            return
+        
+        if buf[0] != 0:
             self.point_count = buf[0]
             buf = self.read_bytes(TOUCH_XY_REG, 6 * self.point_count)
             for i in range(2):
@@ -64,6 +85,11 @@ class cst816d():
                 for i in range(self.point_count):
                     self.coordinates[i]["x"] = ((buf[(i * 6) + 0] & 0x0f) << 8) + buf[(i * 6) + 1]
                     self.coordinates[i]["y"] = ((buf[(i * 6) + 2] & 0x0f) << 8) + buf[(i * 6) + 3]
+            else:
+                # I2C error during coordinate read
+                self.point_count = 0
+        else:
+            self.point_count = 0
     
     def get_touch_xy(self):
         point = self.point_count

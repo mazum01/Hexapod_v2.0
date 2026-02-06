@@ -339,11 +339,14 @@ class MarsMenu:
         # === GAIT ===
         self._items[MenuCategory.GAIT] = [
             MenuItem("Type", "option", value=0,
-                    options=["Tripod", "Wave", "Ripple", "Stationary"]),
+                    options=["Tripod", "Wave", "Ripple", "Stationary", "Free"]),
             MenuItem("Step Height", "value", value=60, min_val=20, max_val=100, step=5, unit="mm"),
             MenuItem("Step Length", "value", value=100, min_val=50, max_val=175, step=5, unit="mm"),
             MenuItem("Turn Rate", "value", value=60, min_val=10, max_val=90, step=5, unit="deg/s"),
             MenuItem("Cycle Time", "value", value=2000, min_val=500, max_val=4000, step=100, unit="ms"),
+            MenuItem("FG Margin", "value", value=30, min_val=10, max_val=80, step=5, unit="mm"),
+            MenuItem("FG Max Swing", "value", value=3, min_val=1, max_val=3, step=1, unit=""),
+            MenuItem("FG Speed", "value", value=200, min_val=50, max_val=400, step=25, unit="mm/s"),
             MenuItem("Start Gait", "action"),
             MenuItem("Stop Gait", "action"),
         ]

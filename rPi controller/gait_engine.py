@@ -68,13 +68,14 @@ TRIPOD_B = [LEG_LF, LEG_RM, LEG_LR]  # Left-front, Right-middle, Left-rear
 # Per-leg base rotation angles (degrees) - defines leg orientation relative to body
 # Positive = CCW when viewed from above; 0 = pointing straight out (lateral)
 # Corner legs at ±45°, middle legs at 0°
+# Array indices: 0=LF, 1=LM, 2=LR, 3=RF, 4=RM, 5=RR
 LEG_BASE_ROTATION_DEG = [
-    45.0,   # LEG_RF (0) - Left Front: -45° (points forward-left)
-    0.0,     # LEG_RM (1) - Left Middle: 0° (straight out)
-    -45.0,    # LEG_RR (2) - Left Rear: +45° (points backward-left)
-    45.0,    # LEG_LR (3) - Right Front: +45° (points forward-right)  
-    0.0,     # LEG_LM (4) - Right Middle: 0° (straight out)
-    -45.0,   # LEG_LF (5) - Right Rear: -45° (points backward-right)
+    -45.0,   # LF (Left Front): points forward-left, -45° from lateral
+    0.0,     # LM (Left Middle): points straight left, 0°
+    45.0,    # LR (Left Rear): points backward-left, +45° from lateral
+    45.0,    # RF (Right Front): points forward-right, +45° from lateral
+    0.0,     # RM (Right Middle): points straight right, 0°
+    -45.0,   # RR (Right Rear): points backward-right, -45° from lateral
 ]
 
 # Precompute sin/cos for each leg's base rotation
@@ -293,6 +294,18 @@ class GaitEngine:
     def is_running(self) -> bool:
         """Check if gait is actively running."""
         return self.state == GaitState.RUNNING
+    
+    def get_stance_mask(self) -> List[bool]:
+        """Return which legs are currently in stance (on the ground).
+        
+        Returns:
+            List of 6 booleans, True if leg is in stance, False if in swing.
+            Order: LF, LM, LR, RF, RM, RR
+            
+        Default implementation returns all True (all legs in stance).
+        Subclasses should override based on their gait phase.
+        """
+        return [True] * NUM_LEGS
     
     def tick(self, dt_seconds: float = None) -> List[List[float]]:
         """Advance gait by one tick and return foot targets.
@@ -516,6 +529,24 @@ class TripodGait(GaitEngine):
             except Exception:
                 pass
     
+    def get_stance_mask(self) -> List[bool]:
+        """Return which legs are currently in stance.
+        
+        Tripod gait: 3 legs swing, 3 legs stance.
+        Phase 0: Tripod A (RF, LM, RR) swings, Tripod B (LF, RM, LR) stance
+        Phase 1: Tripod B swings, Tripod A stance
+        """
+        if self.state != GaitState.RUNNING:
+            return [True] * NUM_LEGS  # All in stance when stopped
+        
+        stance = [False] * NUM_LEGS
+        for leg in range(NUM_LEGS):
+            is_tripod_a = leg in TRIPOD_A
+            # Leg is in stance if it's NOT the swinging tripod
+            in_stance = (is_tripod_a and self._phase == 1) or (not is_tripod_a and self._phase == 0)
+            stance[leg] = in_stance
+        return stance
+    
     def _apply_leg_rotation(self, leg: int, base_x: float, stride_z: float, walk_dir: float) -> Tuple[float, float, float, float]:
         """Apply per-leg corner rotation (matching Teensy test gait) plus heading offset.
         
@@ -697,6 +728,17 @@ class WaveGait(GaitEngine):
             x_prime, z_prime = self._apply_leg_rotation_simple(leg, x, stride_mag, walk_dir)
             self._feet[leg] = FootTarget(x=x_prime, y=y, z=z_prime)
     
+    def get_stance_mask(self) -> List[bool]:
+        """Return which legs are currently in stance.
+        
+        Wave gait: 1 leg swings, 5 legs stance at a time.
+        """
+        if self.state != GaitState.RUNNING:
+            return [True] * NUM_LEGS
+        
+        swing_leg = WAVE_SEQUENCE[self._wave_phase]
+        return [leg != swing_leg for leg in range(NUM_LEGS)]
+    
     def _apply_leg_rotation_simple(self, leg: int, base_x: float, stride_z: float, walk_dir: float) -> Tuple[float, float]:
         """Apply per-leg rotation (simplified version without debug return values)."""
         base_z = -self.params.base_x_mm * LEG_BASE_SIN[leg]
@@ -852,6 +894,17 @@ class RippleGait(GaitEngine):
             x_prime, z_prime = self._apply_leg_rotation_simple(leg, x, stride_mag, walk_dir)
             self._feet[leg] = FootTarget(x=x_prime, y=y, z=z_prime)
     
+    def get_stance_mask(self) -> List[bool]:
+        """Return which legs are currently in stance.
+        
+        Ripple gait: 2 legs swing, 4 legs stance at a time.
+        """
+        if self.state != GaitState.RUNNING:
+            return [True] * NUM_LEGS
+        
+        swing_legs = set(RIPPLE_GROUPS[self._ripple_phase])
+        return [leg not in swing_legs for leg in range(NUM_LEGS)]
+    
     def _apply_leg_rotation_simple(self, leg: int, base_x: float, stride_z: float, walk_dir: float) -> Tuple[float, float]:
         """Apply per-leg rotation (simplified version without debug return values)."""
         base_z = -self.params.base_x_mm * LEG_BASE_SIN[leg]
@@ -946,11 +999,10 @@ class StepToStandGait(GaitEngine):
         # Hold positions evolve as legs are placed
         self._hold: List[FootTarget] = [FootTarget(x=f.x, y=f.y, z=f.z) for f in self._feet]
 
-        # Neutral stand target for all legs
-        self._target: List[FootTarget] = [
-            FootTarget(x=self.params.base_x_mm, y=self.params.base_y_mm, z=0.0)
-            for _ in range(NUM_LEGS)
-        ]
+        # Neutral stand target for all legs - same as firmware STAND: (base_x, base_y, 0)
+        self._target: List[FootTarget] = []
+        for leg in range(NUM_LEGS):
+            self._target.append(FootTarget(x=self.params.base_x_mm, y=self.params.base_y_mm, z=0.0))
 
         self._active_idx: int = 0
         self._active_leg: int = self._order[0]
@@ -1030,6 +1082,379 @@ class StepToStandGait(GaitEngine):
 
         self._feet[leg] = FootTarget(x=float(x), y=float(y), z=float(z))
         return [foot.as_list() for foot in self._feet]
+
+
+#----------------------------------------------------------------------------------------------------------------------
+# Free Gait — Event-Driven Adaptive Locomotion (FG8)
+#----------------------------------------------------------------------------------------------------------------------
+
+# Import free gait components (deferred to avoid circular imports at module load)
+try:
+    from free_gait import (
+        Leg as FreeGaitLeg,
+        LegState as FreeGaitLegState,
+        FootTarget as FreeGaitFootTarget,
+        FreeGaitCoordinator,
+        CoordinatorConfig,
+        FootPlacementPlanner,
+        PlacementConfig,
+        ContactEstimator,
+        ContactConfig,
+        ContactMethod,
+        create_legs as create_free_gait_legs,
+        NUM_LEGS as FG_NUM_LEGS,
+        LEG_NAMES as FG_LEG_NAMES,
+        HIP_POSITIONS_XZ,
+    )
+    FREE_GAIT_AVAILABLE = True
+except ImportError:
+    FREE_GAIT_AVAILABLE = False
+
+
+class FreeGait(GaitEngine):
+    """Event-driven free gait with per-leg state machines and stability coordination.
+    
+    Unlike fixed-phase gaits (Tripod, Wave, Ripple), FreeGait adapts leg timing
+    based on stability constraints and contact events. Each leg operates its own
+    state machine, and a central coordinator grants swing permission based on
+    the support polygon and stability margin.
+    
+    Architecture:
+        - 6 Leg instances with STANCE/LIFT_PENDING/SWING/PLACING states
+        - FreeGaitCoordinator manages stability and swing permissions
+        - FootPlacementPlanner computes target positions
+        - ContactEstimator detects ground contact for state transitions
+    
+    Key Properties:
+        - Legs swing when stability allows, not on fixed phase clock
+        - Emergency hold if stability margin drops critically
+        - Contact detection triggers PLACING → STANCE transition
+        - Integrates with existing GaitTransition for smooth switching
+    
+    Usage:
+        params = GaitParams(base_x_mm=100, base_y_mm=-60, step_len_mm=30)
+        gait = FreeGait(params)
+        gait.start()
+        feet = gait.tick(dt)  # Returns 6x3 foot positions
+    """
+    
+    def __init__(self, params: Optional[GaitParams] = None,
+                 max_swings: int = 3,
+                 min_margin_mm: float = 30.0,
+                 swing_speed_mm_s: float = 200.0):
+        """Initialize free gait engine.
+        
+        Args:
+            params: Base gait parameters (cycle_ms, step_len, etc.).
+            max_swings: Maximum simultaneous legs in swing (1-3).
+            min_margin_mm: Minimum stability margin required to grant swings.
+            swing_speed_mm_s: Swing phase velocity in mm/s.
+        """
+        super().__init__(params)
+        
+        if not FREE_GAIT_AVAILABLE:
+            raise ImportError("free_gait module required for FreeGait. "
+                              "Ensure free_gait.py is in the same directory.")
+        
+        # Create per-leg state machines
+        self._fg_legs: List[FreeGaitLeg] = create_free_gait_legs(
+            base_x_mm=params.base_x_mm if params else 100.0,
+            base_y_mm=params.base_y_mm if params else -60.0,
+            lift_height_mm=params.lift_mm if params else 50.0
+        )
+        
+        # Create coordinator
+        coord_config = CoordinatorConfig(
+            max_simultaneous_swings=max_swings,
+            min_stability_margin_mm=min_margin_mm,
+            critical_margin_mm=min_margin_mm * 0.3,  # ~10mm for default 30mm
+        )
+        self._coordinator = FreeGaitCoordinator(self._fg_legs, coord_config)
+        
+        # Create foot placement planner
+        planner_config = PlacementConfig(
+            base_x_mm=params.base_x_mm if params else 100.0,
+            base_y_mm=params.base_y_mm if params else -60.0,
+            step_len_mm=params.step_len_mm if params else 20.0,
+            lift_height_mm=params.lift_mm if params else 50.0,
+        )
+        self._planner = FootPlacementPlanner(planner_config)
+        
+        # Create contact estimator (without S4 by default)
+        contact_config = ContactConfig(
+            s4_available=False,  # Will be enabled when foot switches connected
+            position_tolerance_mm=5.0,
+            swing_timeout_ms=600.0,
+            placing_timeout_ms=400.0,
+        )
+        self._contact_estimator = ContactEstimator(contact_config)
+        
+        # Motion parameters
+        self._swing_speed_mm_s = swing_speed_mm_s
+        self._pitch_deg: float = 0.0
+        self._roll_deg: float = 0.0
+        
+        # State tracking
+        self._swing_starts: Dict[int, FreeGaitFootTarget] = {}  # leg_idx -> start position
+        
+        # Sync feet array with free gait legs
+        self._sync_feet_from_legs()
+    
+    def start(self) -> None:
+        """Begin free gait execution."""
+        super().start()
+        
+        # Reset all legs to stance at neutral positions
+        for i, leg in enumerate(self._fg_legs):
+            leg._transition_to(FreeGaitLegState.STANCE)
+            # Use planner's neutral position for proper support polygon
+            neutral = self._planner.get_neutral_position(i)
+            leg.foot_current = FreeGaitFootTarget(
+                x=neutral.x,
+                y=neutral.y,
+                z=neutral.z
+            )
+            leg.foot_target = leg.foot_current.copy()
+        
+        self._swing_starts.clear()
+        self._sync_feet_from_legs()
+    
+    def stop(self) -> None:
+        """Stop free gait and return to neutral."""
+        # Plant all swinging legs immediately
+        for leg in self._fg_legs:
+            if leg.is_swinging():
+                leg.emergency_plant()
+        
+        self._sync_feet_from_legs()
+        super().stop()
+    
+    def set_imu_state(self, pitch_deg: float, roll_deg: float) -> None:
+        """Update IMU state for CoG projection.
+        
+        Args:
+            pitch_deg: Body pitch in degrees (positive = nose down).
+            roll_deg: Body roll in degrees (positive = right side down).
+        """
+        self._pitch_deg = pitch_deg
+        self._roll_deg = roll_deg
+    
+    def get_stance_mask(self) -> List[bool]:
+        """Return which legs are currently in stance.
+        
+        Returns:
+            List of 6 booleans, True if leg is in stance.
+        """
+        return [leg.is_stance() for leg in self._fg_legs]
+    
+    def get_stability_margin(self) -> float:
+        """Get current stability margin in mm."""
+        return self._coordinator.margin
+    
+    def is_emergency(self) -> bool:
+        """Check if coordinator is in emergency hold."""
+        return self._coordinator.in_emergency
+    
+    def tick(self, dt_seconds: float = None) -> List[List[float]]:
+        """Advance free gait by one tick and return foot targets.
+        
+        This is the main update method, called at 166 Hz from the controller.
+        
+        Args:
+            dt_seconds: Time since last tick (default ~6ms).
+            
+        Returns:
+            List of 6 foot positions [x, y, z] in mm.
+        """
+        if self.state != GaitState.RUNNING:
+            return [foot.as_list() for foot in self._feet]
+        
+        # Convert to milliseconds
+        dt_ms = (dt_seconds or 0.006) * 1000.0
+        
+        # Update elapsed time
+        if dt_seconds is not None:
+            self._elapsed_ms += int(dt_seconds * 1000)
+        elif self._start_time is not None:
+            self._elapsed_ms = int((time.monotonic() - self._start_time) * 1000)
+        
+        # Apply EMA smoothing to parameters (same as base class)
+        alpha = self.params.smoothing_alpha
+        self._smoothed_speed = alpha * self.params.speed_scale + (1.0 - alpha) * self._smoothed_speed
+        self._smoothed_heading = alpha * self.params.heading_deg + (1.0 - alpha) * self._smoothed_heading
+        self._smoothed_turn_rate = alpha * self.params.turn_rate_deg_s + (1.0 - alpha) * self._smoothed_turn_rate
+        
+        # Step 1: Update coordinator (stability, swing permissions)
+        self._coordinator.tick(dt_ms, self._pitch_deg, self._roll_deg)
+        
+        # Step 2: Process each leg's state machine
+        self._update_leg_states(dt_ms)
+        
+        # Step 3: Compute foot targets based on leg states
+        self._compute_leg_positions(dt_ms)
+        
+        # Step 4: Check for contact and transition PLACING → STANCE
+        self._check_contact()
+        
+        # Step 5: Sync to output array
+        self._sync_feet_from_legs()
+        
+        return [foot.as_list() for foot in self._feet]
+    
+    def _update_leg_states(self, dt_ms: float) -> None:
+        """Advance each leg's state machine based on progress."""
+        for i, leg in enumerate(self._fg_legs):
+            if leg.state == FreeGaitLegState.LIFT_PENDING:
+                # If this is a newly started swing (progress near 0), set the target
+                if leg.swing_progress < 0.01:
+                    target = self._planner.plan_foot_placement(
+                        i,
+                        heading_deg=self._smoothed_heading,
+                        speed_scale=self._smoothed_speed,
+                        turn_rate=self._smoothed_turn_rate / 90.0  # Normalize
+                    )
+                    leg.foot_target = FreeGaitFootTarget(
+                        x=target.x, y=target.y, z=target.z
+                    )
+                
+                # Check if lift phase complete (foot lifted)
+                if leg.swing_progress >= 0.3:  # Matches planner's phase 1 end
+                    leg.complete_lift()
+                    
+            elif leg.state == FreeGaitLegState.SWING:
+                # Check if horizontal motion complete
+                if leg.swing_progress >= 0.7:  # Matches planner's phase 2 end
+                    leg.begin_placing()
+                    
+            elif leg.state == FreeGaitLegState.STANCE:
+                # Clear swing start when back in stance
+                if i in self._swing_starts:
+                    del self._swing_starts[i]
+    
+    def _compute_leg_positions(self, dt_ms: float) -> None:
+        """Compute current foot positions based on leg states and progress."""
+        import math
+        
+        # Leg base rotation angles (matching TripodGait's LEG_BASE_ROTATION_DEG)
+        LEG_ROTATIONS_DEG = [-45.0, 0.0, 45.0, 45.0, 0.0, -45.0]
+        
+        for i, leg in enumerate(self._fg_legs):
+            if leg.state == FreeGaitLegState.STANCE:
+                # Stance: translate foot backward relative to body motion
+                # Body moves forward = feet move backward in body frame
+                
+                if abs(self._smoothed_speed) > 0.01 or abs(self._smoothed_turn_rate) > 0.01:
+                    # Compute velocity in mm/ms based on step_len and swing time
+                    # Full step distance covered in ~300ms stance (half cycle at 600ms swing)
+                    step_len = self.params.step_len_mm if self.params else 20.0
+                    stance_duration_ms = 600.0  # Match swing duration
+                    
+                    # Velocity = 2 * step_len / stance_duration (feet travel 2× step from +step to -step)
+                    velocity_mm_per_ms = (2.0 * step_len * self._smoothed_speed) / stance_duration_ms
+                    
+                    # Apply turn rate adjustment (legs on outside turn faster)
+                    hip_x, _ = HIP_POSITIONS_XZ[i]
+                    turn_gain = 0.5  # Tune as needed
+                    turn_adj = 1.0 + (hip_x / 100.0) * (self._smoothed_turn_rate / 90.0) * turn_gain
+                    turn_adj = max(0.5, min(1.5, turn_adj))
+                    
+                    # Apply per-leg rotation (matching TripodGait's _apply_leg_rotation)
+                    sign = 1.0 if i in (LEG_LF, LEG_LM, LEG_LR) else -1.0
+                    walk_dir = self._smoothed_heading / 90.0  # Normalize to -1..+1
+                    full_angle_rad = math.radians(LEG_ROTATIONS_DEG[i]) + sign * math.radians(walk_dir * 90.0)
+                    
+                    cos_angle = math.cos(full_angle_rad)
+                    sin_angle = math.sin(full_angle_rad)
+                    
+                    # Velocity delta rotated by per-leg angle (negative = backward motion)
+                    delta_mag = -velocity_mm_per_ms * dt_ms * turn_adj
+                    delta_x = delta_mag * sin_angle
+                    delta_z = delta_mag * cos_angle
+                    
+                    # Update foot position
+                    leg.foot_current.x += delta_x
+                    leg.foot_current.z += delta_z
+                
+            elif leg.state in (FreeGaitLegState.LIFT_PENDING, 
+                               FreeGaitLegState.SWING, 
+                               FreeGaitLegState.PLACING):
+                # Swing phases: advance progress and compute trajectory position
+                
+                # Record start position when swing begins
+                if i not in self._swing_starts:
+                    self._swing_starts[i] = FreeGaitFootTarget(
+                        x=leg.foot_current.x,
+                        y=leg.foot_current.y,
+                        z=leg.foot_current.z
+                    )
+                
+                # Advance progress based on time
+                # Total swing = lift_ms + move_ms + place_ms ≈ 600ms default
+                swing_total_ms = 600.0  # Could make configurable
+                progress_delta = dt_ms / swing_total_ms
+                leg.swing_progress = min(1.0, leg.swing_progress + progress_delta)
+                
+                # Get interpolated position from planner
+                start = self._swing_starts[i]
+                target = leg.foot_target
+                
+                # Convert to planner FootTarget type
+                from free_gait import FootTarget as FGFootTarget
+                start_ft = FGFootTarget(x=start.x, y=start.y, z=start.z)
+                target_ft = FGFootTarget(x=target.x, y=target.y, z=target.z)
+                
+                pos = self._planner.plan_swing_trajectory(
+                    i, start_ft, target_ft, leg.swing_progress
+                )
+                
+                leg.foot_current = FreeGaitFootTarget(x=pos.x, y=pos.y, z=pos.z)
+    
+    def _check_contact(self) -> None:
+        """Check for contact and transition PLACING legs to STANCE."""
+        for i, leg in enumerate(self._fg_legs):
+            if leg.state == FreeGaitLegState.PLACING:
+                # Use contact estimator
+                result = self._contact_estimator.estimate_contact(
+                    leg,
+                    s4_contact=None,  # No S4 telemetry yet
+                    current_y=leg.foot_current.y,
+                    target_y=leg.foot_target.y
+                )
+                
+                if result.has_contact:
+                    sensed = (result.method == ContactMethod.SENSED)
+                    leg.confirm_contact(sensed=sensed)
+                    
+                    # Clear swing start tracking
+                    if i in self._swing_starts:
+                        del self._swing_starts[i]
+    
+    def _sync_feet_from_legs(self) -> None:
+        """Copy free gait leg positions to the output feet array."""
+        for i, leg in enumerate(self._fg_legs):
+            self._feet[i] = FootTarget(
+                x=leg.foot_current.x,
+                y=leg.foot_current.y,
+                z=leg.foot_current.z
+            )
+    
+    def _compute_foot_targets(self, t_active: float, in_overlap: bool) -> None:
+        """Override base class method (not used - tick() handles everything)."""
+        # FreeGait doesn't use the base class phase-based computation
+        pass
+    
+    def status_string(self) -> str:
+        """Get human-readable status for logging/display."""
+        return self._coordinator.status_string()
+    
+    def __repr__(self) -> str:
+        margin = self._coordinator.margin if self._coordinator else 0.0
+        swings = self._coordinator.swing_count if self._coordinator else 0
+        return f"FreeGait(margin={margin:.1f}mm, swings={swings})"
+
+
+# Import Dict for type hints
+from typing import Dict
 
 
 #----------------------------------------------------------------------------------------------------------------------
@@ -1377,6 +1802,9 @@ class GaitTransition:
                 phase_changed = wave_phase != self._waiting_phase
             elif ripple_phase >= 0:  # RippleGait
                 phase_changed = ripple_phase != self._waiting_phase
+            elif isinstance(self._from_gait, (FreeGait, StandingGait)):
+                # FreeGait and StandingGait have no phases - transition immediately
+                phase_changed = True
             else:  # TripodGait or others
                 phase_changed = current_phase != self._waiting_phase
             
