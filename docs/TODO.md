@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2026-01-10
+Last updated: 2026-02-02
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -476,77 +476,91 @@ Goal: Replace fixed-phase cyclic gaits with an event-driven free gait that adapt
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### FG1. Per-Leg State Machine
-- [ ] Create `LegState` enum: `STANCE`, `LIFT_PENDING`, `SWING`, `PLACING`
-- [ ] Create `Leg` class with: state, foot_target, swing_progress, contact_sensed, contact_estimated
-- [ ] State transition logic:
+### FG1. Per-Leg State Machine ✅ COMPLETE (v0.12.14)
+- [x] Create `LegState` enum: `STANCE`, `LIFT_PENDING`, `SWING`, `PLACING`
+- [x] Create `Leg` class with: state, foot_target, swing_progress, contact_sensed, contact_estimated
+- [x] State transition logic:
   - `STANCE` → `LIFT_PENDING`: coordinator grants swing permission
   - `LIFT_PENDING` → `SWING`: lift trajectory complete
   - `SWING` → `PLACING`: horizontal motion complete, begin descent
   - `PLACING` → `STANCE`: contact detected or target Y reached
-- [ ] Track per-leg timing: time_in_state, last_transition_time
+- [x] Track per-leg timing: time_in_state, last_transition_time
 
-### FG2. Support Polygon Computation
-- [ ] Implement `compute_support_polygon(stance_feet)` → list of (x, z) vertices in body frame
-- [ ] Use existing FK to get current foot positions
-- [ ] Handle degenerate cases: < 3 stance feet returns None (unstable)
-- [ ] Add to `kinematics.py` or create new `stability.py` module
+### FG2. Support Polygon Computation ✅ COMPLETE (v0.12.14)
+- [x] Implement `compute_support_polygon(stance_feet)` → list of (x, z) vertices in body frame
+- [x] Use existing FK to get current foot positions — `get_stance_feet_xz()` helper
+- [x] Handle degenerate cases: < 3 stance feet returns None (unstable)
+- [x] Added to new `free_gait.py` module (convex_hull_2d, point_in_polygon, distance_to_polygon_edge)
 
-### FG3. Center of Gravity Estimation
-- [ ] Implement `estimate_cog()` → (x, y, z) in body frame
-- [ ] Initial implementation: return body center (0, 0, 0) — sufficient for quasi-static walking
-- [ ] Optional enhancement: weighted average including leg positions (leg mass ~3% each)
-- [ ] Integrate with IMU pitch/roll to project CoG onto ground plane
+### FG3. Center of Gravity Estimation ✅ COMPLETE (v0.12.15)
+- [x] Implement `estimate_cog()` → (x, z) projection on ground plane in body frame
+- [x] Initial implementation: return body center (0, 0, 0) — sufficient for quasi-static walking
+- [x] Optional enhancement: weighted average including leg positions (leg mass ~3% each)
+- [x] Integrate with IMU pitch/roll to project CoG onto ground plane
 
-### FG4. Stability Margin Computation
-- [ ] Implement `compute_stability_margin(cog_xz, support_polygon)` → float (mm)
-- [ ] Algorithm: distance from CoG projection to nearest polygon edge
-- [ ] Positive = stable (inside polygon), negative = unstable (outside)
-- [ ] Configurable minimum margin threshold (default: 30mm)
+### FG4. Stability Margin Computation ✅ COMPLETE (v0.12.16)
+- [x] Implement `compute_stability_margin(cog_xz, support_polygon)` → float (mm)
+- [x] Algorithm: distance from CoG projection to nearest polygon edge
+- [x] Positive = stable (inside polygon), negative = unstable (outside)
+- [x] Configurable minimum margin threshold (default: 30mm)
+- [x] Added `StabilityStatus` enum (STABLE/MARGINAL/CRITICAL/UNSTABLE)
+- [x] Added `classify_stability()` and `check_swing_safe()` helpers
 
-### FG5. Free Gait Coordinator
-- [ ] Create `FreeGaitCoordinator` class
-- [ ] Each tick:
+### FG5. Free Gait Coordinator ✅ COMPLETE (v0.12.17)
+- [x] Create `FreeGaitCoordinator` class
+- [x] Each tick:
   1. Identify stance legs, compute support polygon
   2. Compute stability margin with current CoG
   3. Evaluate which legs are ready to swing (longest in stance, task-aligned)
   4. Grant permission if: margin > threshold after removing candidate leg
-- [ ] Configuration: max_simultaneous_swings (1-3), min_stability_margin_mm
-- [ ] Emergency hold: if margin drops below critical, cancel all pending lifts
-- [ ] Leg selection heuristics: alternating sides, direction-aligned, longest-waiting
+- [x] Configuration: max_simultaneous_swings (1-3), min_stability_margin_mm
+- [x] Emergency hold: if margin drops below critical, cancel all pending lifts
+- [x] Leg selection heuristics: alternating sides, direction-aligned, longest-waiting
+- [x] Added `SwingPriority` enum and `CoordinatorConfig` dataclass
 
-### FG6. Foot Placement Planner
-- [ ] Implement `plan_foot_placement(leg_idx, heading_deg, speed_scale)` → (x, y, z) target
-- [ ] Default positions: neutral standing pose (like StandingGait)
-- [ ] Walking offset: stride based on heading and speed
-- [ ] Pre-check candidate against collision model before committing
+### FG6. Foot Placement Planner ✅ COMPLETE (v0.12.19)
+- [x] Implement `plan_foot_placement(leg_idx, heading_deg, speed_scale)` → (x, y, z) target
+- [x] Default positions: neutral standing pose (like StandingGait)
+- [x] Walking offset: stride based on heading and speed
+- [x] Turn adjustment: differential strides for inside/outside legs
+- [x] Pre-check candidate against collision model before committing
+- [x] Added `plan_swing_trajectory()` for 3-phase lift/translate/place
+- [x] Added `middle_leg_offset_z_mm` config (Mostafa et al. 2012 "offset model") for improved stability margin
 - [ ] Future: terrain-aware placement using contact height history or ToF sensing
 
-### FG7. Contact Estimation (Pre-Switch Fallback)
-- [ ] Implement `estimate_contact(leg_idx)` → bool
-- [ ] Primary: use S4 foot switch telemetry when available
-- [ ] Fallback: position-based (foot reached target Y within tolerance)
-- [ ] Fallback: time-based (swing duration exceeded expected time)
-- [ ] Flag contact source: `SENSED` vs `ESTIMATED` for diagnostics
+### FG7. Contact Estimation (Pre-Switch Fallback) ✅ COMPLETE (v0.12.20)
+- [x] Implement `estimate_contact(leg_idx)` → bool
+- [x] Primary: use S4 foot switch telemetry when available
+- [x] Fallback: position-based (foot reached target Y within tolerance)
+- [x] Fallback: time-based (swing duration exceeded expected time)
+- [x] Flag contact source: `SENSED` vs `ESTIMATED` for diagnostics
 
-### FG8. FreeGait Engine Class
-- [ ] Create `FreeGait(GaitEngine)` in `gait_engine.py`
-- [ ] Owns: 6 `Leg` instances, `FreeGaitCoordinator`, foot placement planner
-- [ ] `tick(dt)`: update coordinator, advance leg state machines, compute foot targets
-- [ ] `get_feet_bytes()`: format current foot positions as FEET command
-- [ ] `start()` / `stop()`: initialize legs to stance, clean shutdown
-- [ ] Integrate with existing `GaitTransition` system for smooth switching
+### FG8. FreeGait Engine Class ✅ COMPLETE (v0.12.21)
+- [x] Create `FreeGait(GaitEngine)` in `gait_engine.py`
+- [x] Owns: 6 `Leg` instances, `FreeGaitCoordinator`, foot placement planner
+- [x] `tick(dt)`: update coordinator, advance leg state machines, compute foot targets
+- [x] `get_feet_bytes()`: format current foot positions as FEET command (inherited)
+- [x] `start()` / `stop()`: initialize legs to stance, clean shutdown
+- [x] Integrate with existing `GaitTransition` system for smooth switching (FG9)
 
-### FG9. Integration & Tuning
-- [ ] Add `FreeGait` to gait cycle (LB/RB toggle includes it)
-- [ ] Configuration in `[gait]` section:
-  - `free_gait_margin_mm` (default: 30)
-  - `free_gait_max_swing` (default: 3)
-  - `free_gait_swing_ms` (default: 400)
-  - `free_gait_lift_mm` (default: 50)
-- [ ] Menu/dashboard exposure for key tuning parameters
-- [ ] Stability fallback: if margin critical, auto-transition to StandingGait
-- [ ] Logging: stability margin, active swings, state transitions per tick
+### FG9. Integration & Tuning ✅ COMPLETE (v0.12.22)
+- [x] Add `FreeGait` to gait cycle (LB/RB toggle includes it)
+- [x] Configuration in `[gait]` section:
+  - `free_gait_min_margin_mm` (default: 30)
+  - `free_gait_max_swings` (default: 3)
+  - `free_gait_swing_speed_mm_s` (default: 200)
+- [x] Menu/dashboard exposure for key tuning parameters (FG Margin, FG Max Swing, FG Speed)
+- [ ] Stability fallback: if margin critical, auto-transition to StandingGait (deferred to FG11)
+- [ ] Logging: stability margin, active swings, state transitions per tick (deferred)
+
+### FG9b. FreeGait Walking Fixes ✅ COMPLETE (v0.12.27)
+- [x] **Body-frame coordinates** (v0.12.25): Support polygon now computed in body frame using `_foot_to_body_frame()`. Fixed degenerate polygon (all Z=0) causing infinite negative margin.
+- [x] **Swing targets** (v0.12.25): Targets set when leg enters LIFT_PENDING, not just for STANCE.
+- [x] **Stance translation** (v0.12.26): Stance legs push backward proportional to speed/heading (matching TripodGait). Enables continuous walking cycle.
+- [x] **IMU integration** (v0.12.26): Controller passes pitch/roll to FreeGait for CoG projection stability calculations.
+- [x] **Strafe/turn verified**: heading=90° moves X axis; turn_rate adjusts leg stride differentially.
+- [x] **Gait transition** (v0.12.27): FreeGait/StandingGait now transition immediately (no phase wait).
+- [x] **Lift height alignment** (v0.12.27): Added lift_attenuation=0.69 to match TripodGait effective lift (41.4mm).
 
 ### FG10. Foot Switch Integration (Firmware + Telemetry)
 - [ ] **Firmware**: Wire 6 foot contact switches to Teensy digital inputs

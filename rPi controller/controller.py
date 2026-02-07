@@ -300,11 +300,28 @@
 # 2026-01-16  v0.12.11 b298: Diagnostics: Collision pose compare logger config moved from env vars to controller.ini; controls exposed in menu + dashboard.
 # 2026-01-16  v0.12.12 b299: Safety: Collision stop_on_collision now enforces an emergency stop (gait stop + idle + disable) instead of warning-only.
 # 2026-01-16  v0.12.13 b300: Safety: Collision response now steps (lift+place) to stand pose instead of a straight-line stop/disable.
+# 2026-01-16  v0.12.14 b301: Free Gait FG1+FG2: Added free_gait.py module with per-leg state machine (LegState, Leg class) and support polygon computation (convex hull, stability margin).
+# 2026-01-16  v0.12.15 b302: Free Gait FG3: CoG estimation (simple + leg-weighted + IMU tilt projection) in free_gait.py.
+# 2026-01-16  v0.12.16 b303: Free Gait FG4: Stability margin (compute_stability_margin, StabilityStatus, check_swing_safe) in free_gait.py.
+# 2026-01-16  v0.12.17 b304: Free Gait FG5: FreeGaitCoordinator class with stability-aware swing permission, emergency hold, priority heuristics.
+# 2026-01-16  v0.12.18 b305: Free Gait FG6: FootPlacementPlanner with heading/speed-based targets, turn adjustment, swing trajectory.
+# 2026-01-17  v0.12.19 b306: Free Gait FG6: Added middle_leg_offset_z_mm config parameter to FootPlacementPlanner.
+# 2026-01-20  v0.12.20 b307: Free Gait FG7: ContactEstimator class for foot contact detection.
+# 2026-01-20  v0.12.21 b308: Free Gait FG8: FreeGait(GaitEngine) class integrating coordinator, planner, and contact estimator.
+# 2026-01-20  v0.12.22 b309: Free Gait FG9: Integration - FreeGait in GAIT_TYPES, config params, MarsMenu, dashboard.
+# 2026-01-20  v0.12.23 b310: Fixed FreeGait coordinate system mismatch (now uses TripodGait's X-positive convention).
+# 2026-01-20  v0.12.24 b311: Display: Added gait indicator overlay on eyes display (single-letter abbreviation in top-left corner).
+# 2026-01-25  v0.12.25 b312: FreeGait: Fixed support polygon using body-frame coords; fixed target-setting for swinging legs.
+# 2026-01-25  v0.12.26 b313: FreeGait: Added stance leg translation (legs push backward during stance); added IMU state passing for stability calculations.
+# 2026-02-02  v0.12.27 b314: FreeGait: Fixed gait transition (FreeGait/StandingGait now transition immediately, no phase wait). Aligned lift height with TripodGait via lift_attenuation=0.69.
+# 2026-02-02  v0.12.28 b315: Fixed I2C Remote I/O error (errno 121) from touch controller by adding OSError handling in cst816d.py. Added traceback to main loop exception handler.
+# 2026-02-03  v0.12.29 b316: FreeGait: Fixed walking direction - now matches TripodGait's _apply_leg_rotation exactly: stride rotated by (leg_angle + sign*walk_dir*90), Z output is rotated stride only (not neutral.z + stride).
+# 2026-02-06  v0.12.30 b317: FreeGait: Fixed swing trajectory - replaced 3-phase (lift/translate/place) with 5-point Bezier curve matching TripodGait. X/Z now interpolate continuously throughout swing instead of only during middle 40%.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.12.13"
+CONTROLLER_VERSION = "0.12.30"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 300
+CONTROLLER_BUILD = 317
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
@@ -363,7 +380,8 @@ from SteeringMode import SteeringMode
 
 # import the gait engine
 from gait_engine import (GaitEngine, TripodGait, WaveGait, RippleGait,
-                         StationaryPattern, StandingGait, StepToStandGait, GaitParams, GaitTransition)
+                         StationaryPattern, StandingGait, StepToStandGait, GaitParams, GaitTransition,
+                         FreeGait)
 
 # import telemetry module (Phase 1 modularization)
 from telemetry import (
@@ -485,8 +503,8 @@ from collision import validate_pose_safety_hybrid  # S2: learned collision model
 import numpy as np
 
 # Gait type cycling order (RB button) - Standing first for leveling tests
-GAIT_TYPES = [StandingGait, TripodGait, WaveGait, RippleGait, StationaryPattern]
-GAIT_NAMES = ["Standing", "Tripod", "Wave", "Ripple", "Stationary"]
+GAIT_TYPES = [StandingGait, TripodGait, WaveGait, RippleGait, StationaryPattern, FreeGait]
+GAIT_NAMES = ["Standing", "Tripod", "Wave", "Ripple", "Stationary", "Free"]
 
 # import the LCD library and related graphics libraries
 # sys.path.append("..")
@@ -1886,20 +1904,35 @@ class Controller:
                 try:
                     poses = []
                     for i in range(6):
-                        pt = np.array(positions[i*3:i*3+3])
+                        x, y, z = positions[i*3:i*3+3]
+                        # The gait engine sends HIP-RELATIVE positions (same as firmware IK).
+                        # Python IK expects BODY-FRAME positions.
+                        # Convert by adding hip offset to get body-frame foot target.
+                        hip_x, hip_z = kinematics.COXA_OFFSET_X[i], kinematics.COXA_OFFSET_Z[i]
+                        # For left legs, X should be negative in body frame
+                        if i < 3:
+                            body_x = hip_x - x  # Left leg: hip at negative X, foot reaches more negative
+                        else:
+                            body_x = hip_x + x  # Right leg: hip at positive X, foot reaches more positive
+                        body_y = y  # Y is same (down)
+                        body_z = hip_z + z  # Z is forward/back from hip
+                        pt = np.array([body_x, body_y, body_z])
                         poses.append(kinematics.compute_ik(i, pt))
                     
                     # S2: Use hybrid model (learned pre-filter + analytical confirm)
                     # if use_learned_model is enabled, otherwise pure analytical
                     use_learned = getattr(self.config.collision, 'use_learned_model', False)
                     details = None
+                    analytical_details = None
                     
                     if use_learned:
                         is_safe, details = validate_pose_safety_hybrid(
                             poses, collision_cfg=self.config.collision
                         )
+                        analytical_details = details.get('analytical', {}) if details else {}
                     else:
-                        is_safe = collision.validate_pose_safety(
+                        # Always use detailed version to get diagnostic info
+                        is_safe, analytical_details = collision.validate_pose_safety_detailed(
                             poses, collision_cfg=self.config.collision
                         )
 
@@ -1918,20 +1951,31 @@ class Controller:
                         # Build detail string for legs/body involved
                         leg_names = ['LF', 'LM', 'LR', 'RF', 'RM', 'RR']
                         detail_parts = []
-                        if use_learned and details:
-                            # Hybrid/learned details
-                            analytical = details.get('analytical', {})
-                            if analytical.get('body_collision'):
-                                detail_parts.append('BODY')
-                            if analytical.get('inter_leg_collision') and analytical.get('distances'):
-                                # Find pairs that are below threshold
-                                thresh = analytical.get('threshold_mm', 35.0)
-                                for (a, b), dist in analytical.get('distances', {}).items():
-                                    if dist < thresh:
-                                        detail_parts.append(f"{leg_names[a]}-{leg_names[b]}")
+                        
+                        # Use analytical_details for collision info
+                        ad = analytical_details or {}
+                        if ad.get('body_collision'):
+                            detail_parts.append('BODY')
+                        if ad.get('inter_leg_collision') and ad.get('distances'):
+                            # Find pairs that are below threshold
+                            thresh = ad.get('threshold_mm', 35.0)
+                            for (a, b), dist in ad.get('distances', {}).items():
+                                if dist < thresh:
+                                    detail_parts.append(f"{leg_names[a]}-{leg_names[b]}:{dist:.0f}mm")
+                        
                         msg = "[COLLISION] Unsafe pose detected!"
                         if detail_parts:
                             msg += f" ({', '.join(detail_parts)})"
+                        
+                        # Add position summary for debugging
+                        if self.verbose:
+                            pos_summary = []
+                            for i in range(6):
+                                x, y, z = positions[i*3:i*3+3]
+                                pos_summary.append(f"{leg_names[i]}:({x:.0f},{y:.0f},{z:.0f})")
+                            print(f"[COLLISION DEBUG] positions: {' '.join(pos_summary)}", end="\r\n")
+                            print(f"[COLLISION DEBUG] threshold={ad.get('threshold_mm', 'N/A')}mm, body_mode={ad.get('body_details', {}).get('mode', 'N/A')}", end="\r\n")
+                        
                         if self.config.collision.warn_only:
                             if self.verbose: print(f"{msg} (WARN)", end="\r\n")
                         elif recovery_running:
@@ -2214,6 +2258,9 @@ class Controller:
                                 self.gaitEngine.start()
                                 self.gaitActive = True
                                 audio_gait_start()
+                                # Update display thread gait indicator
+                                if _displayThread is not None:
+                                    _displayThread.set_gait_name("Tripod")
                                 # Reset stick inputs so gait starts at zero speed until user moves stick
                                 self._gaitStrafeInput = 0.0
                                 self._gaitSpeedInput = 0.0
@@ -2248,9 +2295,16 @@ class Controller:
                             next_type = GAIT_TYPES[next_idx]
                             next_name = GAIT_NAMES[next_idx]
                             
-                            # Create new gait engine (StationaryPattern needs extra args)
+                            # Create new gait engine (StationaryPattern and FreeGait need extra args)
                             if next_type == StationaryPattern:
                                 pending_gait = next_type(params, radius_mm=15.0, period_ms=2000)
+                            elif next_type == FreeGait:
+                                pending_gait = next_type(
+                                    params,
+                                    max_swings=_freeGaitMaxSwings,
+                                    min_margin_mm=_freeGaitMinMarginMm,
+                                    swing_speed_mm_s=_freeGaitSwingSpeedMmS
+                                )
                             else:
                                 pending_gait = next_type(params)
                             
@@ -2695,6 +2749,9 @@ class Controller:
                     _autoDisableAt = None
                     self.autoDisableAt = None
                     audio_gait_start()
+                    # Update display thread gait indicator
+                    if _displayThread is not None:
+                        _displayThread.set_gait_name("Tripod")
                     # Reset stick inputs so gait starts at zero speed
                     self._gaitStrafeInput = 0.0
                     self._gaitSpeedInput = 0.0
@@ -2733,6 +2790,13 @@ class Controller:
                 
                 if next_type == StationaryPattern:
                     pending_gait = next_type(params, radius_mm=15.0, period_ms=2000)
+                elif next_type == FreeGait:
+                    pending_gait = next_type(
+                        params,
+                        max_swings=_freeGaitMaxSwings,
+                        min_margin_mm=_freeGaitMinMarginMm,
+                        swing_speed_mm_s=_freeGaitSwingSpeedMmS
+                    )
                 else:
                     pending_gait = next_type(params)
                 
@@ -3301,6 +3365,10 @@ _bezierP1Overshoot = 1.1
 _bezierP2Height = 1.5
 _bezierP3Height = 0.35
 _bezierP3Overshoot = 1.1
+# Free Gait (FG9) parameters
+_freeGaitMinMarginMm = 30.0
+_freeGaitMaxSwings = 3
+_freeGaitSwingSpeedMmS = 200.0
 # Eye settings
 _eyeSpacingOffset = 10
 _eyeCenterOffset = 5      # Horizontal eye center offset (pixels)
@@ -3597,6 +3665,11 @@ def _unpack_config_to_globals(cfg: ControllerConfig) -> None:
     _bezierP2Height = cfg.gait.bezier_p2_height
     _bezierP3Height = cfg.gait.bezier_p3_height
     _bezierP3Overshoot = cfg.gait.bezier_p3_overshoot
+    
+    # Free Gait (FG9) parameters
+    _freeGaitMinMarginMm = cfg.gait.free_gait_min_margin_mm
+    _freeGaitMaxSwings = cfg.gait.free_gait_max_swings
+    _freeGaitSwingSpeedMmS = cfg.gait.free_gait_swing_speed_mm_s
 
     # --- Pounce ---
     _pouncePrepMs = cfg.pounce.prep_ms
@@ -3904,6 +3977,9 @@ def _setup_mars_menu(ctrl):
                 ctrl.gaitEngine = TripodGait(params)
             ctrl.gaitEngine.start()
             ctrl.gaitActive = True
+            # Update display thread gait indicator
+            if _displayThread is not None:
+                _displayThread.set_gait_name("Tripod")
             _autoDisableAt = None
 
     def _stop_gait_wrapper():
@@ -3926,6 +4002,13 @@ def _setup_mars_menu(ctrl):
         get_gait_width_mm=lambda: _savedGaitWidthMm,
         start_gait=_start_gait_wrapper,
         stop_gait=_stop_gait_wrapper,
+        # FreeGait (FG9) setters and getters
+        set_fg_margin_mm=lambda v: globals().__setitem__('_freeGaitMinMarginMm', v),
+        get_fg_margin_mm=lambda: _freeGaitMinMarginMm,
+        set_fg_max_swings=lambda v: globals().__setitem__('_freeGaitMaxSwings', v),
+        get_fg_max_swings=lambda: _freeGaitMaxSwings,
+        set_fg_speed_mm_s=lambda v: globals().__setitem__('_freeGaitSwingSpeedMmS', v),
+        get_fg_speed_mm_s=lambda: _freeGaitSwingSpeedMmS,
     )
     setup_gait_callbacks(_marsMenu, _gait_ctx)
 
@@ -4545,6 +4628,10 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
         'step length': 'step_length_mm', 'step_length_mm': 'step_length_mm',
         'step height': 'step_height_mm', 'step_height_mm': 'step_height_mm', 'lift_mm': 'step_height_mm',
         'turn rate': 'turn_rate', 'turn_rate': 'turn_rate', 'turn_max_deg_s': 'turn_rate',
+        # Free Gait (FG9)
+        'fg margin': 'fg_margin', 'fg_margin': 'fg_margin',
+        'fg max swing': 'fg_max_swing', 'fg_max_swing': 'fg_max_swing',
+        'fg speed': 'fg_speed', 'fg_speed': 'fg_speed',
         # Safety
         'low batt prot': 'low_battery_enabled', 'low_battery_enabled': 'low_battery_enabled',
         'volt critical': 'volt_critical', 'volt_critical': 'volt_critical',
@@ -4625,6 +4712,31 @@ def _handle_dashboard_config_change(section: str, key: str, value) -> bool:
                     _marsMenu.set_value(MenuCategory.GAIT, "Turn Rate", _gaitTurnMaxDegS)
                 if _verbose:
                     print(f"[Dashboard] Gait turn_max_deg_s -> {_gaitTurnMaxDegS}", end="\r\n")
+                return True
+            
+            # Free Gait (FG9) settings
+            elif normalized_key == 'fg_margin':
+                _freeGaitMinMarginMm = float(value)
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.GAIT, "FG Margin", _freeGaitMinMarginMm)
+                if _verbose:
+                    print(f"[Dashboard] Gait free_gait_min_margin_mm -> {_freeGaitMinMarginMm}", end="\r\n")
+                return True
+                
+            elif normalized_key == 'fg_max_swing':
+                _freeGaitMaxSwings = int(value)
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.GAIT, "FG Max Swing", _freeGaitMaxSwings)
+                if _verbose:
+                    print(f"[Dashboard] Gait free_gait_max_swings -> {_freeGaitMaxSwings}", end="\r\n")
+                return True
+                
+            elif normalized_key == 'fg_speed':
+                _freeGaitSwingSpeedMmS = float(value)
+                if _marsMenu:
+                    _marsMenu.set_value(MenuCategory.GAIT, "FG Speed", _freeGaitSwingSpeedMmS)
+                if _verbose:
+                    print(f"[Dashboard] Gait free_gait_swing_speed_mm_s -> {_freeGaitSwingSpeedMmS}", end="\r\n")
                 return True
         
         # Safety settings
@@ -6129,6 +6241,9 @@ def phase_keyboard_input(ctrl):
             ctrl.gaitEngine = TripodGait(params)
             ctrl.gaitEngine.start()
             ctrl.gaitActive = True
+            # Update display thread gait indicator
+            if _displayThread is not None:
+                _displayThread.set_gait_name("Tripod")
             ctrl._gaitSpeedInput = 0.0
             ctrl._gaitStrafeInput = 0.0
             ctrl._updateGaitHeading()
@@ -6397,6 +6512,9 @@ def phase_autonomy(ctrl):
                 )
                 ctrl.gaitEngine = TripodGait(params)
                 ctrl.send_cmd(b'MODE IDLE', force=True)  # Switch Teensy to IDLE mode
+                # Update display thread gait indicator
+                if _displayThread is not None:
+                    _displayThread.set_gait_name("Tripod")
             
             ctrl.gaitEngine.start()
             ctrl.gaitActive = True
@@ -6485,6 +6603,9 @@ def phase_gait_tick(ctrl):
                     new_name = "Unknown"
                 # Play gait-specific confirmation tone
                 audio_gait_changed(new_name)
+                # Update display thread gait indicator
+                if _displayThread is not None:
+                    _displayThread.set_gait_name(new_name)
                 if ctrl.verbose:
                     print(f"\r\nGait transition complete: now running {new_name}", end="\r\n")
             ctrl.gait_transition.reset()
@@ -6502,7 +6623,25 @@ def phase_gait_tick(ctrl):
                 ctrl.send_feet_cmd(feet_cmd)
     else:
         # Normal gait operation - tick the single gait engine
+        
+        # Pass IMU state to FreeGait for stability calculations
+        if isinstance(ctrl.gaitEngine, FreeGait) and _imuThread is not None and _imuThread.connected:
+            try:
+                roll_deg, pitch_deg, _ = _imuThread.get_orientation()
+                if pitch_deg is not None and roll_deg is not None:
+                    ctrl.gaitEngine.set_imu_state(pitch_deg, roll_deg)
+            except Exception:
+                pass
+        
         ctrl.gaitEngine.tick(dt_seconds)
+        
+        # Update display thread with stance mask for support polygon visualization
+        if hasattr(ctrl, 'displayThread') and ctrl.displayThread and hasattr(ctrl.gaitEngine, 'get_stance_mask'):
+            try:
+                stance_mask = ctrl.gaitEngine.get_stance_mask()
+                ctrl.displayThread.update_stance_mask(stance_mask)
+            except Exception:
+                pass
 
         # Collision recovery: when step-to-stand completes, settle into StandingGait.
         if isinstance(ctrl.gaitEngine, StepToStandGait) and hasattr(ctrl.gaitEngine, 'is_complete'):
@@ -6514,6 +6653,9 @@ def phase_gait_tick(ctrl):
                     ctrl.gaitActive = True
                     ctrl.gait_tick_count = 0
                     ctrl.safety_state["collision"] = False
+                    # Update display thread gait indicator
+                    if _displayThread is not None:
+                        _displayThread.set_gait_name("Standing")
                     if ctrl.verbose:
                         print("[COLLISION] Recovery complete: standing", end="\r\n")
             except Exception:
@@ -7074,6 +7216,15 @@ if _displayThreadEnabled:
     _displayThread.set_show_battery_icon(ctrl.show_battery_icon)
     _displayThread.set_engineering_lcars(_engineeringLcars)
     _displayThread.set_lcars_palette(_menuPalette)
+    # Set initial gait name based on current gait engine
+    if ctrl.gaitEngine is not None:
+        try:
+            gait_idx = GAIT_TYPES.index(type(ctrl.gaitEngine))
+            _displayThread.set_gait_name(GAIT_NAMES[gait_idx])
+        except ValueError:
+            _displayThread.set_gait_name("Standing")
+    else:
+        _displayThread.set_gait_name("Standing")
     _displayThread.start()
     _startupSplash.log(f"Display thread OK ({_displayThreadHz} Hz)", "GREEN")
     if _verbose:
@@ -7223,9 +7374,14 @@ while _run:
         print(end="\r\n")  # Newline to preserve any \r debug output on Ctrl+C
         _run = False
     except Exception as e:
-        # handle any other exceptions that may occur
+        # Log any unexpected exceptions with traceback for debugging
+        import traceback
         if _verbose:
             print(f"Error in main loop: {e}", end="\r\n")
+            traceback.print_exc()
+        else:
+            # Even in non-verbose, print the error once to aid debugging
+            print(f"Error in main loop: {e} (enable verbose for traceback)", end="\r\n")
 
 # clean up all used objects and resources
 

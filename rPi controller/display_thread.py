@@ -5,6 +5,11 @@ Extracted from controller.py as part of Phase 5 modularization (2025-06-18).
 Contains DisplayThread class, UpdateDisplay function, and display helpers.
 
 Change log:
+  2025-01-21: Support polygon visualization for free gait.
+              - Added draw_support_polygon_overlay(): convex hull of stance feet + CoG indicator
+              - Imports compute_support_polygon, distance_to_polygon_edge from free_gait.py
+              - New toggle: show_support_polygon, set_support_polygon(), toggle_support_polygon()
+              - Stability margin color coding: green (>50mm), yellow (>20mm), orange (>0mm), red (unstable)
   2026-01-13: Engineering view accuracy + collision overlay.
               - Body outline now uses accurate BODY_HULL_XZ polygon from collision.py
               - Added draw_collision_overlay(): leg segment cylinders with LEG_RADIUS
@@ -22,6 +27,10 @@ Change log:
               - draw_battery_icon(): Top-right corner, color-coded fill (green/yellow/red)
               - Configurable via show_battery_icon in [safety_display] config
               - Shows voltage text below icon; semi-transparent for minimal distraction
+  2026-01-20: Added gait indicator overlay for EYES display mode.
+              - draw_gait_indicator(): Top-left corner single-letter gait type abbreviation
+              - Color-coded per gait type (T=green, W=blue, R=orange, F=purple, S=gray)
+              - Updated via set_gait_name() when gait transitions complete
   2025-12-24: Fixed eye flicker/tearing:
               - Added 40ms minimum SPI write interval (25fps max) to prevent frame tearing
               - Removed IMU changes from eye force_update (IMU only affects engineering view)
@@ -61,6 +70,9 @@ from collision import (
     LEG_RADIUS,
     MIN_DIST_LEG_LEG,
 )
+
+# Import support polygon computation for free gait stability visualization
+from free_gait import compute_support_polygon, distance_to_polygon_edge
 
 
 # -----------------------------------------------------------------------------
@@ -621,6 +633,8 @@ def draw_hexapod_wireframe_3d(
     show_collision_overlay: bool = False,
     collision_active: bool = False,
     collision_pairs: List[Tuple[int, int]] = None,
+    show_support_polygon: bool = False,
+    stance_mask: List[bool] = None,
 ) -> Tuple[float, float, float, str]:
     """Draw a 3D wireframe visualization of the hexapod using FK.
     
@@ -640,6 +654,8 @@ def draw_hexapod_wireframe_3d(
         show_collision_overlay: If True, draw collision detection geometry
         collision_active: If True, show warning state (e.g., close to collision)
         collision_pairs: List of (leg_i, leg_j) tuples currently in collision
+        show_support_polygon: If True, draw support polygon and CoG indicator
+        stance_mask: List of 6 booleans indicating which legs are in stance
     
     Returns:
         Tuple of (avg_temp, avg_voltage, max_temp, hottest_label) for compatibility
@@ -647,14 +663,18 @@ def draw_hexapod_wireframe_3d(
     if color_palette is None:
         color_palette = TEMPERATURE_COLOR_PALETTE
     
+    # Default stance mask: all legs in stance
+    if stance_mask is None:
+        stance_mask = [True] * 6
+    
     # Ensure we have valid joint angles (default to home position if not)
     if joint_angles is None or len(joint_angles) < 18:
         joint_angles = [120.0] * 18  # Home position = 120 degrees
     
     # Calculate scale: fit robot into given size
     # Robot roughly spans ~500mm diameter at full reach (coxa offset + leg reach)
-    # Increase scale for better zoom (was 300, now 200 for more zoom)
-    scale = size / 200.0
+    # Use 280 divisor to fit entire robot with support polygon visible
+    scale = size / 280.0
     
     segment_width = max(2, size // 18)  # Thicker lines for visibility
     joint_radius = segment_width // 2 + 2
@@ -729,6 +749,32 @@ def draw_hexapod_wireframe_3d(
     
     # Sort legs by depth (back to front for proper occlusion)
     all_leg_data.sort(key=lambda x: x[4], reverse=True)
+    
+    # Draw support polygon FIRST (underneath everything else)
+    if show_support_polygon:
+        # Extract foot positions (last point of each leg) in 3D body frame
+        # Only include stance feet (not swing feet)
+        foot_positions_3d = [None] * 6
+        for leg_idx, pts_3d, _, _, _ in all_leg_data:
+            if len(pts_3d) >= 4 and stance_mask[leg_idx]:
+                foot_positions_3d[leg_idx] = pts_3d[3]  # Foot is point index 3
+        
+        # Filter to only stance feet for support polygon
+        stance_feet_3d = [pos for pos in foot_positions_3d if pos is not None]
+        
+        # Only draw if we have at least 3 stance feet (minimum for a polygon)
+        if len(stance_feet_3d) >= 3:
+            draw_support_polygon_overlay(
+                draw=draw,
+                center_x=center_x,
+                center_y=center_y,
+                scale=scale,
+                azimuth_deg=azimuth_deg,
+                elevation_deg=elevation_deg,
+                foot_positions_3d=stance_feet_3d,
+                body_pitch_deg=body_pitch_deg,
+                body_roll_deg=body_roll_deg,
+            )
     
     # Draw body using accurate BODY_HULL_XZ polygon from collision.py
     # BODY_HULL_XZ is (X, Z) pairs in mm; we need (X, Y=0, Z) for 3D projection
@@ -932,12 +978,148 @@ def draw_collision_overlay(
                     mid_i = ((pts_i[2][0] + pts_i[3][0]) / 2, 
                              (pts_i[2][1] + pts_i[3][1]) / 2)
                     mid_j = ((pts_j[2][0] + pts_j[3][0]) / 2,
-                             (pts_j[2][1] + pts_j[3][1]) / 2)
+                             (pts_j[2][1] + pts_j[3][0]) / 2)
                     draw.line(
                         [(int(mid_i[0]), int(mid_i[1])), 
                          (int(mid_j[0]), int(mid_j[1]))],
                         fill=collision_color, width=2
                     )
+
+
+# -----------------------------------------------------------------------------
+# Support Polygon Visualization
+# -----------------------------------------------------------------------------
+
+def draw_support_polygon_overlay(
+    draw: ImageDraw.Draw,
+    center_x: int,
+    center_y: int,
+    scale: float,
+    azimuth_deg: float,
+    elevation_deg: float,
+    foot_positions_3d: List[Tuple[float, float, float]],
+    body_pitch_deg: float = 0.0,
+    body_roll_deg: float = 0.0,
+) -> float:
+    """Draw support polygon and CoG stability indicator.
+    
+    Visualizes the convex hull of all stance feet (support polygon) and shows
+    the body center of gravity (CoG) position relative to it. The stability
+    margin is the distance from CoG to the nearest polygon edge.
+    
+    Args:
+        draw: PIL ImageDraw object
+        center_x, center_y: Center position for drawing
+        scale: Scale factor (mm to pixels)
+        azimuth_deg, elevation_deg: Camera angles
+        foot_positions_3d: List of 6 foot (x, y, z) positions in body frame (mm)
+        body_pitch_deg, body_roll_deg: Body rotation from IMU
+        
+    Returns:
+        Stability margin in mm (positive = stable, negative = unstable)
+    """
+    # Extract XZ positions of feet (ground plane)
+    feet_xz = [(pos[0], pos[2]) for pos in foot_positions_3d]
+    
+    # Compute support polygon (convex hull of all feet)
+    polygon = compute_support_polygon(feet_xz)
+    
+    if polygon is None or len(polygon) < 3:
+        return 0.0  # Degenerate polygon, skip drawing
+    
+    # Body center of gravity (CoG) - body center is at (0, 0)
+    cog_xz = (0.0, 0.0)
+    
+    # Compute stability margin
+    stability_margin = distance_to_polygon_edge(cog_xz, polygon)
+    
+    # Colors based on stability
+    if stability_margin > 50.0:
+        poly_color = (40, 180, 80)   # Green - stable
+        cog_color = (60, 220, 100)
+    elif stability_margin > 20.0:
+        poly_color = (200, 180, 40)  # Yellow - marginal
+        cog_color = (255, 220, 60)
+    elif stability_margin > 0.0:
+        poly_color = (220, 120, 40)  # Orange - warning
+        cog_color = (255, 150, 50)
+    else:
+        poly_color = (220, 60, 60)   # Red - unstable
+        cog_color = (255, 80, 80)
+    
+    # Calculate average foot height (Y coordinate) to draw polygon at floor level
+    avg_foot_y = sum(pos[1] for pos in foot_positions_3d) / len(foot_positions_3d)
+    
+    # Project polygon vertices to 2D at floor level (use actual foot Y height)
+    polygon_3d = [(pt[0], avg_foot_y, pt[1]) for pt in polygon]  # XZ to XYZ at floor
+    
+    # Apply body rotation
+    pitch_rad = math.radians(body_pitch_deg)
+    roll_rad = math.radians(body_roll_deg)
+    cos_p, sin_p = math.cos(pitch_rad), math.sin(pitch_rad)
+    cos_r, sin_r = math.cos(roll_rad), math.sin(roll_rad)
+    
+    def rotate_point(x, y, z):
+        """Apply pitch and roll rotation."""
+        # Roll around Z
+        x1 = x * cos_r - y * sin_r
+        y1 = x * sin_r + y * cos_r
+        z1 = z
+        # Pitch around X
+        y2 = y1 * cos_p - z1 * sin_p
+        z2 = y1 * sin_p + z1 * cos_p
+        return (x1, y2, z2)
+    
+    polygon_rotated = [rotate_point(p[0], p[1], p[2]) for p in polygon_3d]
+    
+    # Project to 2D
+    polygon_2d = project_3d_to_2d(
+        polygon_rotated, azimuth_deg, elevation_deg, center_x, center_y, scale
+    )
+    
+    # Draw polygon outline with slight offset below feet (draw first for layering)
+    poly_pts = [(int(p[0]), int(p[1])) for p in polygon_2d]
+    
+    # Draw filled polygon with alpha simulation (draw with lighter color)
+    fill_color = (poly_color[0] // 3, poly_color[1] // 3, poly_color[2] // 3)
+    draw.polygon(poly_pts, fill=fill_color, outline=poly_color)
+    
+    # Draw polygon edges (thicker for visibility)
+    n = len(poly_pts)
+    for i in range(n):
+        p1 = poly_pts[i]
+        p2 = poly_pts[(i + 1) % n]
+        draw.line([p1, p2], fill=poly_color, width=2)
+    
+    # Project and draw CoG point (projected to floor level)
+    cog_3d = rotate_point(0.0, avg_foot_y, 0.0)
+    cog_2d = project_3d_to_2d(
+        [cog_3d], azimuth_deg, elevation_deg, center_x, center_y, scale
+    )[0]
+    cog_x, cog_y = int(cog_2d[0]), int(cog_2d[1])
+    
+    # Draw CoG as crosshair with circle
+    cog_radius = 4
+    cross_size = 6
+    draw.ellipse(
+        (cog_x - cog_radius, cog_y - cog_radius,
+         cog_x + cog_radius, cog_y + cog_radius),
+        fill=cog_color, outline=(255, 255, 255)
+    )
+    draw.line([(cog_x - cross_size, cog_y), (cog_x + cross_size, cog_y)], 
+              fill=(255, 255, 255), width=1)
+    draw.line([(cog_x, cog_y - cross_size), (cog_x, cog_y + cross_size)], 
+              fill=(255, 255, 255), width=1)
+    
+    # Draw stability margin indicator (small text near CoG)
+    try:
+        font = get_font(8)
+        margin_text = f"{stability_margin:.0f}mm"
+        draw.text((cog_x + 8, cog_y - 4), margin_text, fill=cog_color, font=font)
+    except Exception:
+        pass  # Font not available, skip text
+    
+    return stability_margin
 
 
 # -----------------------------------------------------------------------------
@@ -1196,6 +1378,63 @@ def draw_battery_icon(
             draw.text((tx, ty), text, fill=text_color, font=font)
         except Exception:
             pass
+    
+    return img
+
+
+def draw_gait_indicator(
+    image: Image.Image,
+    gait_name: str,
+    x: int = 4,
+    y: int = 4,
+    alpha: float = 0.7,
+) -> Image.Image:
+    """Draw a small gait type indicator on the eyes display.
+    
+    Shows the first letter of the gait type (T=Tripod, W=Wave, R=Ripple, 
+    S=Stationary/Standing, F=Free) in the top-left corner.
+    
+    Args:
+        image: Base image to draw on (will be copied)
+        gait_name: Current gait name (e.g., "Tripod", "Wave")
+        x: X position from left
+        y: Y position from top
+        alpha: Transparency (0.0 = invisible, 1.0 = fully opaque)
+    
+    Returns:
+        Modified image with gait indicator overlay
+    """
+    if not gait_name:
+        return image
+    
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    
+    # Get first letter of gait name as abbreviation
+    abbrev = gait_name[0].upper() if gait_name else ""
+    
+    # Color based on gait type
+    gait_colors = {
+        "S": (100, 100, 100),   # Standing/Stationary - gray
+        "T": (0, 200, 100),     # Tripod - green
+        "W": (100, 150, 255),   # Wave - blue
+        "R": (255, 180, 0),     # Ripple - orange
+        "F": (200, 100, 255),   # Free - purple
+    }
+    base_color = gait_colors.get(abbrev, (150, 150, 150))
+    
+    # Apply alpha
+    text_color = tuple(int(c * alpha) for c in base_color)
+    shadow_color = tuple(int(20 * alpha) for _ in range(3))
+    
+    try:
+        font = get_font(14)
+        # Draw shadow for contrast
+        draw.text((x + 1, y + 1), abbrev, fill=shadow_color, font=font)
+        # Draw main text
+        draw.text((x, y), abbrev, fill=text_color, font=font)
+    except Exception:
+        pass
     
     return img
 
@@ -1580,6 +1819,8 @@ def draw_lcars_engineering_view(
     show_collision_overlay: bool = False,
     collision_active: bool = False,
     collision_pairs: List[Tuple[int, int]] = None,
+    show_support_polygon: bool = False,
+    stance_mask: List[bool] = None,
 ) -> Image.Image:
     """Draw LCARS-themed engineering view.
     
@@ -1725,6 +1966,8 @@ def draw_lcars_engineering_view(
             show_collision_overlay=show_collision_overlay,
             collision_active=collision_active,
             collision_pairs=collision_pairs,
+            show_support_polygon=show_support_polygon,
+            stance_mask=stance_mask,
         )
     else:
         avg_temp, avg_voltage, max_temp, hottest_label = draw_hexapod_heatmap(
@@ -1830,6 +2073,8 @@ def draw_engineering_view(
     joint_angles_valid: bool = False,
     view_azimuth: float = 0.0,
     view_elevation: float = 30.0,
+    show_support_polygon: bool = False,
+    stance_mask: List[bool] = None,
 ) -> Image.Image:
     """Draw the engineering view with IMU, ToF, and servo 3D visualization.
     
@@ -1921,6 +2166,8 @@ def draw_engineering_view(
             elevation_deg=view_elevation,
             body_pitch_deg=imu_pitch if imu_connected else 0.0,
             body_roll_deg=imu_roll if imu_connected else 0.0,
+            show_support_polygon=show_support_polygon,
+            stance_mask=stance_mask,
         )
     else:
         # Fallback to flat heatmap when no joint data
@@ -2501,6 +2748,10 @@ class DisplayThread(threading.Thread):
         self._collision_active = False        # True when collision warning/error active
         self._collision_pairs = []            # List of (leg_i, leg_j) pairs in collision
         
+        # Support polygon visualization (engineering display)
+        self._show_support_polygon = True     # Toggle support polygon overlay
+        self._stance_mask = [True] * 6        # Which legs are in stance (for support polygon)
+        
         # Display mode (EYES, ENGINEERING, MENU)
         self._display_mode = DisplayMode.EYES
         
@@ -2508,6 +2759,10 @@ class DisplayThread(threading.Thread):
         self._notification_text = ""
         self._notification_expire = 0.0  # monotonic time when notification expires
         self._notification_duration = 2.0  # default duration in seconds
+        
+        # Gait indicator overlay (small text showing current gait type)
+        self._gait_name = ""  # e.g. "Tripod", "Wave", "Free"
+        self._show_gait_indicator = True  # Enable gait indicator on eyes display
         
         # Startup suppression: prevent rendering until startup splash is complete
         self._startup_complete = False
@@ -2572,6 +2827,16 @@ class DisplayThread(threading.Thread):
         with self._lock:
             self._show_battery_icon = show
 
+    def set_gait_name(self, name: str) -> None:
+        """Set the current gait name for display indicator."""
+        with self._lock:
+            self._gait_name = name
+
+    def set_show_gait_indicator(self, show: bool) -> None:
+        """Enable or disable gait indicator on EYES display mode."""
+        with self._lock:
+            self._show_gait_indicator = show
+
     def set_engineering_lcars(self, use_lcars: bool) -> None:
         """Enable or disable LCARS theme for engineering display."""
         with self._lock:
@@ -2609,6 +2874,27 @@ class DisplayThread(threading.Thread):
             self._collision_active = active
             if pairs is not None:
                 self._collision_pairs = pairs
+
+    def set_support_polygon(self, enabled: bool) -> None:
+        """Enable or disable support polygon overlay in engineering view."""
+        with self._lock:
+            self._show_support_polygon = enabled
+
+    def toggle_support_polygon(self) -> bool:
+        """Toggle support polygon overlay and return new state."""
+        with self._lock:
+            self._show_support_polygon = not self._show_support_polygon
+            return self._show_support_polygon
+
+    def update_stance_mask(self, stance_mask: List[bool]) -> None:
+        """Update which legs are in stance for support polygon visualization.
+        
+        Args:
+            stance_mask: List of 6 booleans, True if leg is in stance.
+        """
+        with self._lock:
+            if stance_mask and len(stance_mask) == 6:
+                self._stance_mask = stance_mask[:]
 
     def set_base_vertical_offset(self, offset: float) -> None:
         """Update the baseline vertical eye offset used for joystick look."""
@@ -2781,9 +3067,15 @@ class DisplayThread(threading.Thread):
                     show_collision_overlay = self._show_collision_overlay
                     collision_active = self._collision_active
                     collision_pairs = self._collision_pairs[:]
+                    # Support polygon overlay state
+                    show_support_polygon = self._show_support_polygon
+                    stance_mask = self._stance_mask[:]
                     # Notification state
                     notification_text = self._notification_text
                     notification_expire = self._notification_expire
+                    # Gait indicator state
+                    gait_name = self._gait_name
+                    show_gait_indicator = self._show_gait_indicator
                     # Clear expired notifications
                     current_time = time.monotonic()
                     if notification_text and current_time >= notification_expire:
@@ -2900,6 +3192,8 @@ class DisplayThread(threading.Thread):
                                 show_collision_overlay=show_collision_overlay,
                                 collision_active=collision_active,
                                 collision_pairs=collision_pairs,
+                                show_support_polygon=show_support_polygon,
+                                stance_mask=stance_mask,
                             )
                         else:
                             display_image = draw_engineering_view(
@@ -2923,6 +3217,8 @@ class DisplayThread(threading.Thread):
                                 joint_angles_valid=joint_angles_valid,
                                 view_azimuth=view_azimuth,
                                 view_elevation=view_elevation,
+                                show_support_polygon=show_support_polygon,
+                                stance_mask=stance_mask,
                             )
                     elif display_mode == DisplayMode.MENU:
                         # Menu mode: just use eyes as base (menu overlays on top)
@@ -2964,6 +3260,13 @@ class DisplayThread(threading.Thread):
                                 voltage=self._filtered_voltage,
                                 volt_min=self._volt_min,
                                 volt_max=self._volt_max,
+                            )
+                        
+                        # Gait indicator overlay (top-left corner)
+                        if show_gait_indicator and gait_name:
+                            display_image = draw_gait_indicator(
+                                display_image,
+                                gait_name=gait_name,
                             )
                         
                         # Low battery warning bar (overrides icon when critical)

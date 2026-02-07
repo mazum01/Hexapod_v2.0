@@ -23,7 +23,7 @@ Leg Kinematic Chain (LegPoints returned by fk_leg):
     Visualization (side view):
 
         (hip)●─────────●(knee)
-             coxa        \\
+                coxa     \\
                           \\ femur
                            \\
                             ●(ankle)

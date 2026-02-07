@@ -635,11 +635,14 @@ def setup_gait_callbacks(menu: MarsMenu, ctx: SimpleNamespace) -> None:
         - get_gait_width_mm: callable returning float
         - start_gait: callable() to start gait
         - stop_gait: callable() to stop gait
+        - set_fg_margin_mm: callable(float) for FreeGait min margin
+        - set_fg_max_swings: callable(int) for FreeGait max simultaneous swings
+        - set_fg_speed_mm_s: callable(float) for FreeGait swing speed
     """
 
     def on_gait_type_change(val):
         if ctx.get_verbose():
-            gait_names = ["Tripod", "Wave", "Ripple", "Stationary"]
+            gait_names = ["Tripod", "Wave", "Ripple", "Stationary", "Free"]
             print(f"Gait type: {gait_names[val]}", end="\r\n")
 
     def on_step_height_change(val):
@@ -690,6 +693,25 @@ def setup_gait_callbacks(menu: MarsMenu, ctx: SimpleNamespace) -> None:
         ctx.stop_gait()
         if ctx.get_verbose():
             print("Gait stopped via menu", end="\r\n")
+    
+    # FreeGait (FG9) parameter callbacks
+    def on_fg_margin_change(val):
+        if hasattr(ctx, 'set_fg_margin_mm'):
+            ctx.set_fg_margin_mm(float(val))
+        if ctx.get_verbose():
+            print(f"FreeGait margin: {val}mm", end="\r\n")
+    
+    def on_fg_max_swing_change(val):
+        if hasattr(ctx, 'set_fg_max_swings'):
+            ctx.set_fg_max_swings(int(val))
+        if ctx.get_verbose():
+            print(f"FreeGait max swings: {val}", end="\r\n")
+    
+    def on_fg_speed_change(val):
+        if hasattr(ctx, 'set_fg_speed_mm_s'):
+            ctx.set_fg_speed_mm_s(float(val))
+        if ctx.get_verbose():
+            print(f"FreeGait swing speed: {val}mm/s", end="\r\n")
 
     # Register callbacks
     menu.set_callback(MenuCategory.GAIT, "Type", "on_change", on_gait_type_change)
@@ -697,6 +719,9 @@ def setup_gait_callbacks(menu: MarsMenu, ctx: SimpleNamespace) -> None:
     menu.set_callback(MenuCategory.GAIT, "Step Length", "on_change", on_step_length_change)
     menu.set_callback(MenuCategory.GAIT, "Turn Rate", "on_change", on_turn_rate_change)
     menu.set_callback(MenuCategory.GAIT, "Cycle Time", "on_change", on_cycle_time_change)
+    menu.set_callback(MenuCategory.GAIT, "FG Margin", "on_change", on_fg_margin_change)
+    menu.set_callback(MenuCategory.GAIT, "FG Max Swing", "on_change", on_fg_max_swing_change)
+    menu.set_callback(MenuCategory.GAIT, "FG Speed", "on_change", on_fg_speed_change)
     menu.set_callback(MenuCategory.GAIT, "Start Gait", "on_select", on_start_gait)
     menu.set_callback(MenuCategory.GAIT, "Stop Gait", "on_select", on_stop_gait)
 
@@ -1216,6 +1241,13 @@ def sync_gait_initial_values(menu: MarsMenu, ctx: SimpleNamespace) -> None:
     menu.set_value(MenuCategory.GAIT, "Step Height", int(ctx.get_gait_lift_mm()))
     menu.set_value(MenuCategory.GAIT, "Turn Rate", int(ctx.get_gait_turn_max_deg_s()))
     menu.set_value(MenuCategory.GAIT, "Cycle Time", int(ctx.get_gait_cycle_ms()))
+    # FreeGait (FG9) initial values
+    if hasattr(ctx, 'get_fg_margin_mm'):
+        menu.set_value(MenuCategory.GAIT, "FG Margin", int(ctx.get_fg_margin_mm()))
+    if hasattr(ctx, 'get_fg_max_swings'):
+        menu.set_value(MenuCategory.GAIT, "FG Max Swing", ctx.get_fg_max_swings())
+    if hasattr(ctx, 'get_fg_speed_mm_s'):
+        menu.set_value(MenuCategory.GAIT, "FG Speed", int(ctx.get_fg_speed_mm_s()))
 
 
 def sync_safety_initial_values(menu: MarsMenu, ctx: SimpleNamespace) -> None:

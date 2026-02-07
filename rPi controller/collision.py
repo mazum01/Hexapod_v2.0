@@ -428,20 +428,60 @@ def _point_in_polygon_xz(x: float, z: float, hull: np.ndarray) -> bool:
     return inside
 
 
+def _cfg_get_bool(collision_cfg: Any, key: str, default: bool) -> bool:
+    """Fetch a boolean collision tuning value from a config object or dict."""
+    if collision_cfg is None:
+        return default
+    if isinstance(collision_cfg, dict):
+        val = collision_cfg.get(key, default)
+        if val is None:
+            return default
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            return val.lower() in ('true', '1', 'yes')
+        return bool(val)
+    val = getattr(collision_cfg, key, default)
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ('true', '1', 'yes')
+    return bool(val)
+
+
 def check_body_collision(leg_chains: list[LegPoints], collision_cfg: Any = None) -> bool:
     """
     Check if legs intersect the body exclusion zone.
     
-    Uses actual body geometry from STL (convex hull in XZ plane) with:
-    1. Quick rejection: points outside bounding radius are safe
-    2. Quick accept: points inside inscribed radius definitely collide
-    3. Full polygon test for points in the "uncertain ring"
-    4. Height check: only flag collision if point is within body Y bounds
+    Modes:
+    - Simple keepout: circular zone of body_keepout_radius_mm (faster, avoids false positives)
+    - Full hull: uses actual body polygon from STL (more accurate, but may flag valid poses)
+    
+    Set body_use_simple_keepout=true in config for simple circular check.
     """
-    # Get configurable safety margin to add to body
+    # Check if simple circular keepout mode is enabled
+    use_simple = _cfg_get_bool(collision_cfg, 'body_use_simple_keepout', False)
     body_margin_mm = _cfg_get(collision_cfg, 'body_safety_margin_mm', DEFAULT_SAFETY_MARGIN_MM)
     
-    # Effective radii with margin
+    if use_simple:
+        # Simple circular keepout zone
+        keepout_r = _cfg_get(collision_cfg, 'body_keepout_radius_mm', DEFAULT_BODY_KEEPOUT_RADIUS_MM)
+        keepout_r_sq = (keepout_r + body_margin_mm) ** 2
+        
+        for chain in leg_chains:
+            for pt in [chain.knee, chain.ankle, chain.foot]:
+                x, y, z = pt[0], pt[1], pt[2]
+                # Height check: skip if point is above or below body
+                if y > BODY_Y_TOP_MM or y < BODY_Y_BOTTOM_MM:
+                    continue
+                dist_sq = x * x + z * z
+                if dist_sq < keepout_r_sq:
+                    return True
+        return False
+    
+    # Full hull-based check
     bounding_r_sq = (BODY_BOUNDING_RADIUS_MM + body_margin_mm) ** 2
     inscribed_r_sq = (BODY_INSCRIBED_RADIUS_MM - body_margin_mm) ** 2
     inscribed_r_sq = max(0.0, inscribed_r_sq)  # Clamp to avoid negative
@@ -480,16 +520,40 @@ def check_body_collision_detailed(leg_chains: list[LegPoints], collision_cfg: An
     Returns:
         (collision_detected, details_dict)
     """
+    use_simple = _cfg_get_bool(collision_cfg, 'body_use_simple_keepout', False)
     body_margin_mm = _cfg_get(collision_cfg, 'body_safety_margin_mm', DEFAULT_SAFETY_MARGIN_MM)
-    bounding_r_sq = (BODY_BOUNDING_RADIUS_MM + body_margin_mm) ** 2
-    inscribed_r_sq = max(0.0, (BODY_INSCRIBED_RADIUS_MM - body_margin_mm) ** 2)
     
     details = {
         'collision': False,
         'collision_point': None,
         'collision_leg': None,
         'min_distance_to_hull': float('inf'),
+        'mode': 'simple' if use_simple else 'hull',
     }
+    
+    if use_simple:
+        # Simple circular keepout zone
+        keepout_r = _cfg_get(collision_cfg, 'body_keepout_radius_mm', DEFAULT_BODY_KEEPOUT_RADIUS_MM)
+        keepout_r_sq = (keepout_r + body_margin_mm) ** 2
+        
+        for leg_idx, chain in enumerate(leg_chains):
+            for pt_name, pt in [('knee', chain.knee), ('ankle', chain.ankle), ('foot', chain.foot)]:
+                x, y, z = pt[0], pt[1], pt[2]
+                if y > BODY_Y_TOP_MM or y < BODY_Y_BOTTOM_MM:
+                    continue
+                dist_sq = x * x + z * z
+                dist = dist_sq ** 0.5
+                details['min_distance_to_hull'] = min(details['min_distance_to_hull'], dist - keepout_r)
+                if dist_sq < keepout_r_sq:
+                    details['collision'] = True
+                    details['collision_point'] = pt_name
+                    details['collision_leg'] = leg_idx
+                    return True, details
+        return False, details
+    
+    # Full hull-based check
+    bounding_r_sq = (BODY_BOUNDING_RADIUS_MM + body_margin_mm) ** 2
+    inscribed_r_sq = max(0.0, (BODY_INSCRIBED_RADIUS_MM - body_margin_mm) ** 2)
     
     for leg_idx, chain in enumerate(leg_chains):
         for pt_name, pt in [('knee', chain.knee), ('ankle', chain.ankle), ('foot', chain.foot)]:

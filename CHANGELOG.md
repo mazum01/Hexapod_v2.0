@@ -1,3 +1,163 @@
+## Python Controller 0.12.30 (b317) — 2026-02-06
+
+### FreeGait: Fixed Swing Trajectory (Bezier Curve)
+
+- **Root cause**: FreeGait used a 3-phase swing trajectory (lift → translate → place) where X/Z only changed during the middle 40% of the swing. TripodGait uses a 5-point Bezier curve where X/Z interpolate continuously throughout the swing.
+
+- **Symptom**: When walking forward, legs appeared to lift straight up, move sideways, then place down - not the smooth diagonal arc of TripodGait.
+
+- **Fix in `free_gait.py` - `plan_swing_trajectory()`**:
+  - Replaced 3-phase approach with 5-point Bezier curve matching TripodGait
+  - Control points: P0 (start) → P1 (slight overshoot back, small lift) → P2 (peak height, center) → P3 (overshoot forward, descending) → P4 (target)
+  - X, Y, Z now interpolate smoothly throughout the entire swing
+  - Bezier parameters match TripodGait: p1_height=0.15, p2_height=1.5, p3_height=0.35, overshoots=1.1
+
+---
+
+## Python Controller 0.12.29 (b316) — 2026-02-03
+
+### FreeGait: Fixed Walking Direction (Left-Side Corner Legs)
+
+- **Root cause**: The stride calculation was incorrectly adding the leg's base rotation angle to the heading. This caused left-side corner legs (LF, LR) to step 90° off from the intended direction.
+
+- **Key insight**: The leg's base rotation is already encoded in the neutral position (`neutral.x = base_x * cos(leg_angle)`). Adding it again to the stride rotation doubled the effect for some legs while canceling it for others.
+
+- **Fix in `free_gait.py` - `plan_foot_placement()`**:
+  - Stride direction now uses heading angle only
+  - Forward walking (heading=0): stride goes purely in +Z for all legs
+  - Strafe (heading=±90): stride goes in ±X for all legs
+  - Each leg's lateral position is maintained by its neutral.x
+
+- **Fix in `gait_engine.py` - `FreeGait._compute_leg_positions()`**:
+  - Same fix applied to stance translation velocity
+
+---
+
+## Python Controller 0.12.28 (b315) — 2026-02-02
+
+### I2C Touch Controller Error Handling
+
+- **Fixed Remote I/O error (errno 121)** in `cst816d.py`:
+  - Added OSError/IOError exception handling to all I2C read/write operations
+  - Touch sensor now gracefully handles intermittent I2C bus failures
+  - Added `_error_count` tracking for diagnostics
+
+- **Improved main loop debugging** in `controller.py`:
+  - Exception handler now prints full traceback when verbose mode is enabled
+  - Non-verbose mode still shows error message with hint to enable verbose
+
+---
+
+## Python Controller 0.12.27 (b314) — 2026-02-02
+
+### FreeGait: Transition Fix & Lift Height Alignment
+
+- **Gait transition fix** in `gait_engine.py`:
+  - FreeGait and StandingGait now transition immediately (no phase wait)
+  - Previously stuck waiting for `_phase` attribute that doesn't exist in event-driven gaits
+  - Added `isinstance(self._from_gait, (FreeGait, StandingGait))` check in `GaitTransition.tick()`
+
+- **Lift height alignment** in `free_gait.py`:
+  - Added `lift_attenuation=0.69` to PlacementConfig
+  - FreeGait effective lift now matches TripodGait (41.4mm vs 41.4mm)
+  - TripodGait uses 5-point Bezier with ~0.69 attenuation; FreeGait now applies same factor
+
+---
+
+## Python Controller 0.12.26 (b313) — 2026-01-25
+
+### FreeGait: Stance Translation & IMU Integration
+
+- **Stance leg translation** in `gait_engine.py`:
+  - Stance legs now push backward during stance phase (proportional to speed × heading)
+  - Enables continuous walking cycle (legs cycle from front → back → swing → front)
+  - Turn adjustment applied per-leg based on hip position (outside legs move faster)
+
+- **IMU state passing** in `controller.py`:
+  - FreeGait now receives pitch/roll from IMU for stability calculations
+  - CoG projection accounts for body tilt when computing support polygon margin
+
+- **Verified functionality**:
+  - Forward walk: legs cycle correctly with stance translation
+  - Strafe (heading=90°): X changes, Z stays at 0
+  - Turn (turn_rate=45°/s): left legs get larger stride for CW turn
+
+---
+
+## Python Controller 0.12.18 (b305) — 2026-01-16
+
+### Free Gait: FG6 Foot Placement Planner
+
+- **FG6 FootPlacementPlanner** in `free_gait.py`:
+  - `FootPlacementPlanner` class — computes target foot positions for swings
+  - `PlacementConfig` dataclass — stride length, lift height, turn gain
+  - `plan_foot_placement()` — heading/speed-based target with turn adjustment
+  - `plan_swing_trajectory()` — 3-phase lift/translate/place interpolation
+  - `get_neutral_position()` — returns standing pose for each leg
+  - Optional collision checker integration with fallback to neutral
+  - Neutral positions and hip positions defined for all 6 legs
+
+---
+
+## Python Controller 0.12.17 (b304) — 2026-01-16
+
+### Free Gait: FG5 Coordinator
+
+- **FG5 FreeGaitCoordinator** in `free_gait.py`:
+  - `FreeGaitCoordinator` class — orchestrates stability-aware leg coordination
+  - `CoordinatorConfig` dataclass — max_simultaneous_swings, margin thresholds
+  - `SwingPriority` enum — LONGEST_WAITING, ALTERNATING, DIRECTION_ALIGNED
+  - `tick()` — updates stability, handles emergencies, grants swing permissions
+  - `request_leg_swing()` — explicit swing request for external control
+  - Emergency hold logic: auto-plants all swinging legs when margin goes critical
+  - Unit tests for coordinator lifecycle, grants, emergency, and priority heuristics
+
+---
+
+## Python Controller 0.12.16 (b303) — 2026-01-16
+
+### Free Gait: FG4 Stability Margin Computation
+
+- **FG4 Stability Margin** in `free_gait.py`:
+  - `compute_stability_margin()` — signed distance from CoG to polygon edge
+  - `StabilityStatus` enum: STABLE, MARGINAL, CRITICAL, UNSTABLE
+  - `classify_stability()` — threshold-based status classification
+  - `check_swing_safe()` — test if lifting a leg maintains stability
+  - `get_stability_color()` — RGB color for visualization
+  - Default thresholds: MIN_STABILITY_MARGIN_MM=30, CRITICAL_MARGIN_MM=10
+
+---
+
+## Python Controller 0.12.15 (b302) — 2026-01-16
+
+### Free Gait: FG3 Center of Gravity Estimation
+
+- **FG3 CoG Estimation** in `free_gait.py`:
+  - `estimate_cog_simple()` — returns body center (0, 0, 0) for quasi-static walking
+  - `estimate_cog_weighted()` — weighted average including leg positions (3% mass per leg)
+  - `project_cog_to_ground()` — projects 3D CoG onto ground plane with IMU pitch/roll compensation
+  - `estimate_cog()` — main entry point combining simple/weighted estimation + ground projection
+- **Unit tests**: Added FG3 test section with symmetric/asymmetric leg positions, tilt projection, and integration with support polygon
+
+---
+
+## Python Controller 0.12.14 (b301) — 2026-01-16
+
+### Free Gait: FG1 Per-Leg State Machine + FG2 Support Polygon
+
+- **New module**: `free_gait.py` — foundation for adaptive event-driven locomotion.
+- **FG1 Per-Leg State Machine**:
+  - `LegState` enum: `STANCE`, `LIFT_PENDING`, `SWING`, `PLACING`
+  - `Leg` class with state transitions, contact tracking, timing, and status helpers
+  - Transition methods: `request_swing()`, `complete_lift()`, `begin_placing()`, `confirm_contact()`, `emergency_plant()`
+- **FG2 Support Polygon**:
+  - `convex_hull_2d()` — Andrew's monotone chain algorithm
+  - `compute_support_polygon()` — returns hull of stance feet in XZ plane
+  - `point_in_polygon()` — convex polygon containment test
+  - `distance_to_polygon_edge()` — stability margin (signed distance from CoG to nearest edge)
+
+---
+
 ## Python Controller 0.12.7 (b294) — 2026-01-13
 
 ### Config Parity: Collision Overlay Toggle
