@@ -70,12 +70,12 @@ TRIPOD_B = [LEG_LF, LEG_RM, LEG_LR]  # Left-front, Right-middle, Left-rear
 # Corner legs at ±45°, middle legs at 0°
 # Array indices: 0=LF, 1=LM, 2=LR, 3=RF, 4=RM, 5=RR
 LEG_BASE_ROTATION_DEG = [
-    -45.0,   # LF (Left Front): points forward-left, -45° from lateral
-    0.0,     # LM (Left Middle): points straight left, 0°
-    45.0,    # LR (Left Rear): points backward-left, +45° from lateral
-    45.0,    # RF (Right Front): points forward-right, +45° from lateral
-    0.0,     # RM (Right Middle): points straight right, 0°
-    -45.0,   # RR (Right Rear): points backward-right, -45° from lateral
+    45.0,    # LF (Left Front): +45° CCW from lateral (points forward-left)
+    0.0,     # LM (Left Middle): 0° (points straight left)
+    -45.0,   # LR (Left Rear): -45° CW from lateral (points backward-left)
+    45.0,    # RF (Right Front): +45° CCW from lateral (points forward-right)
+    0.0,     # RM (Right Middle): 0° (points straight right)
+    -45.0,   # RR (Right Rear): -45° CW from lateral (points backward-right)
 ]
 
 # Precompute sin/cos for each leg's base rotation
@@ -570,11 +570,15 @@ class TripodGait(GaitEngine):
 
         # Step 0
         # Calculate the rotation and translation constants
-        # Calculate the foot base position base on the base parameters and the leg base
-        base_z = -self.params.base_x_mm * LEG_BASE_SIN[leg] # + 0.0 * LEG_BASE_COS[leg]
-        base_x = self.params.base_x_mm * LEG_BASE_COS[leg] # + 0.0 * LEG_BASE_SIN[leg]
-        sign = 1.0 if leg in (LEG_LF, LEG_LM, LEG_LR) else -1.0
-        full_angle = math.radians(LEG_BASE_ROTATION_DEG[leg]) + sign * math.radians(walk_dir * 90.0)
+        # Note: X is positive for ALL legs - firmware mirrors IK output for left side
+        
+        # Calculate the foot base position based on the base parameters and the leg base
+        base_z = -self.params.base_x_mm * LEG_BASE_SIN[leg]
+        base_x = self.params.base_x_mm * LEG_BASE_COS[leg]
+        
+        # Walk direction sign: left legs add heading offset, right legs subtract
+        walk_sign = 1.0 if leg in (LEG_LF, LEG_LM, LEG_LR) else -1.0
+        full_angle = math.radians(LEG_BASE_ROTATION_DEG[leg]) + walk_sign * math.radians(walk_dir * 90.0)
         cos_angle = math.cos(full_angle)
         sin_angle = math.sin(full_angle)
 
@@ -741,10 +745,13 @@ class WaveGait(GaitEngine):
     
     def _apply_leg_rotation_simple(self, leg: int, base_x: float, stride_z: float, walk_dir: float) -> Tuple[float, float]:
         """Apply per-leg rotation (simplified version without debug return values)."""
+        # Note: X is positive for ALL legs - firmware mirrors IK output for left side
+        
         base_z = -self.params.base_x_mm * LEG_BASE_SIN[leg]
         base_x_calc = self.params.base_x_mm * LEG_BASE_COS[leg]
-        sign = 1.0 if leg in (LEG_LF, LEG_LM, LEG_LR) else -1.0
-        full_angle = math.radians(LEG_BASE_ROTATION_DEG[leg]) + sign * math.radians(walk_dir * 90.0)
+        
+        walk_sign = 1.0 if leg in (LEG_LF, LEG_LM, LEG_LR) else -1.0
+        full_angle = math.radians(LEG_BASE_ROTATION_DEG[leg]) + walk_sign * math.radians(walk_dir * 90.0)
         cos_angle = math.cos(full_angle)
         sin_angle = math.sin(full_angle)
         
@@ -907,10 +914,13 @@ class RippleGait(GaitEngine):
     
     def _apply_leg_rotation_simple(self, leg: int, base_x: float, stride_z: float, walk_dir: float) -> Tuple[float, float]:
         """Apply per-leg rotation (simplified version without debug return values)."""
+        # Note: X is positive for ALL legs - firmware mirrors IK output for left side
+        
         base_z = -self.params.base_x_mm * LEG_BASE_SIN[leg]
         base_x_calc = self.params.base_x_mm * LEG_BASE_COS[leg]
-        sign = 1.0 if leg in (LEG_LF, LEG_LM, LEG_LR) else -1.0
-        full_angle = math.radians(LEG_BASE_ROTATION_DEG[leg]) + sign * math.radians(walk_dir * 90.0)
+        
+        walk_sign = 1.0 if leg in (LEG_LF, LEG_LM, LEG_LR) else -1.0
+        full_angle = math.radians(LEG_BASE_ROTATION_DEG[leg]) + walk_sign * math.radians(walk_dir * 90.0)
         cos_angle = math.cos(full_angle)
         sin_angle = math.sin(full_angle)
         
@@ -1336,7 +1346,8 @@ class FreeGait(GaitEngine):
         import math
         
         # Leg base rotation angles (matching TripodGait's LEG_BASE_ROTATION_DEG)
-        LEG_ROTATIONS_DEG = [-45.0, 0.0, 45.0, 45.0, 0.0, -45.0]
+        # LF=45°, LM=0°, LR=-45°, RF=45°, RM=0°, RR=-45°
+        LEG_ROTATIONS_DEG = [45.0, 0.0, -45.0, 45.0, 0.0, -45.0]
         
         for i, leg in enumerate(self._fg_legs):
             if leg.state == FreeGaitLegState.STANCE:

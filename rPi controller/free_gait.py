@@ -338,19 +338,19 @@ def create_legs(base_x_mm: float = 120.0,
     
     # Leg base rotation angles (matching gait_engine.py LEG_BASE_ROTATION_DEG)
     # 0=LF, 1=LM, 2=LR, 3=RF, 4=RM, 5=RR
-    LEG_ROTATIONS_DEG = [-45.0, 0.0, 45.0, 45.0, 0.0, -45.0]
+    LEG_ROTATIONS_DEG = [45.0, 0.0, -45.0, 45.0, 0.0, -45.0]
     
     legs = []
     for i in range(NUM_LEGS):
         leg = Leg(index=i)
         
         # Use TripodGait coordinate convention:
-        # X = base_x_mm * cos(angle) - always positive (outward reach)
+        # X = base_x_mm * cos(angle) - positive for all legs (firmware mirrors left side)
         # Z = 0 at neutral (stride offset is applied during movement)
         angle_rad = math.radians(LEG_ROTATIONS_DEG[i])
         cos_a = math.cos(angle_rad)
         
-        # X is the outward reach (always positive, firmware mirrors for L/R)
+        # X is positive for ALL legs - firmware handles left-side mirroring
         x = base_x_mm * cos_a
         
         # Z is stride offset (0 at neutral)
@@ -1550,13 +1550,15 @@ NEUTRAL_FOOT_POSITIONS: List[Tuple[float, float, float]] = [
 ]
 
 # Hip mount positions (XZ) for computing turn-adjusted strides
+# X positive = right side of body, X negative = left side
+# Z positive = front, Z negative = rear
 HIP_POSITIONS_XZ: List[Tuple[float, float]] = [
-    (60.0, 80.0),    # LF
-    (75.0, 0.0),     # LM
-    (60.0, -80.0),   # LR
-    (-60.0, 80.0),   # RF
-    (-75.0, 0.0),    # RM
-    (-60.0, -80.0),  # RR
+    (-60.0, 80.0),   # LF: left-front
+    (-75.0, 0.0),    # LM: left-middle
+    (-60.0, -80.0),  # LR: left-rear
+    (60.0, 80.0),    # RF: right-front
+    (75.0, 0.0),     # RM: right-middle
+    (60.0, -80.0),   # RR: right-rear
 ]
 
 
@@ -1620,12 +1622,12 @@ class FootPlacementPlanner:
         self._collision_checker = collision_checker
         
         # Initialize neutral positions using TripodGait coordinate convention:
-        # - X is always POSITIVE (outward reach, firmware handles L/R mirroring)
+        # - Left-side legs (LF, LM, LR) have negative X; right-side have positive X
         # - Z is stride offset (0 at neutral)
         import math
         
         # Leg base rotation angles (matching gait_engine.py LEG_BASE_ROTATION_DEG)
-        LEG_ROTATIONS_DEG = [-45.0, 0.0, 45.0, 45.0, 0.0, -45.0]
+        LEG_ROTATIONS_DEG = [45.0, 0.0, -45.0, 45.0, 0.0, -45.0]
         
         # Apply "offset model" shift to middle legs (Mostafa et al. 2012)
         offset_z = self.config.middle_leg_offset_z_mm
@@ -1635,7 +1637,7 @@ class FootPlacementPlanner:
             angle_rad = math.radians(LEG_ROTATIONS_DEG[i])
             cos_a = math.cos(angle_rad)
             
-            # X = outward reach (always positive, scaled by cos for corner legs)
+            # X is positive for ALL legs - firmware handles left-side mirroring
             x = self.config.base_x_mm * cos_a
             
             # Z = 0 at neutral (stride offset applied during movement)
@@ -1699,7 +1701,7 @@ class FootPlacementPlanner:
             return target
         
         # Leg base rotation angles (matching gait_engine.py LEG_BASE_ROTATION_DEG)
-        LEG_ROTATIONS_DEG = [-45.0, 0.0, 45.0, 45.0, 0.0, -45.0]
+        LEG_ROTATIONS_DEG = [45.0, 0.0, -45.0, 45.0, 0.0, -45.0]
         
         # Compute stride magnitude (body-frame forward/back distance)
         stride_magnitude = self.config.step_len_mm * abs(speed_scale)
@@ -1716,14 +1718,17 @@ class FootPlacementPlanner:
         # Apply per-leg rotation (matching TripodGait's _apply_leg_rotation exactly)
         # This rotates the stride vector by (leg_angle + sign * walk_dir * 90)
         # where walk_dir = heading / 90 (normalized -1 to +1)
-        sign = 1.0 if leg_idx in (0, 1, 2) else -1.0  # Left legs vs right legs
+        
+        # Walk direction sign: left legs add heading offset, right legs subtract
+        walk_sign = 1.0 if leg_idx in (0, 1, 2) else -1.0
         walk_dir = heading_deg / 90.0  # Normalize heading to -1..+1
-        full_angle_rad = math.radians(LEG_ROTATIONS_DEG[leg_idx]) + sign * math.radians(walk_dir * 90.0)
+        full_angle_rad = math.radians(LEG_ROTATIONS_DEG[leg_idx]) + walk_sign * math.radians(walk_dir * 90.0)
         
         cos_angle = math.cos(full_angle_rad)
         sin_angle = math.sin(full_angle_rad)
         
         # Rotate stride by full_angle (matching TripodGait)
+        # X is positive for ALL legs - firmware handles left-side mirroring
         stride_x_prime = adjusted_stride * sin_angle
         stride_z_prime = adjusted_stride * cos_angle
         
