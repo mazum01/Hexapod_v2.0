@@ -6,6 +6,14 @@ FORMAT: `YYYY-MM-DD  <summary>`
 
 ## Entries
 
+2026-02-07  v0.12.33 b320: FreeGait: Fixed LEG_ROTATIONS_DEG in `_compute_leg_positions()` - was `[-45,0,45,45,0,-45]` but should be `[45,0,-45,45,0,-45]` matching TripodGait. The wrong values caused left corner legs (LF, LR) to step 90° off the intended direction of travel.
+
+2026-02-07  v0.12.32 b319: Gait: REVERTED v0.12.31 X-sign changes. X coordinates must be POSITIVE for all legs - firmware mirrors IK output for left side. The negative X from b318 caused left legs to swing inward and crash into body/adjacent legs. Removed `side_sign` from gait_engine.py and free_gait.py.
+
+2026-02-03  v0.12.31 b318: [REVERTED in b319] Gait critical fix: Left-side legs (LF, LM, LR) now generate negative X coordinates in body frame. Previously all legs had positive X, causing robot to turn in place instead of walking straight (90° rotation error). Added `side_sign` multiplier (-1 for left, +1 for right) in `gait_engine.py` (_apply_leg_rotation in TripodGait, _apply_leg_rotation_simple in WaveGait/RippleGait) and `free_gait.py` (create_legs, FootPlacementPlanner, plan_foot_placement). Fixed HIP_POSITIONS_XZ to have negative X for left legs.
+
+2026-02-03  v0.12.30 b317: FreeGait: Fixed Bezier swing trajectory calculation. Target coordinates were incorrectly subtracted from start instead of vice versa, causing swing to move away from target. Now correctly computes `dx/dz = target - start`.
+
 2026-02-03  v0.12.29 b316: FreeGait: Fixed left-side corner legs stepping 90° off. Stride direction now uses heading only (not leg base rotation, which is already encoded in neutral position). Forward walking now correctly moves all legs in +Z direction.
 
 2026-02-02  v0.12.28 b315: Fixed I2C Remote I/O error (errno 121) from touch controller (cst816d.py). Added OSError/IOError handling to all I2C read/write operations. Also added traceback printing to main loop exception handler for easier debugging of future unhandled exceptions.

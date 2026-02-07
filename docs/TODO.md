@@ -562,6 +562,15 @@ Goal: Replace fixed-phase cyclic gaits with an event-driven free gait that adapt
 - [x] **Gait transition** (v0.12.27): FreeGait/StandingGait now transition immediately (no phase wait).
 - [x] **Lift height alignment** (v0.12.27): Added lift_attenuation=0.69 to match TripodGait effective lift (41.4mm).
 
+### FG9c. Gait Coordinate System Fixes ✅ COMPLETE (v0.12.31)
+- [x] **Left-side X mirroring** (v0.12.31): All gaits now generate negative X for left-side legs (LF, LM, LR) and positive X for right-side legs (RF, RM, RR). Fixed 90° rotation error where robot turned in place instead of walking straight.
+- [x] **side_sign variable**: Added `-1.0` multiplier for left legs, `+1.0` for right legs in:
+  - `gait_engine.py`: `_apply_leg_rotation()` (TripodGait), `_apply_leg_rotation_simple()` (WaveGait/RippleGait)
+  - `free_gait.py`: `create_legs()`, `FootPlacementPlanner.__init__()`, `plan_foot_placement()`
+- [x] **HIP_POSITIONS_XZ**: Corrected to have negative X for left legs, positive for right.
+- [x] **Bezier swing fix** (v0.12.30): Target coordinates now correctly computed as `target - start` (not `start - target`).
+- [x] **LEG_ROTATIONS_DEG** (v0.12.29): Corrected to `[45, 0, -45, 45, 0, -45]` consistent with TripodGait's `LEG_BASE_ROTATION_DEG`.
+
 ### FG10. Foot Switch Integration (Firmware + Telemetry)
 - [ ] **Firmware**: Wire 6 foot contact switches to Teensy digital inputs
 - [ ] **Firmware**: Implement S4 telemetry frame (already stubbed):

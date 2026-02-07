@@ -4,6 +4,7 @@
 # CHANGE LOG (Python Controller)
 # Format: YYYY-MM-DD  Summary
 # REMINDER: Update CONTROLLER_VERSION below with every behavioral change, feature addition, or bug fix!
+# 2026-02-03  v0.12.31 b318: Gait critical fix: Left-side legs (LF, LM, LR) now generate negative X coordinates in body frame. Previously all legs had positive X, causing robot to turn in place instead of walking straight. Added side_sign (-1 for left, +1 for right) in gait_engine.py (TripodGait, WaveGait, RippleGait) and free_gait.py. Fixed HIP_POSITIONS_XZ.
 # 2026-01-16  v0.12.10 b297: Diagnostics: Added optional collision pose compare CSV log (cmd FEET → IK/FK vs S6 joint telemetry → FK) to debug collision non-triggers.
 # 2026-01-12  v0.12.5 b292: Bugfix: Fixed FK in kinematics.py to use correct geometry (was producing wrong joint positions). Collision detection now correctly identifies adjacent leg collisions during tight turns. Unified FK code - display_thread.py now imports from kinematics.py.
 # 2026-01-12  v0.12.4 b291: Bugfix: Right stick disable now also disables autonomy (prevents re-enable). Collision warnings now show which legs/body are involved.
@@ -316,12 +317,14 @@
 # 2026-02-02  v0.12.27 b314: FreeGait: Fixed gait transition (FreeGait/StandingGait now transition immediately, no phase wait). Aligned lift height with TripodGait via lift_attenuation=0.69.
 # 2026-02-02  v0.12.28 b315: Fixed I2C Remote I/O error (errno 121) from touch controller by adding OSError handling in cst816d.py. Added traceback to main loop exception handler.
 # 2026-02-03  v0.12.29 b316: FreeGait: Fixed walking direction - now matches TripodGait's _apply_leg_rotation exactly: stride rotated by (leg_angle + sign*walk_dir*90), Z output is rotated stride only (not neutral.z + stride).
+# 2026-02-07  v0.12.33 b320: FreeGait: Fixed LEG_ROTATIONS_DEG in _compute_leg_positions() - was [-45,0,45,...] but should be [45,0,-45,...] matching TripodGait. Caused left corner legs to step 90° off direction.
+# 2026-02-07  v0.12.32 b319: Gait: Reverted X-sign changes from b318. X must be POSITIVE for all legs - firmware mirrors IK for left side. Negative X caused left legs to crash into body/each other.
 # 2026-02-06  v0.12.30 b317: FreeGait: Fixed swing trajectory - replaced 3-phase (lift/translate/place) with 5-point Bezier curve matching TripodGait. X/Z now interpolate continuously throughout swing instead of only during middle 40%.
 #----------------------------------------------------------------------------------------------------------------------
 # Controller semantic version (bump on behavior-affecting changes)
-CONTROLLER_VERSION = "0.12.30"
+CONTROLLER_VERSION = "0.12.33"
 # Monotonic build number (never resets across minor/major version changes; increment every code edit)
-CONTROLLER_BUILD = 317
+CONTROLLER_BUILD = 320
 #----------------------------------------------------------------------------------------------------------------------
 
 # Firmware version string for UI/banner display.
