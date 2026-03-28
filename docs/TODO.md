@@ -706,6 +706,21 @@ Goal: Replace fixed-phase cyclic gaits with an event-driven free gait that adapt
 
 ### Sensor Integration
 
+- [ ] BMS UART integration (DALY H Series Smart BMS)
+  - Hardware: DALY 3S 40A/60A Li-ion BMS with UART (9600 baud, 8N1)
+  - Wiring: BMS TX→Pi RX (GPIO15), BMS GND→Pi GND (confirm 3.3V TTL)
+  - Create `bms_sensor.py` module (follows IMU/ToF pattern):
+    - Threaded polling at ~1 Hz (Layer 3 timing)
+    - DALY protocol: request/response frames with checksum
+    - Parse: pack voltage, current, SoC%, cell voltages (3S), temps, protection flags
+  - Integration hooks:
+    - Replace servo-inferred voltage with real pack voltage
+    - Add current draw to telemetry/dashboard
+    - Per-cell voltage display (balance health monitoring)
+    - Protection flag alerts (OVP/UVP/OCP/OTP)
+  - Config: `[bms]` section in controller.ini (enabled, port, poll_hz)
+  - Battery pack: 6× 21700 Li-ion (3S2P), 11.1V nominal, ~10Ah
+
 - [ ] ToF stereo fusion
   - Merge left/right sensor data into unified obstacle representation
   - Polar occupancy grid (12 sectors × 10 distance bins)

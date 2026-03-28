@@ -1,0 +1,1013 @@
+Starting MARS Hexapod (Legacy Wrapper)...
+[?1049h[22;0;0t[1;12r(B[m[4l[?7h[?1h=[H[2JMARS - Modular Autonomous Robotic System
+Firmware 0.2.42/b158 · Controller 0.12.18/b305
+IMU thread started at 100.0 Hz (bus 3, addr 0x4A)
+ToF sensors initializing (bus 3, resolution 8x8)...
+  front_left: 0x29
+  front_right: 0x30
+[ToF] Initializing sensor 'front_left' at 0x29...
+[ToF] I2C probe OK at 0x29, starting firmware upload...
+[ToF] Sensor 'front_left' initialized OK
+[ToF] Initializing sensor 'front_right' at 0x30...
+[ToF] Sensor 'front_right' init failed: I2C probe failed at 0x30: [Errno 121] Remote I/O error
+ToF thread started at 15.0 Hz (1 sensor(s))
+PointCloudServer started (mode=accumulate):
+  HTTP viewer: http://0.0.0.0:8080/
+  WebSocket:   ws://0.0.0.0:8765
+Point cloud viewer: http://0.0.0.0:8080/
+Point cloud WebSocket: ws://0.0.0.0:8765
+[TelemetryServer] HTTP port 8080 in use (point cloud may be serving)
+[TelemetryServer] HTTP: http://0.0.0.0:8080
+[TelemetryServer] WebSocket: ws://0.0.0.0:8766
+Dashboard WebSocket: ws://0.0.0.0:8766
+Dashboard viewer: http://0.0.0.0:8080/dashboard
+[AudioManager] Initialized: (44100, -16, 2)
+[AudioManager] Queue worker started
+[AudioManager] Preloaded 37 sounds
+Audio initialized: device=hw:2,0, volume=70%
+TTS initialized: engine=piper, model=en_US-lessac-medium, gain=+10dB
+Display thread started at 30.0 Hz (blink divisor: 2)
+Searching for Teensy...
+USB Serial, /dev/ttyACM0 - Teensyduino - USB Serial
+Teensy found on port: /dev/ttyACM0
+Connected to Teensy on /dev/ttyACM0 at 1000000 baud
+[JOY_CLIENT] Connected to /tmp/mars_joy.sock
+[JOY_CLIENT] Connection closed by server
+[JOY_CLIENT] Connected to /tmp/mars_joy.sock
+Xbox controller connected
+
+Start button pressed (cycle display)
+  Display mode: ENGINEERING
+
+LB button pressed
+[send_cmd] SENT cmd='b'LEG ALL ENABLE'' force=True throttle_ms=50.0 t=1768673871.704
+[send_cmd] SENT cmd='b'ENABLE'' force=True throttle_ms=50.0 t=1768673871.704
+
+LB: Gait engine STARTED (tripod)
+[collision] Loaded learned model from /home/starter/OneDrive/Projects/Robots/Hexapod_v2.0/rPi controller/assets/collision_model.onnx
+[LVL] R:+2.2° P:+0.7° max_corr:4.3mm
+[LVL] R:+2.2° P:+0.6° max_corr:4.1mm
+[COLLISION DEBUG] positions: LF:(81,-148,11) LM:(130,-134,-15) LR:(103,-146,11) RF:(51,-142,-41) RM:(130,-154,50) RR:(132,-141,-41)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:9mm) (WARN)
+[COLLISION DEBUG] positions: LF:(81,-148,11) LM:(130,-132,-14) LR:(102,-146,11) RF:(52,-140,-40) RM:(130,-154,48) RR:(132,-138,-40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(82,-148,10) LM:(130,-130,-14) LR:(102,-146,10) RF:(53,-138,-39) RM:(130,-154,46) RR:(131,-136,-39)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(82,-148,10) LM:(130,-128,-14) LR:(102,-146,10) RF:(54,-136,-38) RM:(130,-154,44) RR:(130,-134,-38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(83,-148,9) LM:(130,-125,-13) LR:(101,-146,9) RF:(54,-133,-38) RM:(130,-154,42) RR:(130,-131,-38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(83,-148,9) LM:(130,-123,-13) LR:(101,-146,9) RF:(55,-131,-37) RM:(130,-154,40) RR:(128,-129,-37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(84,-148,8) LM:(130,-120,-12) LR:(100,-146,8) RF:(56,-128,-36) RM:(130,-154,38) RR:(128,-126,-36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(84,-148,8) LM:(130,-118,-12) LR:(100,-146,8) RF:(58,-126,-34) RM:(130,-154,37) RR:(126,-124,-34)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(84,-148,7) LM:(130,-115,-12) LR:(99,-146,7) RF:(59,-123,-33) RM:(130,-154,35) RR:(125,-121,-33)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:9mm) (WARN)
+[LVL] R:+2.3° P:+0.6° max_corr:4.2mm
+[COLLISION DEBUG] positions: LF:(100,-148,-8) LM:(130,-113,11) LR:(84,-146,-8) RF:(126,-121,34) RM:(130,-154,-38) RR:(58,-119,34)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(100,-148,-8) LM:(130,-116,11) LR:(84,-146,-8) RF:(128,-124,36) RM:(130,-154,-41) RR:(56,-121,36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(100,-148,-8) LM:(130,-118,11) LR:(84,-146,-8) RF:(129,-126,37) RM:(130,-154,-43) RR:(55,-124,37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(101,-148,-9) LM:(130,-121,11) LR:(83,-146,-9) RF:(130,-129,38) RM:(130,-154,-45) RR:(54,-126,38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(101,-148,-9) LM:(130,-123,11) LR:(83,-146,-9) RF:(131,-131,40) RM:(130,-154,-47) RR:(52,-129,40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(101,-148,-9) LM:(130,-126,12) LR:(83,-146,-9) RF:(132,-134,40) RM:(130,-154,-49) RR:(51,-132,40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(102,-148,-10) LM:(130,-128,12) LR:(82,-146,-10) RF:(133,-136,41) RM:(130,-154,-51) RR:(51,-134,41)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(102,-148,-10) LM:(130,-131,12) LR:(82,-146,-10) RF:(134,-139,42) RM:(130,-154,-54) RR:(50,-137,42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(102,-148,-10) LM:(130,-134,12) LR:(82,-146,-10) RF:(135,-142,43) RM:(130,-154,-56) RR:(49,-139,43)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:7mm) (WARN)
+[LVL] R:+2.2° P:+0.7° max_corr:4.2mm
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-131,-3) LR:(97,-146,5) RF:(46,-139,-46) RM:(130,-154,56) RR:(138,-137,-46)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-128,-3) LR:(97,-146,5) RF:(47,-136,-45) RM:(130,-154,53) RR:(137,-134,-45)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-126,-3) LR:(97,-146,5) RF:(48,-134,-44) RM:(130,-154,51) RR:(136,-132,-44)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-124,-3) LR:(97,-146,5) RF:(49,-132,-43) RM:(130,-154,48) RR:(135,-130,-43)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-121,-3) LR:(96,-146,4) RF:(50,-129,-42) RM:(130,-154,46) RR:(133,-127,-42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-118,-2) LR:(96,-146,4) RF:(52,-126,-40) RM:(130,-154,44) RR:(132,-125,-40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-116,-2) LR:(96,-146,4) RF:(53,-124,-39) RM:(130,-154,42) RR:(131,-122,-39)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-114,-2) LR:(96,-146,4) RF:(55,-122,-37) RM:(130,-154,39) RR:(129,-120,-37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-111,-2) LR:(96,-146,4) RF:(56,-119,-36) RM:(130,-154,37) RR:(128,-117,-36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-107,3) LR:(88,-146,-4) RF:(127,-116,35) RM:(130,-154,-39) RR:(57,-113,35)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-110,3) LR:(88,-146,-4) RF:(129,-118,37) RM:(130,-154,-41) RR:(55,-116,37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-112,3) LR:(88,-146,-4) RF:(130,-120,38) RM:(130,-154,-44) RR:(54,-118,38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-5) LM:(130,-114,3) LR:(87,-146,-5) RF:(132,-123,40) RM:(130,-154,-46) RR:(52,-120,40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(97,-148,-5) LM:(130,-117,3) LR:(87,-146,-5) RF:(133,-125,41) RM:(130,-154,-48) RR:(51,-123,41)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(97,-148,-5) LM:(130,-120,3) LR:(87,-146,-5) RF:(134,-128,42) RM:(130,-154,-50) RR:(49,-126,42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(97,-148,-5) LM:(130,-122,3) LR:(87,-146,-5) RF:(136,-131,44) RM:(130,-154,-53) RR:(48,-128,44)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(98,-148,-6) LM:(130,-125,3) LR:(86,-146,-6) RF:(137,-133,45) RM:(130,-154,-55) RR:(47,-131,45)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(98,-148,-6) LM:(130,-128,3) LR:(86,-146,-6) RF:(138,-136,46) RM:(130,-154,-57) RR:(46,-133,46)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(98,-148,-6) LM:(130,-130,3) LR:(86,-146,-6) RF:(139,-138,47) RM:(130,-154,-60) RR:(45,-136,47)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(98,-148,-6) LM:(130,-133,4) LR:(86,-146,-6) RF:(139,-141,47) RM:(130,-154,-62) RR:(45,-138,47)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:9mm) (WARN)
+[COLLISION DEBUG] positions: LF:(99,-148,-7) LM:(130,-140,4) LR:(85,-146,-7) RF:(140,-148,49) RM:(130,-154,-69) RR:(43,-146,49)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(99,-148,-7) LM:(130,-142,4) LR:(85,-146,-7) RF:(141,-151,49) RM:(130,-154,-71) RR:(43,-148,49)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(99,-148,-7) LM:(130,-144,4) LR:(84,-146,-7) RF:(141,-153,49) RM:(130,-154,-74) RR:(43,-150,49)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(100,-148,-8) LM:(130,-146,4) LR:(84,-146,-8) RF:(140,-154,48) RM:(130,-154,-76) RR:(43,-152,48)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[LVL] R:+2.3° P:+0.7° max_corr:4.4mm
+[COLLISION DEBUG] positions: LF:(88,-147,4) LM:(130,-146,2) LR:(96,-144,4) RF:(41,-154,-51) RM:(130,-153,82) RR:(143,-152,-51)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-146,2) LR:(96,-146,4) RF:(40,-154,-52) RM:(130,-154,82) RR:(144,-152,-52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-146,2) LR:(96,-146,4) RF:(40,-154,-52) RM:(130,-154,80) RR:(144,-151,-52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-144,2) LR:(96,-146,4) RF:(40,-153,-52) RM:(130,-154,78) RR:(144,-150,-52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-143,2) LR:(96,-146,4) RF:(40,-151,-52) RM:(130,-154,75) RR:(144,-149,-52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-141,2) LR:(96,-146,4) RF:(40,-150,-52) RM:(130,-154,73) RR:(144,-148,-52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-140,2) LR:(96,-146,4) RF:(40,-148,-52) RM:(130,-154,70) RR:(144,-146,-52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-138,2) LR:(95,-146,4) RF:(41,-146,-51) RM:(130,-154,68) RR:(143,-144,-51)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-147,3) LM:(130,-136,2) LR:(95,-146,3) RF:(41,-144,-51) RM:(130,-154,65) RR:(143,-142,-51)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-147,3) LM:(130,-133,2) LR:(95,-146,3) RF:(42,-142,-50) RM:(130,-154,63) RR:(142,-140,-50)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-147,3) LM:(130,-129,2) LR:(95,-146,3) RF:(44,-137,-48) RM:(130,-154,58) RR:(140,-136,-48)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-147,3) LM:(130,-126,2) LR:(95,-146,3) RF:(45,-135,-47) RM:(130,-154,55) RR:(139,-133,-47)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-147,3) LM:(130,-124,2) LR:(95,-146,3) RF:(46,-132,-46) RM:(130,-154,53) RR:(138,-131,-46)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-147,3) LM:(130,-121,2) LR:(94,-146,3) RF:(47,-130,-45) RM:(130,-154,50) RR:(136,-128,-45)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-147,2) LM:(130,-119,2) LR:(94,-146,2) RF:(49,-128,-43) RM:(130,-154,48) RR:(135,-126,-43)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(90,-147,2) LM:(130,-116,2) LR:(94,-146,2) RF:(50,-125,-42) RM:(130,-154,45) RR:(134,-124,-42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(90,-147,2) LM:(130,-114,2) LR:(94,-146,2) RF:(52,-123,-40) RM:(130,-154,43) RR:(132,-121,-40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(90,-147,2) LM:(130,-111,2) LR:(94,-146,2) RF:(54,-120,-38) RM:(130,-155,40) RR:(130,-119,-38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(90,-147,2) LM:(130,-109,2) LR:(94,-146,2) RF:(55,-118,-37) RM:(130,-155,38) RR:(129,-116,-37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(90,-147,2) LM:(130,-107,2) LR:(94,-146,2) RF:(57,-116,-35) RM:(130,-155,36) RR:(127,-114,-35)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:8mm) (WARN)
+[LVL] R:+2.3° P:+0.8° max_corr:4.2mm
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-104,-2) LR:(90,-146,-2) RF:(127,-112,35) RM:(130,-154,-39) RR:(57,-110,35)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-107,-2) LR:(90,-146,-2) RF:(129,-114,37) RM:(130,-154,-41) RR:(55,-112,37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-109,-2) LR:(90,-146,-2) RF:(131,-117,39) RM:(130,-154,-44) RR:(53,-114,39)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-111,-2) LR:(90,-146,-2) RF:(132,-119,40) RM:(130,-154,-46) RR:(52,-117,40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-114,-2) LR:(89,-146,-2) RF:(134,-122,42) RM:(130,-154,-49) RR:(50,-119,42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-116,-2) LR:(89,-146,-3) RF:(136,-124,44) RM:(130,-154,-51) RR:(48,-122,44)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-119,-2) LR:(89,-146,-3) RF:(137,-127,45) RM:(130,-154,-54) RR:(47,-124,45)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-122,-2) LR:(89,-146,-3) RF:(138,-130,46) RM:(130,-154,-56) RR:(46,-127,46)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-124,-2) LR:(89,-146,-3) RF:(140,-132,48) RM:(130,-154,-59) RR:(44,-130,48)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-127,-2) LR:(89,-146,-3) RF:(141,-135,49) RM:(130,-154,-61) RR:(43,-132,49)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY, RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-130,-2) LR:(89,-146,-3) RF:(142,-138,50) RM:(130,-154,-64) RR:(42,-135,50)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY, RM-RR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-132,-2) LR:(88,-146,-3) RF:(142,-140,50) RM:(130,-154,-66) RR:(42,-138,50)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-134,-2) LR:(88,-146,-4) RF:(143,-143,51) RM:(130,-154,-69) RR:(41,-140,51)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-137,-2) LR:(88,-146,-4) RF:(144,-145,52) RM:(130,-154,-71) RR:(40,-142,52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-139,-2) LR:(88,-146,-4) RF:(144,-148,52) RM:(130,-154,-74) RR:(40,-145,52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-142,-2) LR:(88,-146,-4) RF:(144,-150,52) RM:(130,-154,-76) RR:(40,-147,52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-144,-2) LR:(88,-146,-4) RF:(144,-152,52) RM:(130,-154,-78) RR:(40,-149,52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-146,-2) LR:(88,-146,-4) RF:(144,-154,52) RM:(130,-154,-81) RR:(40,-151,52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-146,-2) LR:(88,-146,-4) RF:(144,-154,52) RM:(130,-154,-82) RR:(40,-152,52)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-146,-2) LR:(88,-145,-4) RF:(142,-154,50) RM:(130,-153,-82) RR:(42,-152,50)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-146,-4) LM:(130,-146,-2) LR:(88,-144,-4) RF:(141,-154,49) RM:(130,-152,-82) RR:(43,-152,49)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[COLLISION DEBUG] positions: LF:(85,-148,7) LM:(130,-146,-2) LR:(98,-146,7) RF:(42,-154,-50) RM:(130,-154,78) RR:(141,-152,-50)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (BODY) (WARN)
+[LVL] R:+2.4° P:+0.6° max_corr:4.4mm
+[COLLISION DEBUG] positions: LF:(86,-148,6) LM:(130,-130,-3) LR:(97,-146,6) RF:(47,-138,-45) RM:(130,-154,54) RR:(137,-136,-45)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-127,-3) LR:(97,-146,5) RF:(48,-136,-44) RM:(130,-154,52) RR:(136,-134,-44)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-125,-3) LR:(97,-146,5) RF:(49,-133,-43) RM:(130,-154,50) RR:(135,-131,-43)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-122,-3) LR:(97,-146,5) RF:(50,-131,-42) RM:(130,-154,48) RR:(134,-129,-42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,4) LM:(130,-120,-3) LR:(96,-146,4) RF:(51,-128,-41) RM:(130,-154,45) RR:(133,-126,-41)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-117,-3) LR:(96,-146,4) RF:(52,-126,-40) RM:(130,-154,43) RR:(131,-124,-40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-115,-3) LR:(96,-146,4) RF:(54,-124,-38) RM:(130,-154,41) RR:(130,-122,-38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-112,-3) LR:(96,-146,4) RF:(56,-121,-36) RM:(130,-154,38) RR:(128,-119,-36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-110,-2) LR:(96,-146,4) RF:(57,-119,-35) RM:(130,-154,36) RR:(127,-117,-35)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-110,-3) LR:(90,-145,-2) RF:(126,-119,34) RM:(130,-154,-39) RR:(58,-116,34)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-113,-2) LR:(90,-145,-2) RF:(128,-121,36) RM:(130,-154,-42) RR:(56,-118,36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-116,-1) LR:(89,-145,-2) RF:(130,-124,38) RM:(130,-154,-44) RR:(54,-121,38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-118,-1) LR:(89,-145,-3) RF:(131,-126,39) RM:(130,-154,-47) RR:(53,-123,39)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-121,-1) LR:(89,-145,-3) RF:(133,-129,41) RM:(130,-154,-49) RR:(51,-126,41)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-123,-1) LR:(89,-145,-3) RF:(134,-132,42) RM:(130,-154,-51) RR:(50,-129,42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-4) LM:(130,-126,-1) LR:(88,-145,-4) RF:(135,-134,43) RM:(130,-154,-54) RR:(49,-131,43)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-128,-0) LR:(88,-145,-4) RF:(136,-137,44) RM:(130,-154,-56) RR:(48,-134,44)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-131,-0) LR:(88,-145,-4) RF:(137,-140,45) RM:(130,-154,-58) RR:(47,-136,45)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(96,-148,-4) LM:(130,-134,-0) LR:(88,-145,-4) RF:(137,-142,45) RM:(130,-154,-60) RR:(46,-139,45)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:8mm) (WARN)
+[LVL] R:+2.2° P:+0.9° max_corr:4.6mm
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-131,10) LR:(91,-146,-1) RF:(48,-139,-44) RM:(130,-154,54) RR:(136,-136,-44)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-128,10) LR:(91,-146,-1) RF:(49,-137,-43) RM:(130,-154,52) RR:(135,-134,-43)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-126,9) LR:(91,-146,-1) RF:(50,-134,-42) RM:(130,-154,49) RR:(134,-132,-42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-124,9) LR:(91,-146,-1) RF:(51,-132,-41) RM:(130,-154,47) RR:(133,-129,-41)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-121,9) LR:(91,-146,-1) RF:(52,-129,-40) RM:(130,-154,45) RR:(132,-127,-40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-119,8) LR:(91,-146,-1) RF:(54,-127,-38) RM:(130,-154,43) RR:(130,-124,-38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-116,8) LR:(91,-146,-1) RF:(55,-124,-37) RM:(130,-154,40) RR:(129,-122,-37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-114,8) LR:(91,-146,-1) RF:(56,-122,-36) RM:(130,-154,38) RR:(127,-119,-36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(93,-148,-1) LM:(130,-111,8) LR:(91,-146,-1) RF:(58,-120,-34) RM:(130,-154,36) RR:(126,-117,-34)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(86,-148,6) LM:(130,-117,-18) LR:(98,-146,6) RF:(125,-126,33) RM:(130,-154,-40) RR:(59,-123,33)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(86,-148,6) LM:(130,-120,-19) LR:(98,-146,6) RF:(126,-128,34) RM:(130,-154,-42) RR:(58,-125,34)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(86,-148,6) LM:(130,-122,-19) LR:(98,-146,6) RF:(127,-131,35) RM:(130,-154,-44) RR:(57,-128,35)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(85,-148,7) LM:(130,-125,-20) LR:(98,-146,7) RF:(128,-133,36) RM:(130,-154,-46) RR:(56,-130,36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(85,-148,7) LM:(130,-128,-20) LR:(99,-146,7) RF:(129,-136,37) RM:(130,-154,-48) RR:(55,-133,37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(85,-148,7) LM:(130,-130,-20) LR:(99,-146,7) RF:(129,-139,37) RM:(130,-154,-50) RR:(55,-136,37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(84,-148,7) LM:(130,-133,-21) LR:(99,-146,7) RF:(130,-141,38) RM:(130,-154,-52) RR:(54,-138,38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(84,-148,8) LM:(130,-135,-21) LR:(100,-146,8) RF:(130,-144,38) RM:(130,-154,-54) RR:(54,-141,38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(84,-148,8) LM:(130,-138,-21) LR:(100,-146,8) RF:(131,-146,39) RM:(130,-154,-56) RR:(53,-143,39)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:8mm) (WARN)
+[LVL] R:+2.2° P:+0.8° max_corr:4.5mm
+[COLLISION DEBUG] positions: LF:(104,-148,-12) LM:(130,-136,29) LR:(80,-146,-12) RF:(60,-144,-32) RM:(130,-154,44) RR:(124,-142,-32)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(104,-148,-12) LM:(130,-134,29) LR:(80,-146,-12) RF:(60,-142,-31) RM:(130,-154,42) RR:(123,-140,-31)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(103,-148,-11) LM:(130,-132,28) LR:(81,-146,-11) RF:(61,-140,-31) RM:(130,-154,40) RR:(123,-137,-31)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(103,-148,-11) LM:(130,-129,28) LR:(81,-146,-11) RF:(62,-138,-30) RM:(130,-154,39) RR:(122,-135,-30)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:8mm) (WARN)
+[LVL] R:+2.2° P:+0.7° max_corr:4.4mm
+[COLLISION DEBUG] positions: LF:(90,-148,2) LM:(130,-111,-11) LR:(94,-146,2) RF:(126,-120,34) RM:(130,-154,-40) RR:(58,-117,34)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(90,-148,2) LM:(130,-114,-11) LR:(94,-146,2) RF:(128,-122,36) RM:(130,-154,-42) RR:(56,-119,36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(90,-148,2) LM:(130,-116,-12) LR:(94,-146,2) RF:(129,-124,37) RM:(130,-154,-44) RR:(55,-122,37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(90,-148,2) LM:(130,-119,-12) LR:(94,-146,2) RF:(130,-127,38) RM:(130,-154,-46) RR:(54,-124,38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-148,2) LM:(130,-122,-12) LR:(94,-146,2) RF:(131,-130,40) RM:(130,-154,-49) RR:(52,-127,40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-148,3) LM:(130,-124,-12) LR:(94,-146,3) RF:(132,-132,40) RM:(130,-154,-51) RR:(51,-130,40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-148,3) LM:(130,-127,-13) LR:(95,-146,3) RF:(133,-135,42) RM:(130,-154,-53) RR:(50,-132,42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-148,3) LM:(130,-129,-13) LR:(95,-146,3) RF:(134,-138,42) RM:(130,-154,-55) RR:(50,-135,42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-148,3) LM:(130,-132,-13) LR:(95,-146,3) RF:(135,-140,43) RM:(130,-154,-58) RR:(49,-138,43)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(89,-148,3) LM:(130,-134,-13) LR:(95,-146,3) RF:(136,-143,44) RM:(130,-154,-60) RR:(48,-140,44)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:8mm) (WARN)
+[LVL] R:+2.2° P:+0.7° max_corr:4.3mm
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-132,13) LR:(89,-146,-3) RF:(50,-141,-42) RM:(130,-154,53) RR:(134,-138,-42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-130,13) LR:(89,-146,-3) RF:(51,-138,-41) RM:(130,-154,51) RR:(133,-136,-41)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(95,-148,-3) LM:(130,-128,13) LR:(89,-146,-3) RF:(52,-136,-40) RM:(130,-154,48) RR:(132,-133,-40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-3) LM:(130,-125,12) LR:(89,-146,-3) RF:(53,-133,-39) RM:(130,-154,46) RR:(131,-131,-39)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-123,12) LR:(90,-146,-2) RF:(54,-131,-38) RM:(130,-154,44) RR:(130,-128,-38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-120,12) LR:(90,-146,-2) RF:(55,-128,-37) RM:(130,-154,42) RR:(129,-126,-37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-118,11) LR:(90,-146,-2) RF:(56,-126,-36) RM:(130,-154,40) RR:(128,-123,-36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-115,11) LR:(90,-146,-2) RF:(58,-124,-34) RM:(130,-154,38) RR:(126,-121,-34)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(94,-148,-2) LM:(130,-113,11) LR:(90,-146,-2) RF:(59,-121,-33) RM:(130,-154,36) RR:(125,-118,-33)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RF-RM:9mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-113,-14) LR:(95,-146,4) RF:(125,-121,34) RM:(130,-154,-40) RR:(58,-118,34)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-115,-14) LR:(96,-146,4) RF:(127,-124,35) RM:(130,-154,-42) RR:(57,-121,35)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-118,-14) LR:(96,-146,4) RF:(128,-126,36) RM:(130,-154,-44) RR:(56,-124,36)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-120,-15) LR:(96,-146,4) RF:(129,-129,37) RM:(130,-154,-46) RR:(55,-126,37)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-123,-15) LR:(96,-146,4) RF:(130,-132,38) RM:(130,-154,-48) RR:(54,-129,38)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(88,-148,4) LM:(130,-126,-16) LR:(96,-146,4) RF:(131,-134,39) RM:(130,-154,-50) RR:(53,-132,39)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-128,-16) LR:(96,-146,5) RF:(132,-137,40) RM:(130,-154,-52) RR:(52,-134,40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-131,-16) LR:(97,-146,5) RF:(132,-139,40) RM:(130,-154,-54) RR:(51,-137,40)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-134,-17) LR:(97,-146,5) RF:(133,-142,41) RM:(130,-154,-56) RR:(51,-139,41)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(87,-148,5) LM:(130,-136,-17) LR:(97,-146,5) RF:(133,-144,42) RM:(130,-154,-58) RR:(50,-142,42)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (RM-RR:8mm) (WARN)
+[LVL] R:+2.2° P:+0.8° max_corr:4.4mm
+[LVL] R:+2.2° P:+0.8° max_corr:4.3mm
+[COLLISION DEBUG] positions: LF:(130,-148,-22) LM:(114,-122,62) LR:(70,-146,-38) RF:(87,-131,-3) RM:(133,-154,10) RR:(95,-128,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(131,-148,-23) LM:(113,-125,64) LR:(69,-146,-40) RF:(87,-133,-3) RM:(133,-154,10) RR:(95,-131,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(133,-148,-24) LM:(113,-128,65) LR:(68,-146,-41) RF:(87,-136,-3) RM:(133,-154,11) RR:(95,-133,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(135,-148,-25) LM:(112,-130,66) LR:(67,-146,-43) RF:(87,-138,-3) RM:(133,-154,11) RR:(95,-136,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(136,-148,-26) LM:(112,-133,68) LR:(66,-146,-44) RF:(87,-141,-3) RM:(133,-154,11) RR:(95,-138,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(138,-148,-27) LM:(112,-135,68) LR:(65,-146,-46) RF:(87,-144,-3) RM:(133,-154,12) RR:(95,-141,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(140,-148,-28) LM:(112,-138,69) LR:(64,-146,-48) RF:(87,-146,-3) RM:(133,-154,12) RR:(95,-143,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(142,-148,-29) LM:(112,-140,69) LR:(63,-146,-50) RF:(87,-148,-3) RM:(133,-154,12) RR:(95,-146,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(143,-148,-30) LM:(112,-142,70) LR:(62,-146,-51) RF:(87,-150,-3) RM:(133,-154,13) RR:(95,-148,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(145,-148,-31) LM:(112,-144,70) LR:(61,-146,-53) RF:(87,-152,-3) RM:(134,-154,13) RR:(95,-150,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(147,-148,-32) LM:(112,-146,69) LR:(60,-146,-55) RF:(87,-154,-3) RM:(134,-154,14) RR:(95,-152,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(147,-148,-32) LM:(112,-146,69) LR:(60,-145,-55) RF:(88,-154,-3) RM:(134,-154,13) RR:(94,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(147,-147,-32) LM:(112,-146,67) LR:(60,-144,-55) RF:(88,-154,-2) RM:(134,-153,13) RR:(94,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(147,-146,-32) LM:(113,-146,65) LR:(60,-143,-55) RF:(88,-154,-2) RM:(134,-151,13) RR:(94,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(147,-144,-32) LM:(113,-146,63) LR:(60,-142,-55) RF:(88,-154,-2) RM:(134,-150,13) RR:(94,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(147,-142,-32) LM:(114,-146,61) LR:(60,-140,-55) RF:(88,-154,-2) RM:(134,-148,13) RR:(94,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(146,-141,-32) LM:(114,-146,58) LR:(60,-138,-54) RF:(88,-154,-2) RM:(134,-146,13) RR:(94,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(146,-139,-31) LM:(115,-146,56) LR:(61,-136,-54) RF:(88,-154,-2) RM:(133,-144,13) RR:(94,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(145,-136,-31) LM:(116,-146,54) LR:(61,-134,-53) RF:(89,-154,-2) RM:(133,-142,13) RR:(94,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(144,-134,-30) LM:(116,-146,52) LR:(61,-132,-52) RF:(89,-154,-2) RM:(133,-140,12) RR:(94,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(41,-125,30) LM:(143,-146,-50) LR:(122,-123,51) RF:(94,-154,1) RM:(127,-131,-11) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(40,-128,30) LM:(144,-146,-52) LR:(122,-125,52) RF:(94,-154,1) RM:(127,-134,-11) RR:(90,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(39,-130,31) LM:(144,-146,-55) LR:(123,-128,53) RF:(94,-154,2) RM:(127,-136,-11) RR:(90,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(38,-133,32) LM:(145,-146,-57) LR:(124,-131,54) RF:(94,-154,2) RM:(127,-139,-12) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(37,-136,32) LM:(145,-146,-59) LR:(124,-133,55) RF:(95,-154,2) RM:(127,-141,-12) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-138,32) LM:(146,-146,-61) LR:(124,-136,56) RF:(95,-154,2) RM:(127,-144,-12) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-140,33) LM:(147,-146,-63) LR:(125,-138,56) RF:(95,-154,2) RM:(127,-146,-12) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-143,33) LM:(147,-146,-65) LR:(125,-140,56) RF:(95,-154,2) RM:(127,-148,-12) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-145,33) LM:(148,-146,-68) LR:(125,-142,56) RF:(95,-154,2) RM:(127,-151,-12) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-147,33) LM:(148,-146,-70) LR:(125,-144,56) RF:(95,-154,2) RM:(127,-153,-12) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-148,33) LM:(149,-146,-71) LR:(125,-146,56) RF:(95,-154,2) RM:(127,-154,-12) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(37,-148,32) LM:(149,-146,-72) LR:(124,-146,55) RF:(95,-154,2) RM:(127,-154,-11) RR:(90,-151,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(38,-148,31) LM:(149,-144,-72) LR:(123,-146,54) RF:(95,-153,2) RM:(127,-154,-11) RR:(90,-150,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(40,-148,30) LM:(149,-143,-72) LR:(122,-146,52) RF:(95,-151,2) RM:(127,-154,-11) RR:(90,-149,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(42,-148,29) LM:(149,-142,-72) LR:(121,-146,50) RF:(95,-150,2) RM:(127,-154,-10) RR:(90,-147,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(44,-148,28) LM:(149,-140,-71) LR:(120,-146,48) RF:(95,-148,2) RM:(127,-154,-10) RR:(90,-146,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(45,-148,27) LM:(148,-138,-71) LR:(119,-146,47) RF:(95,-146,2) RM:(128,-154,-10) RR:(90,-144,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:3mm) (WARN)
+[LVL] R:+2.1° P:+0.7° max_corr:4.2mm
+[COLLISION DEBUG] positions: LF:(47,-148,26) LM:(148,-136,-70) LR:(118,-146,45) RF:(95,-144,2) RM:(128,-154,-9) RR:(90,-142,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(49,-148,25) LM:(148,-134,-69) LR:(117,-146,43) RF:(95,-142,2) RM:(128,-154,-9) RR:(90,-139,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(129,-148,-22) LM:(114,-119,63) LR:(70,-146,-37) RF:(90,-127,-1) RM:(132,-154,7) RR:(93,-124,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(131,-148,-23) LM:(113,-122,64) LR:(69,-146,-39) RF:(90,-130,-1) RM:(132,-154,8) RR:(93,-127,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(133,-148,-24) LM:(113,-124,66) LR:(68,-146,-41) RF:(90,-132,-1) RM:(132,-154,8) RR:(93,-130,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(134,-148,-25) LM:(112,-127,68) LR:(67,-146,-42) RF:(90,-135,-1) RM:(132,-154,8) RR:(93,-132,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(136,-148,-26) LM:(112,-129,69) LR:(66,-146,-44) RF:(90,-138,-1) RM:(132,-154,8) RR:(93,-135,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(138,-148,-27) LM:(112,-132,70) LR:(65,-146,-46) RF:(90,-140,-1) RM:(132,-154,9) RR:(93,-138,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(140,-148,-28) LM:(111,-134,71) LR:(64,-146,-48) RF:(90,-143,-1) RM:(132,-154,9) RR:(93,-140,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(141,-148,-29) LM:(111,-137,72) LR:(63,-146,-49) RF:(90,-145,-1) RM:(132,-154,10) RR:(93,-142,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(143,-148,-30) LM:(111,-139,72) LR:(62,-146,-51) RF:(90,-148,-1) RM:(133,-154,10) RR:(93,-145,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(145,-148,-31) LM:(111,-142,72) LR:(61,-146,-53) RF:(90,-150,-1) RM:(133,-154,10) RR:(93,-147,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(146,-148,-32) LM:(111,-144,72) LR:(60,-146,-55) RF:(90,-152,-1) RM:(133,-154,10) RR:(93,-149,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(148,-148,-33) LM:(111,-146,72) LR:(59,-146,-56) RF:(90,-154,-1) RM:(133,-154,11) RR:(93,-151,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(149,-148,-33) LM:(111,-146,72) LR:(59,-146,-57) RF:(90,-154,-1) RM:(133,-154,11) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(149,-147,-34) LM:(112,-146,70) LR:(58,-145,-57) RF:(90,-154,-1) RM:(133,-153,11) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(149,-146,-34) LM:(112,-146,68) LR:(58,-144,-57) RF:(90,-154,-1) RM:(133,-152,11) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(149,-145,-34) LM:(113,-146,66) LR:(58,-142,-57) RF:(90,-154,-1) RM:(133,-150,11) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(149,-143,-33) LM:(113,-146,63) LR:(59,-140,-57) RF:(90,-154,-1) RM:(133,-149,11) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(148,-142,-33) LM:(114,-146,61) LR:(59,-139,-57) RF:(90,-154,-1) RM:(133,-147,11) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(148,-140,-33) LM:(115,-146,59) LR:(59,-137,-56) RF:(90,-154,-1) RM:(133,-145,11) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(147,-137,-32) LM:(115,-146,57) LR:(60,-135,-55) RF:(90,-154,-1) RM:(133,-143,11) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(146,-135,-32) LM:(116,-146,55) LR:(60,-132,-54) RF:(90,-154,-1) RM:(133,-141,10) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(146,-133,-31) LM:(116,-146,52) LR:(61,-130,-54) RF:(90,-154,-1) RM:(133,-138,10) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:8mm) (WARN)
+[LVL] R:+2.2° P:+0.8° max_corr:4.5mm
+[COLLISION DEBUG] positions: LF:(40,-122,29) LM:(144,-146,-49) LR:(121,-119,52) RF:(92,-154,0) RM:(128,-127,-8) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(38,-125,30) LM:(144,-146,-51) LR:(122,-122,53) RF:(92,-154,0) RM:(128,-130,-8) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(37,-127,31) LM:(145,-146,-54) LR:(122,-124,55) RF:(92,-155,0) RM:(128,-133,-8) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-130,31) LM:(146,-146,-56) LR:(123,-127,56) RF:(92,-154,0) RM:(128,-135,-8) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(35,-132,32) LM:(147,-146,-58) LR:(124,-130,57) RF:(92,-154,0) RM:(128,-138,-8) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(34,-135,32) LM:(147,-146,-60) LR:(124,-132,58) RF:(92,-154,0) RM:(128,-140,-9) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(33,-138,33) LM:(148,-146,-62) LR:(124,-135,59) RF:(92,-154,0) RM:(128,-143,-9) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(32,-140,33) LM:(149,-146,-65) LR:(125,-137,60) RF:(92,-155,0) RM:(128,-145,-9) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(32,-142,33) LM:(149,-146,-67) LR:(125,-139,60) RF:(92,-155,0) RM:(128,-148,-9) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(32,-145,33) LM:(150,-146,-69) LR:(125,-142,60) RF:(92,-155,0) RM:(128,-150,-9) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(32,-147,33) LM:(151,-146,-72) LR:(125,-144,60) RF:(92,-155,0) RM:(128,-152,-9) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(32,-148,33) LM:(152,-146,-74) LR:(125,-145,60) RF:(92,-155,0) RM:(128,-154,-9) RR:(92,-152,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(33,-148,32) LM:(152,-146,-74) LR:(124,-145,59) RF:(92,-154,0) RM:(128,-154,-8) RR:(92,-151,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(34,-148,32) LM:(152,-145,-74) LR:(123,-145,58) RF:(92,-153,0) RM:(128,-154,-8) RR:(92,-150,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-148,30) LM:(152,-144,-74) LR:(122,-145,56) RF:(92,-152,0) RM:(128,-154,-8) RR:(92,-149,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(38,-148,30) LM:(152,-142,-74) LR:(121,-146,54) RF:(92,-150,0) RM:(128,-154,-8) RR:(92,-148,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(40,-148,28) LM:(152,-141,-74) LR:(120,-146,52) RF:(92,-149,0) RM:(128,-154,-7) RR:(92,-146,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(42,-148,28) LM:(151,-139,-73) LR:(119,-146,50) RF:(92,-147,0) RM:(128,-154,-7) RR:(92,-144,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(44,-148,26) LM:(151,-137,-72) LR:(118,-146,48) RF:(92,-145,0) RM:(128,-154,-7) RR:(92,-142,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(45,-148,26) LM:(151,-135,-71) LR:(117,-146,47) RF:(92,-143,0) RM:(128,-154,-7) RR:(92,-140,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(47,-148,24) LM:(150,-132,-70) LR:(116,-145,45) RF:(92,-141,0) RM:(128,-154,-6) RR:(92,-138,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(131,-148,-21) LM:(111,-118,64) LR:(71,-146,-39) RF:(92,-126,-0) RM:(132,-154,6) RR:(92,-123,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(132,-148,-22) LM:(111,-121,65) LR:(70,-146,-41) RF:(92,-129,-0) RM:(132,-154,6) RR:(92,-126,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(134,-148,-23) LM:(110,-123,67) LR:(69,-146,-42) RF:(92,-132,-0) RM:(132,-154,6) RR:(92,-129,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(136,-148,-24) LM:(110,-126,69) LR:(68,-146,-44) RF:(92,-134,-0) RM:(132,-154,6) RR:(92,-131,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(138,-148,-25) LM:(110,-128,70) LR:(67,-146,-46) RF:(92,-137,-0) RM:(132,-154,6) RR:(92,-134,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(140,-148,-26) LM:(109,-131,71) LR:(66,-146,-48) RF:(92,-139,-0) RM:(132,-154,7) RR:(92,-137,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(142,-148,-27) LM:(109,-134,72) LR:(65,-146,-50) RF:(92,-142,-0) RM:(132,-154,7) RR:(92,-139,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(144,-148,-28) LM:(109,-136,73) LR:(64,-146,-52) RF:(92,-144,-0) RM:(132,-154,7) RR:(92,-142,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(145,-148,-29) LM:(108,-138,74) LR:(63,-146,-54) RF:(92,-147,-0) RM:(132,-154,7) RR:(92,-144,-0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(148,-148,-30) LM:(108,-141,75) LR:(62,-146,-56) RF:(92,-149,0) RM:(132,-154,7) RR:(92,-146,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(150,-148,-32) LM:(108,-143,75) LR:(60,-146,-58) RF:(92,-151,0) RM:(132,-154,7) RR:(92,-148,0)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(152,-148,-33) LM:(108,-145,75) LR:(59,-146,-60) RF:(92,-153,0) RM:(132,-154,7) RR:(92,-150,1)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(153,-148,-33) LM:(108,-146,75) LR:(58,-146,-61) RF:(93,-154,0) RM:(132,-154,7) RR:(92,-152,1)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[LVL] R:+2.2° P:+0.8° max_corr:4.5mm
+[COLLISION DEBUG] positions: LF:(153,-148,-34) LM:(108,-146,75) LR:(58,-146,-61) RF:(93,-154,1) RM:(132,-154,7) RR:(91,-152,1)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(154,-148,-34) LM:(108,-146,76) LR:(58,-146,-62) RF:(93,-154,1) RM:(132,-154,7) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(154,-148,-34) LM:(108,-146,75) LR:(58,-145,-62) RF:(94,-154,1) RM:(132,-153,6) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(155,-147,-34) LM:(109,-146,73) LR:(58,-144,-63) RF:(94,-154,1) RM:(132,-152,6) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(155,-145,-35) LM:(109,-146,71) LR:(57,-142,-63) RF:(94,-154,1) RM:(132,-151,5) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(155,-144,-35) LM:(110,-146,69) LR:(57,-141,-63) RF:(94,-154,1) RM:(132,-149,5) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(155,-142,-34) LM:(111,-146,66) LR:(57,-139,-63) RF:(94,-154,1) RM:(131,-148,5) RR:(90,-152,3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(154,-140,-34) LM:(111,-146,64) LR:(58,-137,-62) RF:(94,-154,1) RM:(131,-146,5) RR:(90,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(154,-138,-34) LM:(112,-146,62) LR:(58,-135,-62) RF:(94,-154,1) RM:(131,-144,5) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(153,-136,-33) LM:(113,-146,60) LR:(58,-133,-61) RF:(94,-154,1) RM:(131,-142,5) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(152,-134,-33) LM:(113,-146,57) LR:(59,-131,-60) RF:(94,-154,1) RM:(131,-139,4) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(151,-131,-32) LM:(114,-146,55) LR:(60,-129,-59) RF:(94,-154,1) RM:(131,-137,4) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(150,-129,-32) LM:(115,-146,52) LR:(60,-126,-58) RF:(94,-154,1) RM:(131,-135,4) RR:(91,-152,2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:9mm) (WARN)
+[COLLISION DEBUG] positions: LF:(39,-118,29) LM:(144,-146,-49) LR:(121,-116,53) RF:(90,-155,-1) RM:(129,-124,-4) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(37,-121,30) LM:(145,-146,-51) LR:(122,-118,55) RF:(90,-154,-1) RM:(129,-126,-4) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(35,-124,31) LM:(146,-146,-53) LR:(123,-121,57) RF:(90,-154,-1) RM:(129,-129,-4) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(34,-126,32) LM:(146,-146,-56) LR:(124,-123,58) RF:(90,-154,-1) RM:(129,-132,-4) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(32,-129,33) LM:(147,-146,-58) LR:(124,-126,60) RF:(90,-154,-1) RM:(129,-134,-4) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(31,-132,33) LM:(148,-146,-60) LR:(125,-129,61) RF:(89,-154,-1) RM:(129,-137,-4) RR:(93,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(30,-134,34) LM:(148,-146,-63) LR:(126,-131,62) RF:(89,-154,-1) RM:(129,-140,-5) RR:(93,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(30,-137,34) LM:(149,-146,-65) LR:(126,-134,62) RF:(89,-154,-2) RM:(129,-142,-5) RR:(93,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(29,-139,34) LM:(150,-146,-67) LR:(126,-136,63) RF:(89,-154,-2) RM:(129,-144,-5) RR:(93,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(28,-142,35) LM:(150,-146,-70) LR:(127,-139,64) RF:(89,-154,-2) RM:(129,-147,-5) RR:(94,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(28,-144,35) LM:(151,-146,-72) LR:(127,-141,64) RF:(89,-154,-2) RM:(129,-149,-5) RR:(94,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(28,-146,35) LM:(152,-146,-74) LR:(127,-143,64) RF:(89,-154,-2) RM:(129,-151,-5) RR:(94,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(28,-148,35) LM:(152,-146,-77) LR:(127,-145,64) RF:(89,-154,-2) RM:(129,-153,-5) RR:(94,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(28,-148,35) LM:(153,-146,-78) LR:(127,-146,63) RF:(89,-154,-2) RM:(129,-154,-5) RR:(94,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(30,-148,34) LM:(153,-145,-78) LR:(126,-146,62) RF:(89,-154,-2) RM:(129,-154,-5) RR:(94,-151,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(32,-148,33) LM:(153,-144,-78) LR:(124,-146,60) RF:(89,-152,-2) RM:(129,-154,-4) RR:(94,-149,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(34,-148,32) LM:(153,-143,-78) LR:(124,-146,58) RF:(89,-151,-2) RM:(129,-154,-4) RR:(94,-148,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(36,-148,30) LM:(153,-141,-78) LR:(122,-146,56) RF:(89,-149,-2) RM:(129,-154,-4) RR:(94,-146,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:0mm) (WARN)
+[COLLISION DEBUG] positions: LF:(38,-148,29) LM:(152,-139,-77) LR:(121,-146,54) RF:(89,-148,-2) RM:(129,-154,-4) RR:(94,-145,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:1mm) (WARN)
+[COLLISION DEBUG] positions: LF:(40,-148,28) LM:(152,-137,-76) LR:(120,-146,52) RF:(89,-146,-2) RM:(129,-154,-4) RR:(94,-143,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:2mm) (WARN)
+[COLLISION DEBUG] positions: LF:(42,-148,27) LM:(152,-135,-75) LR:(119,-146,50) RF:(89,-144,-2) RM:(129,-154,-4) RR:(93,-141,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(44,-148,26) LM:(152,-133,-74) LR:(118,-146,48) RF:(89,-141,-1) RM:(129,-154,-4) RR:(93,-138,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(46,-148,25) LM:(151,-131,-72) LR:(117,-146,45) RF:(90,-139,-1) RM:(129,-154,-4) RR:(93,-136,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LM-LR:8mm) (WARN)
+[LVL] R:+2.1° P:+0.9° max_corr:4.5mm
+[LVL] R:+2.3° P:+0.7° max_corr:4.4mm
+[LVL] R:+2.2° P:+0.8° max_corr:4.4mm
+[LVL] R:+2.2° P:+0.8° max_corr:4.5mm
+[LVL] R:+2.2° P:+0.7° max_corr:4.3mm
+[LVL] R:+2.1° P:+0.8° max_corr:4.2mm
+[LVL] R:+2.3° P:+0.7° max_corr:4.4mm
+[LVL] R:+2.2° P:+0.7° max_corr:4.4mm
+[COLLISION DEBUG] positions: LF:(74,-148,-52) LM:(187,-143,28) LR:(40,-146,18) RF:(85,-151,19) RM:(143,-154,-6) RR:(73,-148,-6)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:8mm) (WARN)
+[COLLISION DEBUG] positions: LF:(74,-148,-54) LM:(187,-145,28) LR:(38,-146,18) RF:(86,-153,18) RM:(143,-154,-6) RR:(73,-150,-6)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(74,-148,-56) LM:(186,-146,28) LR:(36,-146,18) RF:(86,-154,18) RM:(143,-154,-6) RR:(74,-152,-6)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(74,-148,-56) LM:(186,-146,29) LR:(36,-146,18) RF:(86,-154,18) RM:(143,-154,-6) RR:(74,-152,-6)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(74,-148,-56) LM:(186,-146,30) LR:(36,-146,18) RF:(86,-154,18) RM:(142,-154,-6) RR:(74,-152,-6)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(75,-148,-56) LM:(186,-146,30) LR:(36,-146,17) RF:(86,-154,18) RM:(142,-154,-6) RR:(74,-152,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(75,-148,-57) LM:(185,-146,30) LR:(35,-145,17) RF:(87,-154,18) RM:(142,-153,-7) RR:(74,-152,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(76,-147,-57) LM:(183,-146,30) LR:(35,-144,16) RF:(87,-154,17) RM:(142,-152,-7) RR:(75,-152,-5)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:3mm) (WARN)
+[COLLISION DEBUG] positions: LF:(76,-145,-57) LM:(181,-146,29) LR:(34,-143,16) RF:(87,-154,16) RM:(142,-151,-7) RR:(76,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(77,-144,-58) LM:(179,-146,29) LR:(34,-141,15) RF:(88,-154,16) RM:(142,-149,-7) RR:(76,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(78,-142,-57) LM:(178,-146,28) LR:(35,-139,14) RF:(88,-154,15) RM:(141,-148,-7) RR:(77,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:4mm) (WARN)
+[COLLISION DEBUG] positions: LF:(79,-140,-57) LM:(175,-146,28) LR:(35,-138,13) RF:(88,-154,15) RM:(141,-146,-7) RR:(77,-152,-4)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:5mm) (WARN)
+[COLLISION DEBUG] positions: LF:(80,-138,-57) LM:(173,-146,28) LR:(35,-135,12) RF:(89,-154,14) RM:(141,-144,-7) RR:(78,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:6mm) (WARN)
+[COLLISION DEBUG] positions: LF:(81,-136,-56) LM:(171,-146,28) LR:(36,-133,11) RF:(89,-154,14) RM:(140,-141,-7) RR:(78,-152,-3)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:7mm) (WARN)
+[COLLISION DEBUG] positions: LF:(82,-134,-56) LM:(169,-146,28) LR:(36,-131,10) RF:(90,-154,13) RM:(140,-139,-7) RR:(79,-152,-2)
+[COLLISION DEBUG] threshold=9.0mm, body_mode=N/A
+[COLLISION] Unsafe pose detected! (LF-LM:8mm) (WARN)
+[LVL] R:+2.1° P:+0.8° max_corr:4.3mm
+[LVL] R:+2.1° P:+0.8° max_corr:4.3mm
+[LVL] R:+2.2° P:+0.8° max_corr:4.4mm
+[LVL] R:+2.1° P:+0.7° max_corr:4.3mm
+[LVL] R:+2.2° P:+0.8° max_corr:4.5mm
+[LVL] R:+2.3° P:+0.7° max_corr:4.4mm
+
+LB button pressed
+[?1l>[send_cmd] SENT cmd='b'STAND'' force=True throttle_ms=50.0 t=1768673928.585
+
+LB: Gait engine STOPPED
+
+A button pressed
+  (Autonomy auto-disabled)
+Standing gait started (leveling enabled)
+  Standing gait started (leveling enabled)
+[LVL] R:+2.5° P:+0.6° max_corr:4.5mm
+[LVL] R:+2.5° P:+0.6° max_corr:4.6mm
+[LVL] R:+2.5° P:+0.6° max_corr:4.6mm
+[LVL] R:+2.5° P:+0.6° max_corr:4.6mm
+[LVL] R:+2.5° P:+0.6° max_corr:4.6mm
+
+X button pressed (Tuck)
+[send_cmd] SENT cmd='b'TUCK'' force=True throttle_ms=50.0 t=1768673940.269
+
+b'TUCK' sequence sent. Auto DISABLE in 4s (reason=TUCK).
+
+[CTRL] SIGTERM received, shutting down...
+Stopping display thread...
+Stopping IMU thread...
+Stopping ToF thread...
+Stopping Point Cloud server...
+PointCloudServer stopped
+Stopping Dashboard server...
+[TelemetryServer] Stopped
+
+Exiting main loop and cleaning up...
+Disabling robot (LEG ALL DISABLE + DISABLE).
+[send_cmd] SENT cmd='b'DISABLE'' force=True throttle_ms=50.0 t=1768673946.158
+Stopping telemetry ('Y 0').
+
+[AudioManager] Shutdown complete
