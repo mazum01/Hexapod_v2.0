@@ -1,0 +1,464 @@
+52 International Journal of Manufacturing, Materials, and Mechanical Engineering, 2(3), 52-59, July-September 2012
+
+The Offset Model of a Hexapod
+Robot and the Effect of
+the Offset Parameter
+Kazi Mostafa, National Sun Yat-sen University, Taiwan
+Innchyn Her, National Sun Yat-sen University, Taiwan
+Yi-Hsien Wu, National Sun Yat-sen University, Taiwan
+
+ABSTRACT
+Generally, it is claimed that hexapod walking robots are superior to others. However, in some conditions
+hexapod suffers from stability problems. To solve the problem of stability, this paper proposes a new gait model
+of hexapod robot named offset model and also investigates the effects of morphological factor of hexapod
+robots on their locomotion. A comparison between the offset model and general model of hexapod robot is
+also included. The stability margin and error margin are used to indicate the stability of a hexapod robot,
+as it walks with different gaits in arbitrary directions. Two hexapod gaits are compared, which are the diametrical gait and the paired metachronal gait. The former is an artificial gait and the latter is a natural gait.
+The authors conclude that that the stability of a hexapod robot with the diametrical gait can be enhanced by
+increasing the offset parameter.
+Keywords:
+
+Diametrical Gait, Error Margin, Hexapods, Offset Model, Paired Metachronal Gait, Stability
+Margin
+
+INTRODUCTION
+Legged robots have greater flexibility in crossing barriers and adapting to the terrain. Wheels
+can perform better on prepared surfaces, but
+unable where terrain is uneven. However, the
+design, control and gait planning of legged
+robots depend on several areas of engineering
+and science. A robot designer has to know which
+gait is the best for a specific use of the hexapod
+(Erden & Leblebicioglu, 2007; Starke, RobilDOI: 10.4018/ijmmme.2012070104
+
+liard, Weller, Wilson, & Pfau, 2009; Mostafa,
+Her, & Her, 2011).
+Among all legged robots, advantages of
+the hexapod configuration are satisfactory
+walking efficiency and at the same time static
+stability. Hexapod gaits are much diversified,
+i.e., having a larger number of patterns than
+biped, quadruped or even myriapod gaits. For
+the development of artificial gaits, Bessonov
+and Umnov (1973) proposed the free gait for
+a hexapod robot to move in a straight line.
+Regarding crossing an uneven terrain, McGhee
+and Iswandhi (1979) presented the adaptive gait
+
+Copyright © 2012, IGI Global. Copying or distributing in print or electronic forms without written permission of IGI Global is prohibited.
+
+International Journal of Manufacturing, Materials, and Mechanical Engineering, 2(3), 52-59, July-September 2012 53
+
+Figure 1. The pairings of legs in hexapod surefooted gaits with an offset model: (a) Diametric
+gait; (b) Paired metachronal gait
+
+to improve the performance of the free gait.
+Ozguner and Tsai (1984) then inventoried the
+FTL (Follow-the-leader) gait. Yang and Kim
+(1998) investigated a fault tolerant gait for a
+hexapod robot to be stable and functional even
+when one leg is broken. Afterward, Yang (2009)
+combined the adaptive gait and the FTL gait to
+improve the fault tolerant gait. One of the gaits
+mentioned in this paper (the diametrical gait)
+is extended from the fault tolerant gait. The
+robot swings a pair of legs at the same time
+in this gait, as shown in Figure 1(a). Readers
+interested in more details about diametrical
+and paired metachronal gait can find them in
+in Mostafa et al. (2011).
+Wilson (1966) observed gaits of the hexapod for the slow wave gait, the ripple gait, and
+the tripod gait. The paired metachronal gait
+discussed in this research is the ripple gait. The
+hexapod robot swings a pair of legs at a time
+during the movement with the paired metachronal gait. The group of legs is shown in Figure
+1(b). McGhee and Frank (1987) proposed the
+slow wave gait of the quadruped robot moving
+along the straight line. They divided the leaving
+and contact of legs to the ground into two states
+and discussed the best swinging sequence of
+
+the legs, the control of gait, and the algorithm
+for the stability of gait.
+The main focus of this study is to develop
+an offset model of hexapod robot and assess
+the effect of offset parameter. We investigate
+two offset models hexapod gait (diametrical
+gait and paired metachronal gait) and their
+stability margin.
+
+The Offset Model of
+Hexapod Robots
+Before delving into details, an explanation of
+the six-legged robot model is appropriate. More
+details about hexapod robot of this study can be
+found in Mostafa et al. (2010) and Mostafa et al.
+(2011). Figure 1 illustrates the offset model of
+hexapod robots used in this paper. The general
+model which means D=0 in Figure 1 has been
+used frequently in the research and analysis of
+the hexapod robot gait. P and Q define the size
+of the allocated reachable region of a leg, and
+U is the width of the body. In this paper, we
+simply let P=Q=U=1. The mass of the legs is
+small, and the CG (denoted as a star) is at the
+centroid of the body.
+Yang and Kim (1998) proposed the fault
+tolerant gait with this model and indicated that
+
+Copyright © 2012, IGI Global. Copying or distributing in print or electronic forms without written permission of IGI Global is prohibited.
+
+54 International Journal of Manufacturing, Materials, and Mechanical Engineering, 2(3), 52-59, July-September 2012
+
+the analysis of the model of the hexapod robot
+gait should satisfy the following assumptions:
+
+case, the robot will not topple even if any one
+leg is broken.
+
+•
+
+COMPARISON BETWEEN
+THE OFFSET MODEL AND
+GENERAL MODEL
+
+•
+•
+•
+•
+
+The hexapod robot has a symmetrical
+structure.
+The contact between the leg and the ground
+is a point.
+There is no sliding phenomenon between
+the leg and the ground.
+The weight of each leg merges into the
+body, and the center of gravity is on the
+position of the geometric center.
+During the movement, the speed of the
+hexapod robot body and the average speed
+of each leg are all constant.
+
+The offset model is proposed under the
+same assumptions in this paper. We added an
+offset parameter D to the middle legs of the
+general model to let the relative position between
+each standpoint and the center of gravity be
+more distributed like the models in Figure 1.
+
+Stability and Error Margin
+The stability of walking robots is one of the
+significant factors for the design of robotic gaits.
+Song and Waldron (1987) defined the stability
+margin (sm) as the shortest distance of the center
+of gravity to the support polygon. The bigger
+the stability margin means the better the stability. In 1998, Yang and Kim (1998) applied the
+stability margin to the fault tolerant gait of the
+hexapod robot. Chu and Pang (2002) calculated
+the stability margin of the hexagonal model and
+compared with the rectangular model. The result
+shows that the hexagonal robots have better
+stability margin than the rectangular robots.
+Liu (2009) defined the fault tolerant point
+as the intersection of the diagonal lines of a
+support polygon during the movement of the
+hexapod robot with a pair of leg lifting. The
+distance between the center of gravity and the
+fault tolerant point is defined as the error margin
+(em). A smaller error margin means a better the
+stability. When the error margin becomes zero,
+the center of gravity is on the intersection of
+the diagonal lines of the support pattern. In that
+
+Arrangement of Gait
+First, we assign each leg a number from one
+to six. The robot swings a pair of legs every
+time, so we take the two swinging legs as a
+unit during each move. As shown in Figure 2,
+we take leg 3 and leg 4 as a pair of legs and
+use a circle to represent it. In the same way, we
+choose square to express the pair of leg 2 and
+leg 5 and triangle to express the pair of leg 1
+and leg 6. And we use a star to show the center
+of gravity. The swing sequence of these three
+pair of legs is circle-square-triangle. Thus, the
+center of gravity of the hexapod robot will go
+through three moving stages in a complete
+cycle of the moving process. The solid symbol
+represents the legs that are grounded and the
+hollow symbol means the lifted legs. The path
+of the center of gravity is shown by dash line
+( _ _ ). A Coordinate system is used in which
+the origin is placed at the center of gravity of
+the robot. Distance moved by the robot will
+be shown by the distance between the origin
+and the new center of the gravity. As shown in
+Figure 2, these seven steps compose a complete
+gait cycle and represent the completion of gait
+cycle (Cgc) is 100%.
+In order to compare the general model and
+the offset model (D=0 and D≠0 in Figure 1),
+we assume that the initial stable area of these
+two models should be equivalent. The rectangular stable area of the general model should
+be equal to the hexagonal stable area of the
+offset model. Moreover, we assume that the
+parameters P and Q of the two models are
+equivalent. From the assumption of the stable
+area we can derive formula for the relationship
+between parameters U and D of the two models.
+Which is, U1= U2+ D.
+Where, U1 is the parameter U for the general
+model and U2 is the parameter U for the offset
+
+Copyright © 2012, IGI Global. Copying or distributing in print or electronic forms without written permission of IGI Global is prohibited.
+
+International Journal of Manufacturing, Materials, and Mechanical Engineering, 2(3), 52-59, July-September 2012 55
+
+Figure 2. The step sequence of the diametrical gait moving in the X direction: (1) the initial
+standpoints; (2) leg 3 and leg 4 lifting; (3) leg 3 and leg 4 down; (4) leg 2 and leg 5 lifting; (5)
+leg 2 and leg 5 down; (6) leg 1 and leg 6 lifting; (7) leg 1 and leg 6 down.(→ Pair of legs 3 &
+4; →Pair of legs 2 & 5; →Pair of legs 3 & 4; →CG)
+
+model. Therefore, if we change the parameter
+D, the width between the opposite two legs will
+also be changed.
+
+The Stability and Error Margin
+Let us consider the robot moving in X direction
+with diametrical gait and set the parameters of
+the general model P = Q = U1=1. Thus, the
+parameter D of the offset model will be D =
+1 – U2. Figure 3 shows the stability margin of
+the general model with the parameters P = Q =
+U1= 1 and the offset model with the parameters
+P = Q = 1, U2= 2/3, and D = 1/3. We choose the
+minimum value of sm to compare the stability
+of two models. As seen from the figure, the
+parameter sm of the offset model is bigger than
+the general model in the first and third stage,
+but smaller in the second stage. Figure 4 shows
+the stability margin of the offset model with the
+parameters P = Q = 1, D + U = 1, and D changes
+from 0 to 1 during each moving stage. As seen
+
+from the figure, the stability margin increased
+with the increase of the parameter D in the first
+and third stage, but decrease in the second stage
+under the condition of U + D = 1.
+The stability margin will not be changed
+when the parameter D increased to 0.064. With
+D changes from 0 to 1, the minimum value of
+sm increases from 0.2 to 0.364. The result shows
+that the stability of the offset model is higher
+than general model, and it will become higher
+with the increase of the parameter D. As for
+comparing another parameter of stability, we
+choose the maximum value of em for comparison. Figure 5 shows the comparison of the
+error margin for the general model with P = Q
+= U1 = 1 and the offset model with P = Q = 1,
+U2= 2/3, and D = 1/3. Under the condition of
+the same stable area, the error margin of the
+offset model is smaller than the general model
+during the three stages. Figure 6 shows the
+error margin of the offset model with P = Q =
+1 and D + U = 1 and the parameter D changes
+
+Copyright © 2012, IGI Global. Copying or distributing in print or electronic forms without written permission of IGI Global is prohibited.
+
+56 International Journal of Manufacturing, Materials, and Mechanical Engineering, 2(3), 52-59, July-September 2012
+
+Figure 3. The effect on the stability margin by increasing the offset parameter D under the condition of the same stable area for a completion of gait cycle (Cgc) with a diametrical gait: (a)
+show the stability margin of the general model P=Q=U1=1 and the offset model P=Q=1, D=1,
+U2=2/3, the dash line expresses the general model and the solid line represents the offset model
+
+Figure 4. The stability margin of the offset model with P=Q=1, D+U=1 and D increases from 0 to 1
+
+from 0 to 1 during each stages. As seen from
+the figure, we can see that the error margin will
+become smaller as the parameter D becomes
+larger. The maximum value of em decreases
+from 0.707 to 0.559, and the stability of the
+robot increases. Table 1 shows the effects on
+stability and error margin of the model by in-
+
+creasing the parameter D. From the table, we
+can discover about the stabilities of offset
+model and general model using the different
+gaits towards the different directions under the
+condition of the same stable area. Thus, it is
+useful to the diametrical gait by increasing the
+parameter D under the constraint.
+
+Copyright © 2012, IGI Global. Copying or distributing in print or electronic forms without written permission of IGI Global is prohibited.
+
+International Journal of Manufacturing, Materials, and Mechanical Engineering, 2(3), 52-59, July-September 2012 57
+
+Figure 5. The effect on the error margin by increasing the offset parameter D under the condition
+of the same stable area for a completion of gait cycle (Cgc) with a diametrical gait: (a) show the
+error margin of the general model P=Q=U1=1 and the offset model P=Q=1, D=1, U2=2/3, the
+dash line expresses the general model and the solid line represents the offset model
+
+Figure 6. Show the error margin of the offset model with P=Q=1, D+U=1 and D increases
+from 0 to 1
+
+Table 1. The effects on stability and error margin of the offset model by increasing the offset
+parameter D
+Direction
+Gait
+Diametrical Gait
+
+X
+
+Y
+
+(Sm )min
+
+(Em )max
+
+(Sm )min
+
+(Em )max
+
+Increased
+
+Decreased
+
+Increased
+
+-
+
+Copyright © 2012, IGI Global. Copying or distributing in print or electronic forms without written permission of IGI Global is prohibited.
+
+58 International Journal of Manufacturing, Materials, and Mechanical Engineering, 2(3), 52-59, July-September 2012
+
+DISCUSSION
+
+ACKNOWLEDGMENT
+
+We can enhance the stability of hexapod robot
+by increasing the stability margin or decreasing
+the error margin. From figure we can see that,
+under the same condition of stable area, the stability margin increased in first and third portion
+with the increase of the parameter D. Besides,
+the error margin decreased with the increase
+of parameter D. Therefore, it is recommended
+to use the offset model than the general model
+while walking toward the X direction with the
+diametrical gait.
+
+We thank Messrs L. W. Liu and D. W. Wu for
+creating the figures and Mr. D. Li for miscellaneous assistance. Financial support by the
+National Science Council of Taiwan under grant
+NSC 98-2221-E110-023 is also acknowledged.
+
+CONCLUSION
+This paper demonstrated the use of an offset
+robot model in the assessment of the effects of
+altering the offset parameter D. We can utilize
+the offset model and change the offset parameter
+to zero if we want to use the general model. And
+the comparison between two models in this
+paper showed that the robots with offset model
+have better stability margin than general model
+especially for the diametrical gait. Two paired
+hexapod gaits walking in two axial directions
+were compared. When a diametrical gait used
+for X-directional (forward) walking, enlarging the offset parameter D can stabilize the
+robot. When this gait is used for Y-directional
+(sideway) walking, increasing D enhances the
+stability. However, making D larger is more
+effective for forward walking. When the paired
+metachronal gait is used, increasing D does not
+help for either X- or Y-directional walking.
+The paired metachronal gait was quite inert to
+the change of parameter D. The gait analysis
+and simulation of hexapod offset model have
+been carried out with different gaits in arbitrary
+directions, which have shown that the stability
+of hexapod enhanced by increasing the offset
+parameter. It is anticipated that the findings can
+help designers in determining the configurations, and gaits, of robots.
+
+REFERENCES
+Bessonov, A. P., & Umnov, N. V. (1973). The analysis of gaits in six-legged vehicle according to their
+static stability. In Proceedings of the Symposium on
+Theory and Practice of Robots and Manipulators,
+Udine, Italy (pp. 1-9).
+Chu, S. K., & Pang, G. K. (2002). Comparison
+between different model of hexapod robot in fault
+tolerant gait. IEEE Transactions on Systems, Man,
+and Cybernetics. Part A, Systems and Humans,
+32(6), 752–756. doi:10.1109/TSMCA.2002.807066
+Erden, M. S., & Leblebicioglu, K. (2007). Analysis of
+wave gaits for energy efficiency. Autonomous Robots,
+23(3), 213–230. doi:10.1007/s10514-007-9041-z
+Liu, L. W. (2009). Discussion and comparison
+between natural and artificial true crab gaits (Unpublished master’s thesis). National Sun Yat-Sen
+University, Kaohsiung City, Taiwan, R. O. C.
+McGhee, R. B., & Frank, A. A. (1968). On the
+stability properties of quadruped creeping gaits.
+Journal of Mathematical Biosciences, 3, 331–351.
+doi:10.1016/0025-5564(68)90090-4
+McGhee, R. B., & Iswandhi, G. I. (1979). Adaptive locomotion of a multilegged robot over rough
+terrain. IEEE Transactions on Systems, Man,
+and Cybernetics, 9(4), 176–182. doi:10.1109/
+TSMC.1979.4310180
+Mostafa, K., Her, I., & Her, J. M. (2011). Which is
+better? A natural or an artificial surefooted gait for
+hexapods. International Journal of Intelligent Mechatronics and Robotics, 1(3), 63–72. doi:10.4018/
+ijimr.2011070105
+Mostafa, K., Tsai, C. S., & Her, I. (2010). Alternative
+gaits for multiped robots with leg failures to retain
+maneuverability. International Journal of Advanced
+Robotic Systems, 7(4), 33–40.
+
+Copyright © 2012, IGI Global. Copying or distributing in print or electronic forms without written permission of IGI Global is prohibited.
+
+International Journal of Manufacturing, Materials, and Mechanical Engineering, 2(3), 52-59, July-September 2012 59
+
+Ozguner, F., Tsai, S. J., & McGhee, R. B. (1984).
+An approach to the use of terrain- preview information in rough terrain locomotion by a
+hexapod walking machine. The International
+Journal of Robotics Research, 3(2), 134–146.
+doi:10.1177/027836498400300211
+Song, S. M., & Waldron, K. J. (1987). An analytical
+approach for gait study and its applications on wave
+gaits. The International Journal of Robotics Research,
+6(2), 60–71. doi:10.1177/027836498700600205
+Starke, S. D., Robilliard, J. J., Weller, R., Wilson,
+A. M., & Pfau, T. (2009). Walk-run classification of
+symmetrical gaits in the horse: a multidimensional
+approach. Journal of the Royal Society of London,
+6(33), 335–342.
+
+Wilson, D. M. (1966). Insect walking. Annual Review
+of Entomology, 11(1), 103–122. doi:10.1146/annurev.
+en.11.010166.000535
+Yang, J. M. (2009). Fault-tolerant gait planning for
+a hexapod robot walking over rough terrain. Journal
+of Intelligent & Robotic Systems, 54(4), 613–627.
+doi:10.1007/s10846-008-9282-x
+Yang, J. M., & Kim, J. H. (1998). Fault-tolerant locomotion of the hexapod robot. IEEE Transactions on
+Systems, Man, and Cybernetics. Part B, Cybernetics,
+28(1), 109–116. doi:10.1109/3477.658585
+
+Kazi Mostafa was born in Chittagong, Bangladesh on July 1, 1981. He obtained BS in Mechanical
+Engineering from Chittagong University of Engineering & Technology, Bangladesh. He obtained
+his MS in Manufacturing Management from University of South Australia, Adelaide. Since
+September 2009 he is with the Department of Mechanical & Electro-mechanical Engineering,
+“Non Traditional Design Lab” at National Sun Yat-sen University, Taiwan, as PhD candidate.
+His research interests include computer vision, image processing and robotics.
+Innchyn Her was born in Taipei, Taiwan, in 1957. He obtained his BS, MS, and PhD degrees
+from National Taiwan University (1979), the Pennsylvania State University (1983), and Purdue
+University (1987). He has been a professor at National Sun Yat-sen University since 1995. He
+has published in areas like mechanical design, robotics, automation, image processing, and
+crystallography.
+Yi-Hsien Wu was born in Tainan City, Taiwan, in 1986. He obtained his BS in Power Mechanical Engineering from National Tsing Hua University (NTHU), Taiwan. And now he is with the
+Department of Mechanical & Electro-mechanical Engineering, “Non Traditional Design Lab”
+at National Sun Yat-sen University, Taiwan as MS student. His research interests include rolling
+and sliding kinematic analysis and mechanism design.
+
+Copyright © 2012, IGI Global. Copying or distributing in print or electronic forms without written permission of IGI Global is prohibited.
+
+
