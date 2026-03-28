@@ -572,6 +572,7 @@ Goal: Replace fixed-phase cyclic gaits with an event-driven free gait that adapt
 - [x] **LEG_ROTATIONS_DEG** (v0.12.29): Corrected to `[45, 0, -45, 45, 0, -45]` consistent with TripodGait's `LEG_BASE_ROTATION_DEG`.
 
 ### FG10. Foot Switch Integration (Firmware + Telemetry)
+- [ ] **Hardware (future)**: Consider upgrading foot contact switches to FSRs (Force Sensitive Resistors) or strain gauges — enables analog contact force measurement, unlocking impedance-driven reactive gait adaptation (early touchdown during swing based on force threshold, per Coelho et al. 2022). Binary switches only give contact/no-contact; FSRs enable the full reactive locomotion loop.
 - [ ] **Firmware**: Wire 6 foot contact switches to Teensy digital inputs
 - [ ] **Firmware**: Implement S4 telemetry frame (already stubbed):
   - Format: 6 contact states packed as single byte (1 bit per leg)
@@ -842,6 +843,17 @@ Goal: Replace fixed-phase cyclic gaits with an event-driven free gait that adapt
 - [x] Bitmask leg/joint enable flags
 - [x] Move constant strings to flash
 - [x] RR/OOS feedback robustness
+
+---
+
+## Tuning References
+
+### Impedance Controller (MarsImpedance)
+From Coelho et al. 2022 ("Reactive Locomotion of a Hexapod for Navigation Across Irregular Ground") — sim-validated optimal parameters for a tripod gait over 20mm step obstacles:
+- **ωn = 300 s⁻¹**, **ξ = 0.7** → lowest torso roll/pitch oscillation and foot slippage
+- Virtual mass = total robot mass / 3 (one third for 3-leg tripod support)
+- These are external benchmarks to compare against when tuning `IMP_TUNING.md`
+- [ ] Validate MARS impedance params against these reference values during tuning sessions
 
 ---
 
