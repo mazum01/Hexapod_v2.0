@@ -124,12 +124,13 @@ def compute_standing_angles(outward_mm=STAND_OUTWARD_MM,
             f"Unreachable: D={D*1e3:.1f}mm, range=[{abs(F-T)*1e3:.1f}, {(F+T)*1e3:.1f}]mm"
         )
 
-    # Tibia: internal knee angle via law of cosines, then supplement
+    # Tibia: internal knee angle via law of cosines, then supplement.
+    # Negate for the "elbow-out" solution (knees pointing outward).
     cos_knee = (F * F + T * T - D * D) / (2.0 * F * T)
     knee_internal = math.acos(max(-1.0, min(1.0, cos_knee)))
-    tibia_joint = math.pi - knee_internal
+    tibia_joint = -(math.pi - knee_internal)
 
-    # Femur: standard 2-link IK solution
+    # Femur: 2-link IK, elbow-out solution (+ instead of -)
     P = F + T * math.cos(tibia_joint)
     Q = T * math.sin(tibia_joint)
     femur_joint = math.atan2(R, h) - math.atan2(Q, P)
