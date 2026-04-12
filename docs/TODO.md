@@ -1,6 +1,6 @@
 # Project TODOs (persistent)
 
-Last updated: 2026-02-02
+Last updated: 2026-03-28
 Owner: Hexapod v2.0 (Firmware + Python controller)
 
 Conventions
@@ -432,10 +432,21 @@ The firmware has geometric keep-out zone collision detection that triggers STAND
 - [ ] Train RL policy that maximizes task reward while avoiding collisions
   - Reward: forward progress, stability, energy efficiency
   - Penalty: collision events, near-misses, jerky motion
-  - Sim-to-real: train in PyBullet/MuJoCo, fine-tune on real robot
+  - Sim-to-real: train in MuJoCo, fine-tune on real robot
 - [ ] Deploy policy on Coral/Hailo for real-time inference
   - Replaces or augments hand-tuned gait engine
   - Automatically learns safe trajectories for complex terrain
+
+### S3a. MuJoCo Simulation Environment
+- [x] **P1: MJCF model** — high-fidelity hexapod model with accurate geometry,
+  servo dynamics, contact properties. Validated: stands under gravity, joint
+  commands work, foot contacts detected. (`simulation/hexapod_model.py`)
+- [ ] **P2: Sim harness** — standalone runner with MuJoCo viewer, tripod walk test,
+  coordinate frame validation against firmware
+- [ ] **P3: Gymnasium RL env** — `HexapodEnv(gymnasium.Env)` with obs/action/reward
+  API, configurable terrain, vectorized env support
+- [ ] **P4: Controller-in-the-loop** — virtual serial port connecting real
+  `controller.py` to simulation, telemetry emulation, 166 Hz real-time sync
 
 ### S4. Visual Self-Monitoring (Camera-Based)
 - [ ] Downward-facing camera watches leg motion

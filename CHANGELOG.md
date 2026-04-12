@@ -1,3 +1,24 @@
+## Simulation v0.1.0 — 2026-03-28
+
+### MuJoCo Hexapod Model (Phase 1)
+
+- **New `simulation/` module** with high-fidelity MuJoCo MJCF model of the MARS hexapod
+- `hexapod_model.py`: Generates MJCF XML and body mesh STL from robot constants
+  - Accurate geometry: 6 legs × 3 DOF, link lengths from `robot_config.h`
+  - Body mesh: 24-vertex convex hull extruded from `collision.py` BODY_HULL_XZ
+  - Servo actuators: position-controlled, torque-limited to 3.43 N·m (HTS-35H spec)
+  - Mass distribution: 2.1 kg total (0.948 kg body + 18 × 64g servos)
+  - Standing pose IK: femur=-17.1°, tibia=+73.7° (from firmware defaults)
+  - Sensors: IMU (accel/gyro), foot touch contacts, joint pos/vel for all 18 joints
+  - Three cameras: tracking, side, top
+- `sim_harness.py`: Validation test suite
+  - Standing stability: holds pose for 2s with <2mm drop, <0.3° tilt
+  - Joint commands: actuators respond correctly (10° command → 9.9° movement)
+  - Foot contacts: all 6 feet register ground contact (2.6–5.2N)
+  - Headless rendering: PNG output for visual verification
+
+---
+
 ## Python Controller 0.12.30 (b317) — 2026-02-06
 
 ### FreeGait: Fixed Swing Trajectory (Bezier Curve)
